@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from .budget import timeout as remaining_timeout
 
 from .git_commands import normalize_subject, SHA
 
@@ -23,7 +24,7 @@ class GitResolver:
         self.calls += 1
         try:
             result = subprocess.run(["git", "-C", str(cwd), "-c", "core.quotePath=false", *args],
-                                    input=stdin, capture_output=True, timeout=timeout, check=False,
+                                    input=stdin, capture_output=True, timeout=remaining_timeout(timeout), check=False,
                                     **({} if binary else {"encoding": "utf-8", "errors": "replace"}))
         except (OSError, subprocess.SubprocessError):
             self.errors += 1

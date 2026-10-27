@@ -466,51 +466,30 @@ TABLES = {
 }
 
 
+def inputs(graph):
+    """Canonical graph tables shared by compatibility SQL and the runtime catalog."""
+    from .engine import Input
+    sources = {
+        "nodes": [graph.public(n) for n in graph.body["nodes"]],
+        "edges": [{**e, "type_only": int(bool(e.get("type_only"))), "ref": reference(graph.snapshot, "edges", e["id"])}
+                  for e in graph.body["edges"]],
+        "gaps": [{**g, "calls": g.get("calls", 1)} if g["area"] == "calls" else g for g in graph.body["gaps"]],
+        "files": [{**r, "ref": reference(graph.snapshot, "source", r["path"])} for r in graph.body["source"]["files"]],
+    }
+    return [Input(name, rows, {}, list(TABLES[name]), TABLES[name], "one " + name.rstrip("s"))
+            for name, rows in sources.items()]
+
+
 def query(graph, sql, params=None, limit=1000, seconds=5.0):
-    db = sqlite3.connect(":memory:")
-    db.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 4*1024*1024)
-    db.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH, 128*1024)
-    sources = {"nodes": [graph.public(n) for n in graph.body["nodes"]],
-               "edges": [{**e, "type_only": int(bool(e.get("type_only"))), "ref": reference(graph.snapshot, "edges", e["id"])}
-                         for e in graph.body["edges"]],
-               # Python call gaps are one row per call; TS/JS and Rust rows carry their own count.
-               "gaps": [{**g, "calls": g.get("calls", 1)} if g["area"] == "calls" else g for g in graph.body["gaps"]],
-               "files": [{**r, "ref": reference(graph.snapshot, "source", r["path"])} for r in graph.body["source"]["files"]]}
-    def scalar(value):
-        return json.dumps(value, ensure_ascii=True) if isinstance(value, (dict, list)) else value
-    try:
-        for table, columns in TABLES.items():
-            db.execute(f'CREATE TABLE "{table}" (' + ",".join(f'"{n}" {t}' for n, t in columns.items()) + ")")
-            db.executemany(f'INSERT INTO "{table}" VALUES (' + ",".join("?" for _ in columns) + ")",
-                           [[scalar(r.get(n)) for n in columns] for r in sources[table]])
-        db.commit()
-        allowed = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
-        def authorize(action, arg1, arg2, database, trigger):
-            if action == sqlite3.SQLITE_FUNCTION and (arg2 or "").lower() in ("load_extension", "writefile", "readfile"):
-                return sqlite3.SQLITE_DENY
-            return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
-        db.set_authorizer(authorize)
-        deadline = time.monotonic() + seconds
-        db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
-        cursor = db.execute(sql, params or {})
-        if cursor.description is None:
-            raise ValueError("Use a read-only SELECT or WITH query")
-        names = [x[0] for x in cursor.description]
-        if len(set(names)) != len(names):
-            raise ValueError("Alias duplicate output column names")
-        rows = cursor.fetchmany(limit + 1)
-        def output_value(value):
-            if isinstance(value, bytes):
-                return {"encoding": "hex", "value": value.hex()}
-            if isinstance(value, float) and not math.isfinite(value):
-                return str(value)
-            return value
-        result = graph.document("query", [dict(zip(names, map(output_value, row))) for row in rows[:limit]], engine="sqlite",
-                                query=sql, query_complete=len(rows) <= limit, max_query_rows=limit)
-        if len(rows) > limit:
-            result["gaps"] = [*result["gaps"], {"area": "query", "reason": "row_limit", "limit": limit}]
-        return result
-    except sqlite3.Error as error:
-        raise ValueError(f"Read-only query failed: {error}") from None
-    finally:
-        db.close()
+    from .engine import SQLiteQuery
+    with SQLiteQuery(TABLES, seconds) as engine:
+        requested = engine.plan(sql, params)
+        for item in inputs(graph):
+            if item.name in requested:
+                engine.load(item)
+        output = engine.evaluate(limit)
+    result = graph.document("query", output["results"], engine="sqlite", query=sql,
+                            query_complete=output["query_complete"], max_query_rows=limit)
+    if not output["query_complete"]:
+        result["gaps"] = [*result["gaps"], {"area": "query", "reason": "row_limit", "limit": limit}]
+    return result

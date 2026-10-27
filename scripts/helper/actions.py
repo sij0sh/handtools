@@ -21,6 +21,7 @@ from .projection import FIELDS, accepted, brief, clean, human, next_for, project
 from .profiles import PROFILES, content_text, detected, emitted_kinds, first, pointer
 from .records import RecordCache, new_scope, read_ref, records, safe_ref
 from .reader import scan_file
+from .recording_scan import _size, text_budget, _snapshot, lineages, scan_group
 
 SESSIONS = str(Path(__file__).resolve().parents[1] / "sessions.py")
 
@@ -41,13 +42,6 @@ def rerun(purpose, **flags):
         argv = kept + [name, str(value)]
     # coverage marks a command the byte budget keeps, so an incomplete scan always shows its rerun.
     return {"purpose": purpose, "argv": command_line([sys.executable, SESSIONS, *argv]), "coverage": True}
-
-
-def _size(path):
-    try:
-        return os.stat(path).st_size
-    except OSError:
-        return 0
 
 
 def switched(action, drop=(), **flags):
@@ -78,17 +72,6 @@ def all_requests(count):
                              human=True, fields="session,timestamp,turn,text,ref", preview_chars=200,
                              limit=page, max_bytes=max(16384, 8192 + 700 * page)),
             "coverage": True}
-
-
-def text_budget(args, files, gscope):
-    """Explicit --max-text-bytes, else the bytes this group will scan, within the default and the cap."""
-    if args.max_text_bytes is not None:
-        gscope["text_budget"] = args.max_text_bytes
-        return args.max_text_bytes
-    size = sum(_size(path) for path in files)
-    budget = max(TEXT_BYTES_DEFAULT, min(size, args.max_scan_bytes, TEXT_BYTES_AUTO_CAP))
-    gscope["text_budget"] = budget
-    return budget
 
 
 def coverage_next(groups, scope):
@@ -306,18 +289,6 @@ def raw(args):
             "note": "Raw encoded JSON bytes, not decoded field content"}]}
 
 
-def _snapshot(path, scope, before):
-    try:
-        from pathlib import Path
-        stat = Path(path).stat()
-        scanned = scope.get("bytes_scanned", 0) - before
-        scope.setdefault("snapshot", []).append({
-            "file": str(Path(path).absolute()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
-            "inode": stat.st_ino, "bytes_scanned": scanned, "scan_complete": scanned >= stat.st_size})
-    except OSError:
-        pass
-
-
 def edges(groups, scope):
     """Exact recorded relationships; absent partners produce no edge."""
     rows = []
@@ -428,19 +399,6 @@ def describe():
                            "other files are parse_state unsupported, and a missing grammar is parser_unavailable",
                            "import module and qualname stay literal source text; target_path/target_state map them by stated rules",
                            "edit_symbols basis: at_edit (recorded post-edit file) or current (hunk text unique today)"]}}]}
-
-
-def lineages(recordings):
-    """Each recording's independent session: a subagent or fork counts with the session it was recorded from."""
-    by_file = {r["file"]: r for r in recordings}
-    def key(r, depth=0):
-        parent = r.get("parent_session")
-        if not parent:
-            return r["session"]
-        # Pi records the parent as a file path; resolve it to that recording's own lineage.
-        found = by_file.get(parent)
-        return key(found, depth + 1) if found is not None and found is not r and depth < 32 else parent
-    return {r["file"]: key(r) for r in recordings}
 
 
 def combined_scope(scope, groups):
@@ -981,21 +939,7 @@ def run(args):
         if args.action == "records":
             groups.append({"harness": harness, "scope": gscope, "files": files})
             continue
-        scan = ScanOptions.from_args(args, text_budget(args, files, gscope))
-        gscope["bytes_selected"] = sum(_size(path) for path in files)
-        recordings = []
-        for path in files:
-            if gscope.get("event_limit_reached"):
-                gscope["scan_complete"] = False
-                break
-            if gscope["bytes_scanned"] >= args.max_scan_bytes:
-                gscope["scan_complete"] = False
-                gscope["scan_limit_reached"] = True
-                break
-            before = gscope["bytes_scanned"]
-            recordings.append(scan_file(path, scan, gscope))
-            gscope["files_scanned"] += 1
-            _snapshot(path, gscope, before)
+        recordings = scan_group(files, ScanOptions.from_args(args, text_budget(args, files, gscope)), gscope)
         keys = lineages(recordings)
         gscope["sessions_independent"] = len(set(keys.values()))
         for r in recordings:

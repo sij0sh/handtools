@@ -1,4 +1,5 @@
 """Recording discovery: settings, candidate files, harness grouping, project filter."""
+from .budget import check
 import json
 import ntpath
 import os
@@ -94,6 +95,7 @@ def candidate_files(options, scope, roots=None):
     candidates = {}
     seen = set()
     def add(label, path):
+        check()
         if path.is_symlink() or path.suffix != ".jsonl":
             return
         stat = path.stat()
@@ -132,6 +134,7 @@ def candidate_files(options, scope, roots=None):
             # The --max-candidates value that would read every candidate of the largest group.
             scope["candidates_needed"] = max(scope.get("candidates_needed", 0), len(found))
         for mtime, name in found[:options.max_candidates]:
+            check()
             # Header inspection is deliberately bounded and reported separately.
             forced = None if options.harness == "auto" else options.harness
             harness, root, read = header(name, options.max_record_bytes, 262144, forced)

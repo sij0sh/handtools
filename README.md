@@ -38,6 +38,19 @@ S="$HOME/.agents/skills/remember/scripts"
 python3 "$S/remember.py" impact src/store.py
 ```
 
+Or collect a target's source, consumers and relevant history in one call, and ask
+relational questions across source, Git and sessions:
+
+```bash
+python3 "$S/remember.py" inspect src/store.py
+python3 "$S/remember.py" query 'SELECT path, count(*) AS n FROM changes GROUP BY path ORDER BY n DESC LIMIT 10'
+```
+
+The common interface is `map`, `find`, `inspect`, `show` and `query`; `describe TABLE`
+lists columns. Table dependencies load automatically, and SQL is dependency-free
+SQLite. Follow a result's `next[].ref` with `show`. See
+[runtime contracts](references/runtime.md).
+
 Graph tools require Python 3.11+ and work without Git or additional packages. Python syntax extraction is built in; optional parsers extend language support.
 
 Bare `map` prints whole source for small repositories and a directory summary

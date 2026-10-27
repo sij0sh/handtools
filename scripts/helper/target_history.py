@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from . import cite, commit_links, edit_hunks, git_file_history
-from .actions import lineages
+from .recording_scan import lineages, scan_group
 from .discovery import candidate_files, normalized_root
 from .enrichment import parse_root_map, remap
 from .git_resolve import GitResolver
@@ -223,14 +223,8 @@ def scan(args, root):
         # Like sessions.py: store full text for the bytes this group will scan, so a target mention is not cut off.
         size = sum(os.path.getsize(f) for f in files if os.path.exists(f))
         text = max(TEXT_BYTES_DEFAULT, min(size, args.max_scan_bytes, TEXT_BYTES_AUTO_CAP))
-        for file in files:
-            if counters["bytes_scanned"] >= args.max_scan_bytes or counters.get("event_limit_reached"):
-                counters["scan_complete"] = False
-                counters["byte_limit_reached"] = counters["bytes_scanned"] >= args.max_scan_bytes
-                break
-            recordings.append(scan_file(file, ScanOptions(harness=harness, max_scan_bytes=args.max_scan_bytes,
-                                                          max_events=args.max_events, max_text_bytes=text), counters))
-            counters["files_scanned"] += 1
+        recordings.extend(scan_group(files, ScanOptions(harness=harness, max_scan_bytes=args.max_scan_bytes,
+                                                         max_events=args.max_events, max_text_bytes=text), counters))
         coverage.append({"harness": harness, **counters})
     keys = lineages(recordings)
     excluded = set(args.exclude_session)

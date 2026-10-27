@@ -1,4 +1,8 @@
-# Query tools
+# Legacy query adapters
+
+For new work use `remember.py query SQL`: SQLite across source, Git, recordings
+and custom inputs, with automatic provider loading. See [runtime](runtime.md).
+The interfaces below remain compatible for existing callers.
 
 ## Graph SQL: SQLite
 

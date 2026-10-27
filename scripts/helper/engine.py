@@ -352,3 +352,151 @@ def evaluate(inputs, sql=None, limit=None, seconds=DEFAULT_SECONDS, memory=DEFAU
         result["next"].insert(0, "Input omitted rows, so aggregates undercount; "
                                  "rerun as sessions.py select --sql '...'.")
     return result
+
+
+class SQLiteQuery:
+    """One disposable SQL context for planning and execution.
+
+    SQLite's compiler/authorizer resolves tables and columns, including CTE scope.
+    Planning uses empty declared tables; providers are loaded only after validation.
+    No lexical SQL dependency guesses and no external access or durable databases.
+    """
+    def __init__(self, schemas, seconds=10.0):
+        import sqlite3
+        import time
+        self.sqlite3, self.time = sqlite3, time
+        if seconds <= 0:
+            raise EngineError("Query deadline must be positive")
+        self.deadline = time.monotonic() + seconds
+        self.connection = sqlite3.connect(":memory:")
+        self.connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 4 * 1024 * 1024)
+        self.connection.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH, 128 * 1024)
+        self.connection.execute("PRAGMA temp_store=MEMORY")
+        self.schemas = schemas
+        self.reads = {}
+        self.inputs = {}
+        self.sql, self.params = None, None
+        try:
+            for name, schema in schemas.items():
+                if not IDENTIFIER.fullmatch(name) or not schema:
+                    raise EngineError(f"Invalid or empty table schema: {name}")
+                declared = []
+                for column, kind in schema.items():
+                    if not isinstance(column, str) or not column or '\x00' in column:
+                        raise EngineError("Column names must be nonempty strings without NUL")
+                    value = TYPE_ALIASES.get(str(kind).upper())
+                    if value is None:
+                        raise EngineError(f"Unknown column type: {kind}")
+                    sql_type = {"int": "INTEGER", "bool": "INTEGER", "float": "REAL", "str": "TEXT"}[value]
+                    declared.append('"' + column.replace('"', '""') + '" ' + sql_type)
+                self.connection.execute(f'CREATE TABLE "{name}" (' + ','.join(declared) + ')')
+            self.rootpages = {page: name for name, page in self.connection.execute(
+                "SELECT name, rootpage FROM sqlite_master WHERE type='table'")}
+            self.connection.set_progress_handler(lambda: int(time.monotonic() > self.deadline), 1000)
+        except Exception:
+            self.close()
+            raise
+
+    def _authorize(self, action, arg1, arg2, database, trigger):
+        s = self.sqlite3
+        if action == s.SQLITE_READ:
+            if arg1 not in self.schemas:
+                return s.SQLITE_DENY
+            self.reads.setdefault(arg1, set()).add(arg2)
+        if action == s.SQLITE_FUNCTION and (arg2 or "").lower() in ("load_extension", "readfile", "writefile"):
+            return s.SQLITE_DENY
+        return s.SQLITE_OK if action in (s.SQLITE_SELECT, s.SQLITE_READ, s.SQLITE_FUNCTION, s.SQLITE_RECURSIVE) else s.SQLITE_DENY
+
+    def plan(self, sql, params=None):
+        if not isinstance(sql, str) or not sql.strip():
+            raise EngineError("Supply one read-only SELECT or WITH query")
+        self.sql, self.params = sql, params or {}
+        self.reads = {}
+        self.connection.set_authorizer(self._authorize)
+        try:
+            program = self.connection.execute("EXPLAIN " + sql, self.params).fetchall()
+            # SQLite omits SQLITE_READ callbacks for some COUNT(*)/USING joins.
+            # Its compiled OpenRead bytecode still identifies the exact base tables;
+            # root pages are known because this private schema has no indexes/views.
+            for instruction in program:
+                if instruction[1] == "OpenRead" and instruction[3] in self.rootpages:
+                    self.reads.setdefault(self.rootpages[instruction[3]], set())
+        except self.sqlite3.Error as error:
+            raise EngineError(f"Read-only query failed: {error}") from None
+        finally:
+            self.connection.set_authorizer(None)
+        return {name: sorted(fields) for name, fields in self.reads.items()}
+
+    def load(self, item):
+        if item.name not in self.schemas:
+            raise EngineError(f"Undeclared table: {item.name}")
+        if item.name in self.inputs:
+            raise EngineError(f"Table already loaded: {item.name}")
+        columns(item.rows, list(self.schemas[item.name]))
+        schema = self.schemas[item.name]
+        names = list(schema)
+        def record(row):
+            if self.time.monotonic() > self.deadline:
+                raise EngineError("Query/provider deadline exceeded; narrow the query or use --budget deep")
+            values = []
+            for name in names:
+                value = row.get(name)
+                if isinstance(value, (dict, list, tuple)):
+                    value = json.dumps(value, ensure_ascii=True, default=_text, separators=(",", ":"))
+                elif isinstance(value, int) and not -(2**63) <= value < 2**63:
+                    value = str(value)
+                values.append(value)
+            return values
+        try:
+            self.connection.executemany(f'INSERT INTO "{item.name}" VALUES (' + ','.join('?' for _ in names) + ')',
+                                        (record(row) for row in item.rows))
+            self.connection.commit()
+        except self.sqlite3.Error as error:
+            raise EngineError(f"Input table {item.name}: {error}") from None
+        self.inputs[item.name] = item
+
+    def evaluate(self, limit=1000):
+        if not isinstance(limit, int) or limit <= 0:
+            raise EngineError("Row limit must be positive")
+        if self.time.monotonic() > self.deadline:
+            raise EngineError("Query/provider deadline exceeded; narrow the query or use --budget deep")
+        self.connection.set_authorizer(self._authorize)
+        try:
+            cursor = self.connection.execute(self.sql, self.params)
+            if cursor.description is None:
+                raise EngineError("Supply one read-only SELECT or WITH query")
+            names = [column[0] for column in cursor.description]
+            if len(set(names)) != len(names):
+                raise EngineError("Alias duplicate output column names")
+            fetched = cursor.fetchmany(limit + 1)
+        except self.sqlite3.Error as error:
+            raise EngineError(f"Read-only query failed: {error}") from None
+        finally:
+            self.connection.set_authorizer(None)
+        rows = []
+        for record in fetched[:limit]:
+            row = {}
+            for name, value in zip(names, record):
+                value = _jsonable(value)
+                if name in REFERENCES and isinstance(value, str):
+                    try:
+                        decoded = json.loads(value)
+                        if isinstance(decoded, (dict, list)):
+                            value = decoded
+                    except ValueError:
+                        pass
+                row[name] = value
+            rows.append(row)
+        return {"results": rows, "query_complete": len(fetched) <= limit,
+                "scope": {"engine": "sqlite", "query": self.sql,
+                          "inputs": [{"view": name, "rows": len(item.rows), "grain": item.grain,
+                                      "upstream": item.upstream} for name, item in self.inputs.items()]}}
+
+    def close(self):
+        self.connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()

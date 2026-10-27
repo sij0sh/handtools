@@ -10,6 +10,7 @@ import stat
 import subprocess
 import tempfile
 from pathlib import Path
+from .budget import check, timeout
 
 SCHEMA = 1
 DEFAULT_EXCLUDES = (".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", "venv",
@@ -28,7 +29,7 @@ def digest(value):
 def git(root, *args):
     try:
         p = subprocess.run(["git", "--no-optional-locks", "-C", str(root), *args],
-                           capture_output=True, timeout=30)
+                           capture_output=True, timeout=timeout(30))
         return p.stdout.decode("utf-8", "surrogateescape") if p.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -154,6 +155,7 @@ def capture(root, *, max_files=20000, max_file_bytes=1024*1024, max_total_bytes=
     paths, coverage = inventory(root, rules, max_files)
     files, signatures, used = [], {}, 0
     for path in paths:
+        check()
         row, sig = read_file(root, path, max_file_bytes, max_total_bytes - used)
         used += row.get("bytes_read", 0)
         files.append(row)

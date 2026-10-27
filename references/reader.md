@@ -1,6 +1,6 @@
 # Setup and limits
 
-The graph CLI (`remember.py`) needs Python 3.11+ and only the standard library.
+The common runtime (`remember.py`, including cross-source SQL) needs Python 3.11+ and only the standard library.
 Python AST extraction is built in. Optional tree-sitter packages add syntax/import
 extraction for Rust, Go, TypeScript/JavaScript and shell; missing grammars are
 reported, not installed automatically.

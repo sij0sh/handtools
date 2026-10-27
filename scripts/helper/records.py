@@ -1,4 +1,5 @@
 """Bounded JSONL reading, raw refs, and record caches. No filesystem writes."""
+from .budget import check
 import hashlib
 import json
 from pathlib import Path
@@ -32,6 +33,7 @@ def records(path, scope, max_record, max_scan, ranges=None):
                     stream.readline()
             line_no = 0
             while True:
+                check()
                 offset = stream.tell()
                 if end is not None and offset >= end:
                     break

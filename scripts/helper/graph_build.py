@@ -1,4 +1,5 @@
 """Evidence graph producers: syntax, import resolution and conservative Python calls."""
+from .budget import check
 import ast
 import collections
 import re
@@ -102,6 +103,7 @@ class Builder:
         root = self.node("directory", ".", path=".", name=".")
         dirs = {".": root}
         for path, row in self.files.items():
+            check()
             parent = root
             parts = PurePosixPath(path).parts[:-1]
             for i in range(len(parts)):
@@ -192,6 +194,7 @@ class Builder:
         """REFERENCES edges from manifests and CI files; certain paths that match nothing become gaps."""
         counts = collections.Counter()
         for path, row in self.files.items():
+            check()
             if row["state"] != "read":
                 continue
             for ref in manifest_refs.references(path, row["text"]):
@@ -209,6 +212,7 @@ class Builder:
 
     def calls(self):
         for path, row in self.files.items():
+            check()
             if row["state"] != "read" or self.nodes[self.file_id(path)].get("language") != "python":
                 continue
             try:
