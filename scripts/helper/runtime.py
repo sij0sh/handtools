@@ -116,6 +116,10 @@ def custom_inputs(args):
     return result
 
 
+# inspect bounds: source preview, history leads, executable candidate choices.
+PREVIEW_LINES, HISTORY_LEADS, CANDIDATE_CHOICES = 80, 8, 5
+
+
 class Runtime:
     def __init__(self, request):
         self.request = request
@@ -208,8 +212,6 @@ class Runtime:
         argv = self.base_argv()
         if providers.graph:
             argv = continuations.replace_option(argv, '--snapshot', providers.graph.snapshot)
-        # Stdin cannot be replayed; never hand out a token that would block waiting for it.
-        if any(value.endswith('=-') for value in args.input): argv = None
         recover = None
         if any(c.get("complete") is False for c in providers.coverage.values()):
             recover = self.recovery(argv, "Rerun with wider provider limits")
@@ -229,9 +231,20 @@ class Runtime:
         graph = graph_cli.get_graph(self.store, args)
         matches = graph.resolve(args.target)
         if len(matches) != 1:
-            return Result({"operation": "inspect", "status": "partial", "results": [graph.public(graph.nodes[n]) for n in matches],
-                           "coverage": {"target": {"complete": False, "reason": "ambiguous" if matches else "unresolved"}},
-                           "next": [{"purpose": "Choose one candidate ref, then inspect it"}]})
+            candidates = [graph.public(graph.nodes[n]) for n in matches]
+            argv = continuations.replace_option(self.base_argv(), '--snapshot', graph.snapshot)
+            at = argv.index(args.target, 1) if args.target in argv[1:] else None
+            # One executable choice per candidate, pinned to the snapshot that produced the ambiguity.
+            choices = [continuations.encode(argv[:at] + [c['ref']] + argv[at+1:], None,
+                                            f"Inspect candidate {c['ref']}", "expansion")
+                       for c in candidates[:CANDIDATE_CHOICES]] if at else []
+            if len(candidates) > len(choices) or not matches:
+                choices.append({"purpose": "Choose one candidate ref, then inspect it" if matches
+                                else "Use map or find to locate the target"})
+            return Result({"operation": "inspect", "status": "partial", "results": candidates,
+                           "coverage": {"target": {"complete": False, "reason": "ambiguous" if matches else "unresolved",
+                                                   "candidates": len(candidates)}},
+                           "next": choices})
         node = graph.public(graph.nodes[matches[0]])
         if node['kind'] not in ('file', 'symbol'):
             raise ValueError("inspect requires a file or symbol; use map for a directory")
@@ -243,8 +256,8 @@ class Runtime:
         start, end = node.get('line') or 1, node.get('end_line') or len(text)
         source_ref = reference(graph.snapshot, 'source', node['path'])
         rows.append({"section": "source", "path": node['path'], "line": start,
-                     "text": '\n'.join(text[start-1:min(end, start+79)]), "ref": source_ref,
-                     "text_complete": src.get('text') is not None and end < start+80})
+                     "text": '\n'.join(text[start-1:min(end, start+PREVIEW_LINES-1)]), "ref": source_ref,
+                     "text_complete": src.get('text') is not None and end < start+PREVIEW_LINES})
         steps += [{"stage": "resolve", "state": "completed"}, {"stage": "source", "state": "completed"}]
         deadline.check()
         if args.intent == 'change':
@@ -265,11 +278,11 @@ class Runtime:
         deadline.check()
         history = target_history.run(pinned, self.store, lambda store, options, pin=None: graph)
         compact = target_history.compact(history['results'])
-        rows += [{"section": "history", **r} for r in compact[:8]]
+        rows += [{"section": "history", **r} for r in compact[:HISTORY_LEADS]]
         history_partial = any(c.get('state') in ('partial', 'unavailable') for c in history['coverage'].get('git', []))
         history_partial |= history['coverage'].get('sessions', {}).get('state') in ('partial', 'unavailable')
         coverage['history'] = {"complete": not history_partial, "details": target_history.summary(history['coverage']),
-                               "leads_omitted": max(0, len(compact)-8)}
+                               "leads_omitted": max(0, len(compact)-HISTORY_LEADS)}
         steps.append({"stage": "history", "state": "bounded" if history_partial else "completed"})
         # Expand one strongest session lead. The selected event remains distinguishable from previews.
         expanded = False
@@ -293,7 +306,12 @@ class Runtime:
         if history_partial:
             recover = self.recovery(argv, "Rescan target history with wider recording limits")
             if recover: next_items.append(recover)
-        if len(compact) > 8:
+        if src.get('text') is not None and end >= start+PREVIEW_LINES:
+            next_items.append(continuations.encode(
+                ['show', source_ref, '--start-line', str(start+PREVIEW_LINES), '--lines', str(end-start-PREVIEW_LINES+1),
+                 '--repo', self.store.root, '--cache', str(self.store.path.parent)], None,
+                "Read the rest of the target source", "expansion"))
+        if len(compact) > HISTORY_LEADS:
             next_items.append(continuations.encode(self.history_argv(node['ref'], graph.snapshot), None,
                                                    "Read all target history leads", "expansion"))
         document = {"operation": "inspect", "target": node, "results": rows, "steps": steps, "coverage": coverage,
@@ -347,6 +365,9 @@ def resume(p, args, argv, incoming):
                 argv = continuations.replace_option(argv, flag, incoming[index + 1])
             elif token.startswith(flag + '='):
                 argv = continuations.replace_option(argv, flag, token.split('=', 1)[1])
+    if continuations.stdin_tables(argv) and sys.stdin.isatty():
+        # Never block waiting on a terminal; the signature rejects different piped rows.
+        raise ValueError("This continuation replays stdin: pipe the same input again")
     return normalize(p.parse_args(argv), argv), argv, saved.get('signature')
 
 
@@ -394,16 +415,18 @@ def run_runtime(args, argv, expected):
         return 0
     result = Runtime(Request(args, tuple(argv), expected)).execute()
 
-    def next_page(offset, empty):
+    def next_page(offset, empty, need=None):
         following = continuations.replace_option(result.argv, '--offset', offset)
         effect = 'delivery'
         if args.action == 'query' and offset >= args.max_query_rows:
             following = continuations.replace_option(following, '--max-query-rows', args.max_query_rows * 2)
             effect = 'coverage'
         if empty:
-            following = continuations.replace_option(following, '--max-bytes', args.max_bytes * 2)
-        return continuations.encode(following, result.signature,
-            'Increase output budget to read the next row' if empty else 'Read the next page', effect)
+            following = continuations.replace_option(following, '--max-bytes', max(args.max_bytes * 2, need or 0))
+        return continuations.mark_stdin(continuations.encode(following, result.signature,
+            'Increase output budget to read the next row' if empty else 'Read the next page', effect))
+    for item in result.document.get('next') or []:
+        continuations.mark_stdin(item)
     delivery.deliver("common", result.document, args, continuation=next_page if result.argv else None)
     return 0
 
@@ -442,3 +465,7 @@ def main(argv=None):
     except (ValueError, OSError, RecursionError) as error:
         print(json.dumps({"schema_version": 2, "status": "error", "results": [], "error": str(error)[:4000]}))
         return 2
+    except KeyboardInterrupt:
+        # Cancellation is not partial evidence: nothing was delivered or retained for this request.
+        print(json.dumps({"schema_version": 2, "status": "error", "results": [], "error": "cancelled"}))
+        return 130

@@ -127,7 +127,7 @@ class TargetHistoryTests(unittest.TestCase):
 
     def test_ambiguity_does_not_scan_and_refs_preserve_snapshot(self):
         self.write("other.py", "def target():\n    return 3\n")
-        with patch("helper.target_history.candidate_files", side_effect=AssertionError("scan")):
+        with patch("helper.target_history.scan_project", side_effect=AssertionError("scan")):
             self.assertEqual(self.history("target")["status"], "ambiguous")
         mapped = self.run_command("map", "a.py::target")
         ref = mapped["history"]["next"]["target"]
@@ -197,7 +197,7 @@ class TargetHistoryTests(unittest.TestCase):
 
     def test_no_graph_scans_or_broad_find_continuations(self):
         self.write("b.py", "def target():\n    return 3\n")
-        with patch("helper.target_history.candidate_files", side_effect=AssertionError("scan")):
+        with patch("helper.target_history.scan_project", side_effect=AssertionError("scan")):
             for args in [("map", "a.py"), ("neighbors", "a.py"), ("impact", "a.py")]:
                 self.assertIn("history", self.run_command(*args))
             broad = self.run_command("find", "target")

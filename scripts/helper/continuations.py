@@ -35,6 +35,26 @@ def decode(token):
     return value
 
 
+def stdin_tables(argv):
+    """Supplied tables a replay reads from stdin again."""
+    tables = []
+    for index, item in enumerate(argv):
+        value = item.partition('=')[2] if item.startswith('--input=') else (
+            argv[index + 1] if item == '--input' and index + 1 < len(argv) else None)
+        if value is not None and value.endswith('=-'):
+            tables.append(value[:-2])
+    return tables
+
+
+def mark_stdin(item):
+    """Tell the caller to pipe the same rows again; the signature rejects different rows."""
+    if isinstance(item, dict) and item.get("ref", "").startswith(PREFIX):
+        tables = stdin_tables(decode(item["ref"])["argv"])
+        if tables:
+            item["stdin"] = {"tables": tables, "replay": "pipe the same input to show"}
+    return item
+
+
 def signature(value):
     return digest(value)
 

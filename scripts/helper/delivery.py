@@ -17,6 +17,8 @@ from .graph_output import check_fields, compact_row, project_rows, render_table
 RETENTION = {"retained": "source", "history": "transient", "common": "transient", "envelope": "transient"}
 # Operations whose results may carry transcript-derived text; they never reach the report store.
 TRANSIENT_OPERATIONS = {"history", "inspect"}
+# Room for the continuation token itself when sizing a budget for an oversized row.
+NEXT_MARGIN = 2048
 
 
 def select(rows, args, fields, transform=None):
@@ -161,7 +163,8 @@ def page(document, args, continuation=None):
     output.setdefault("status", "ok")
     output["schema_version"] = 2
     output.setdefault("scope", {}).setdefault("retention", "transient")
-    output["results"] = select(rows, args, fields)
+    selected = select(rows, args, fields)
+    output["results"] = list(selected)  # fit() pops from this list; selected stays whole.
     more = bool(output.pop("more_rows", False))
     original_next = output.get("next") or []
     if not isinstance(original_next, list): original_next = [original_next]
@@ -175,7 +178,10 @@ def page(document, args, continuation=None):
         if not output["delivery"]["complete"] and continuation:
             # Blocking coverage recovery ranks before paging; paging before optional expansion.
             at = sum(1 for item in original_next if isinstance(item, dict) and item.get("effect") == "coverage")
-            output["next"].insert(at, continuation(following, not output["results"]))
+            # A row too large for the budget: ask for enough bytes to deliver it in one step.
+            need = (len(render({**output, "results": selected[:1]}, args, fields)) + NEXT_MARGIN
+                    if not output["results"] and selected else None)
+            output["next"].insert(at, continuation(following, not output["results"], need))
         if not output["delivery"]["complete"]:
             output["results_truncated"] = "More computed rows exist; follow next. Coverage is reported separately."
     finish()

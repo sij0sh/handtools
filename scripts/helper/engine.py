@@ -17,6 +17,8 @@ REFERENCES = ("ref", "call_ref", "result_ref")
 MAX_COLUMNS = 200
 DEFAULT_MEMORY = "512MB"
 DEFAULT_SECONDS = 10.0
+# SQLite heap ceiling. Process-wide and can only be lowered, so every query context sets the same value.
+SQLITE_HEAP = 512 * 1024 * 1024
 # Output cap when --limit is omitted, so the query's own LIMIT governs.
 DEFAULT_ROW_CAP = 1000
 INSTALL = ("DuckDB and PyArrow are required for SQL queries; install the pinned "
@@ -369,6 +371,7 @@ class SQLiteQuery:
             raise EngineError("Query deadline must be positive")
         self.deadline = time.monotonic() + seconds
         self.connection = sqlite3.connect(":memory:")
+        self.connection.execute(f"PRAGMA hard_heap_limit={SQLITE_HEAP}")
         self.connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 4 * 1024 * 1024)
         self.connection.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH, 128 * 1024)
         self.connection.execute("PRAGMA temp_store=MEMORY")
@@ -401,7 +404,8 @@ class SQLiteQuery:
         s = self.sqlite3
         if action == s.SQLITE_READ:
             if arg1 not in self.schemas:
-                return s.SQLITE_DENY
+                # COUNT(*) over a CTE reads the CTE by name with no column; SQLite's own tables stay denied.
+                return s.SQLITE_OK if arg2 == "" and not (arg1 or "").lower().startswith("sqlite_") else s.SQLITE_DENY
             self.reads.setdefault(arg1, set()).add(arg2)
         if action == s.SQLITE_FUNCTION and (arg2 or "").lower() in ("load_extension", "readfile", "writefile"):
             return s.SQLITE_DENY
@@ -415,17 +419,25 @@ class SQLiteQuery:
         self.connection.set_authorizer(self._authorize)
         try:
             program = self.connection.execute("EXPLAIN " + sql, self.params).fetchall()
-            # SQLite omits SQLITE_READ callbacks for some COUNT(*)/USING joins.
-            # Its compiled OpenRead bytecode still identifies the exact base tables;
-            # root pages are known because this private schema has no indexes/views.
-            for instruction in program:
-                if instruction[1] == "OpenRead" and instruction[3] in self.rootpages:
-                    self.reads.setdefault(self.rootpages[instruction[3]], set())
+            # SQLite omits SQLITE_READ callbacks for some COUNT(*)/USING joins (the right
+            # side's USING column). Its compiled OpenRead/Column bytecode still identifies
+            # the exact base tables and columns; root pages are known because this private
+            # schema has no indexes/views.
+            cursors = {}
+            for _, opcode, p1, p2, *_ in program:
+                if opcode == "OpenRead" and p2 in self.rootpages:
+                    cursors[p1] = self.rootpages[p2]
+                    self.reads.setdefault(cursors[p1], set())
+                elif opcode == "Column" and p1 in cursors:
+                    names = list(self.schemas[cursors[p1]])
+                    if 0 <= p2 < len(names):
+                        self.reads[cursors[p1]].add(names[p2])
         except self.sqlite3.Error as error:
             raise EngineError(f"Read-only query failed: {error}") from None
         finally:
             self.connection.set_authorizer(None)
-        return {name: sorted(fields) for name, fields in self.reads.items()}
+        # An empty column name is SQLite's rowid/table-only read (e.g. COUNT(*)).
+        return {name: sorted(f for f in fields if f) for name, fields in self.reads.items()}
 
     def load(self, item):
         if item.name not in self.schemas:
@@ -441,7 +453,9 @@ class SQLiteQuery:
             values = []
             for name in names:
                 value = row.get(name)
-                if isinstance(value, (dict, list, tuple)):
+                if isinstance(value, bool) and TYPE_ALIASES.get(str(schema[name]).upper()) == "str":
+                    value = "true" if value else "false"  # SQLite would store 1/0 in a text column.
+                elif isinstance(value, (dict, list, tuple)):
                     value = json.dumps(value, ensure_ascii=True, default=_text, separators=(",", ":"))
                 elif isinstance(value, int) and not -(2**63) <= value < 2**63:
                     value = str(value)
@@ -453,6 +467,8 @@ class SQLiteQuery:
             self.connection.commit()
         except self.sqlite3.Error as error:
             raise EngineError(f"Input table {item.name}: {error}") from None
+        except MemoryError:
+            raise EngineError(f"Input table {item.name} exceeded the {SQLITE_HEAP >> 20} MiB SQLite memory cap") from None
         self.inputs[item.name] = item
 
     def evaluate(self, limit=1000):
@@ -469,8 +485,17 @@ class SQLiteQuery:
             if len(set(names)) != len(names):
                 raise EngineError("Alias duplicate output column names")
             fetched = cursor.fetchmany(limit + 1)
+        except self.sqlite3.OperationalError as error:
+            if str(error) != "interrupted":
+                raise EngineError(f"Read-only query failed: {error}") from None
+            if self.time.monotonic() <= self.deadline:
+                raise KeyboardInterrupt from None  # Ctrl-C inside the progress handler, not the deadline.
+            raise EngineError("Read-only query failed: interrupted at the query deadline; aggregate, narrow "
+                              "or raise --seconds") from None
         except self.sqlite3.Error as error:
             raise EngineError(f"Read-only query failed: {error}") from None
+        except MemoryError:
+            raise EngineError(f"Query exceeded the {SQLITE_HEAP >> 20} MiB SQLite memory cap; aggregate or narrow it") from None
         finally:
             self.connection.set_authorizer(None)
         rows = []

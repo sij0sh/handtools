@@ -1,6 +1,7 @@
 """Shared bounded recording scan and lineage mechanics; no retained transcript data."""
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from .reader import scan_file
 from .budget import check
 from .options import TEXT_BYTES_DEFAULT, TEXT_BYTES_AUTO_CAP
@@ -62,3 +63,51 @@ def scan_group(files, options, counters):
         counters["files_scanned"] += 1
         _snapshot(path, counters, before)
     return recordings
+
+
+class DiscoveryUnavailable(ValueError):
+    """Recording discovery failed before any scan (e.g. no configured directories)."""
+
+
+def current_sessions(args):
+    """Sessions to drop: --exclude-session plus the harness's own current-session id."""
+    excluded = set(getattr(args, "exclude_session", []))
+    excluded.update(v for v in (os.environ.get("CODEX_THREAD_ID"), os.environ.get("PI_SESSION_ID"),
+                                os.environ.get("CLAUDE_SESSION_ID")) if v)
+    return excluded
+
+
+def scan_project(args, root, scope):
+    """Discover and scan one project's recordings, dropping excluded sessions.
+
+    Returns (kept, groups, keys, excluded, scanned): groups are per-harness counters, keys map file to
+    independent session, scanned counts recordings before exclusion. Discovery failure raises
+    DiscoveryUnavailable; scan and deadline errors propagate unchanged."""
+    from .discovery import candidate_files
+    from .options import DiscoveryOptions, ScanOptions
+    options = DiscoveryOptions(files=tuple(getattr(args, "recordings", [])), project=root,
+                               also_roots=tuple(getattr(args, "project_root", [])),
+                               max_files=args.max_recordings, max_candidates=args.max_candidates)
+    # Store full text for the bytes each group will scan, so a target mention is not cut off.
+    policy = SimpleNamespace(max_text_bytes=None, max_scan_bytes=args.max_scan_bytes)
+    try:
+        candidates = candidate_files(options, scope)
+    except ValueError as error:
+        raise DiscoveryUnavailable(str(error)) from None
+    recordings, groups = [], []
+    for harness, files, counters in candidates:
+        check()
+        scan = ScanOptions(harness=harness, max_scan_bytes=args.max_scan_bytes, max_events=args.max_events,
+                           max_text_bytes=text_budget(policy, files, counters))
+        recordings.extend(scan_group(files, scan, counters))
+        groups.append({"harness": harness, **counters})
+    keys = lineages(recordings)
+    excluded = current_sessions(args)
+    kept = []
+    for recording in recordings:
+        if {recording["session"], recording["file"], keys[recording["file"]]} & excluded:
+            continue
+        for event in recording["events"]:
+            event["independent_session"] = keys[recording["file"]]
+        kept.append(recording)
+    return kept, groups, keys, excluded, len(recordings)

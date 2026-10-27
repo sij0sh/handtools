@@ -202,16 +202,72 @@ class RuntimeTests(unittest.TestCase):
             q.plan('WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n) SELECT sum(x) FROM n')
             with self.assertRaisesRegex(ValueError,'interrupted'):q.evaluate()
 
+    def test_plan_reads_using_join_columns_on_both_sides(self):
+        schemas={'files':{'path':'TEXT','size':'INTEGER'},'changes':{'sha':'TEXT','path':'TEXT'}}
+        with SQLiteQuery(schemas) as q:
+            self.assertEqual(q.plan('SELECT f.size, c.sha FROM files f JOIN changes c USING(path)'),
+                             {'files':['path','size'],'changes':['path','sha']})
+        with SQLiteQuery(schemas) as q:
+            self.assertEqual(q.plan('SELECT count(*) FROM files'),{'files':[]})
+
+    def test_count_star_over_cte_allowed_schema_tables_denied(self):
+        out=self.cli('query','WITH n(x) AS (VALUES (1),(2)) SELECT count(*) c FROM n')
+        self.assertEqual(out['results'],[{'c':2}])
+        self.cli('query','SELECT count(*) FROM sqlite_master',ok=False)
+        self.cli('query','SELECT name FROM sqlite_master',ok=False)
+
     def test_unknown_column_types_rejected(self):
         with self.assertRaises(ValueError):SQLiteQuery({'x':{'column':'NOT_A_TYPE'}})
 
     def test_duplicate_output_names_rejected(self):
         self.cli('query','SELECT 1 AS x, 2 AS x',ok=False)
 
-    def test_stdin_result_does_not_offer_unreplayable_token(self):
-        out=self.cli('query','SELECT * FROM supplied','--input','supplied=-','--limit','1',stdin='[{"x":1},{"x":2}]')
+    def test_inspect_large_source_continues_past_preview(self):
+        body=''.join(f'    x{i} = {i}\n' for i in range(200))
+        (self.repo/'big.py').write_text('def big():\n'+body+'    return 0\n')
+        out=self.cli('inspect','big.py','--no-sessions','--max-bytes','60000')
+        source=next(r for r in out['results'] if r['section']=='source')
+        self.assertFalse(source['text_complete'])
+        self.assertEqual(len(source['text'].splitlines()),80)
+        rest=next(n for n in out['next'] if n['purpose']=='Read the rest of the target source')
+        page=self.cli('show',rest['ref'],'--limit','500','--max-bytes','60000')
+        self.assertEqual(page['results'][0]['line'],81)
+        self.assertEqual(page['results'][-1]['text'],'    return 0')
+
+    def test_inspect_ambiguous_candidates_are_executable_and_pinned(self):
+        (self.repo/'other.py').write_text('def save(x):\n    return x\n')
+        out=self.cli('inspect','save','--no-sessions')
+        choices=[n for n in out['next'] if 'ref' in n]
+        self.assertEqual(len(choices),2)
+        refs={r['ref'] for r in out['results']}
+        self.assertEqual({self.decoded(c)[1] for c in choices},refs)
+        # The candidate stays inspectable from the ambiguous snapshot after the live file changes.
+        (self.repo/'other.py').write_text('def keep(x):\n    return x\n')
+        other=next(r['ref'] for r in out['results'] if r['path']=='other.py')
+        chosen=next(c for c in choices if self.decoded(c)[1]==other)
+        picked=self.cli('show',chosen['ref'],'--max-bytes','60000')
+        self.assertEqual(picked['target']['path'],'other.py')
+        self.assertIn('def save',next(r for r in picked['results'] if r['section']=='source')['text'])
+
+    def test_inspect_deleted_target_is_unresolved_but_pinned_source_remains(self):
+        body=''.join(f'    x{i} = {i}\n' for i in range(100))
+        (self.repo/'gone.py').write_text('def gone():\n'+body)
+        out=self.cli('inspect','gone.py','--no-sessions','--max-bytes','60000')
+        rest=next(n for n in out['next'] if n['purpose']=='Read the rest of the target source')
+        (self.repo/'gone.py').unlink()
+        missing=self.cli('inspect','gone.py','--no-sessions')
+        self.assertEqual(missing['coverage']['target']['reason'],'unresolved')
+        self.assertFalse(missing['results'])
+        self.assertTrue(self.cli('show',rest['ref'],'--limit','500','--max-bytes','60000')['results'])
+
+    def test_stdin_continuation_replays_same_piped_rows(self):
+        rows='[{"x":1},{"x":2}]'
+        out=self.cli('query','SELECT * FROM supplied ORDER BY x','--input','supplied=-','--limit','1',stdin=rows)
         self.assertFalse(out['delivery']['complete'])
-        self.assertFalse(out['next'])
+        item=out['next'][0]
+        self.assertEqual(item['stdin']['tables'],['supplied'])
+        self.assertEqual(self.cli('show',item['ref'],stdin=rows)['results'],[{'x':2}])
+        self.assertIn('source changed',self.cli('show',item['ref'],stdin='[{"x":1},{"x":3}]',ok=False)['error'])
 
     def test_byte_budget_keeps_executable_next(self):
         data=self.root/'large.json';data.write_text(json.dumps([{'x':'a'*5000}]))
@@ -221,6 +277,46 @@ class RuntimeTests(unittest.TestCase):
         token=out['next'][0]['ref']
         expanded=self.cli('show',token,'--max-bytes','12000')
         self.assertEqual(len(expanded['results'][0]['x']),5000)
+
+    def test_oversized_row_continuation_requests_enough_bytes(self):
+        data=self.root/'large.json';data.write_text(json.dumps([{'x':'a'*40000}]))
+        out=self.cli('query','SELECT * FROM supplied','--input',f'supplied={data}','--max-bytes','2048')
+        argv=self.decoded(out['next'][0])
+        self.assertGreater(int(argv[argv.index('--max-bytes')+1]),40000)
+        self.assertEqual(len(self.cli('show',out['next'][0]['ref'])['results'][0]['x']),40000)
+
+    def test_tiny_budget_keeps_partial_coverage_and_recovery(self):
+        data=self.root/'rows.json';data.write_text(json.dumps([{'x':'b'*900} for _ in range(5)]))
+        out=self.cli('query','SELECT c.path, s.x FROM files c, supplied s','--input',f'supplied={data}',
+                     '--max-files','1','--max-bytes','2048')
+        self.assertEqual(out['status'],'partial')
+        self.assertEqual(out['next'][0]['effect'],'coverage')
+
+    def test_supplied_booleans_keep_json_spelling_in_text_columns(self):
+        data=self.root/'mix.json';data.write_text('[{"a":true},{"a":"x"},{"a":false}]')
+        out=self.cli('query','SELECT a FROM m','--input',f'm={data}')
+        self.assertEqual([r['a'] for r in out['results']],['true','x','false'])
+
+    def test_sqlite_memory_cap_is_a_query_error(self):
+        code=("from helper import engine\nengine.SQLITE_HEAP=16<<20\n"
+              "with engine.SQLiteQuery({},20) as q:\n"
+              "    q.plan(\"WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n LIMIT 1000000) "
+              "SELECT printf('%0100d',x) FROM n ORDER BY random()\")\n"
+              "    try: q.evaluate(1)\n    except ValueError as e: print(e)\n")
+        p=subprocess.run([sys.executable,'-c',code],cwd=ROOT/'scripts',capture_output=True,text=True,timeout=60)
+        self.assertIn('memory cap',p.stdout,p.stderr)
+
+    def test_sigint_cancels_query_without_traceback(self):
+        import signal, time
+        p=subprocess.Popen([sys.executable,str(ROOT/'scripts/remember.py'),'query',
+                            'WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n) SELECT count(*) FROM n',
+                            '--seconds','30','--repo',str(self.repo),'--cache',str(self.cache)],
+                           stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
+                           preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+        time.sleep(1)
+        p.send_signal(signal.SIGINT)
+        out,err=p.communicate(timeout=10)
+        self.assertEqual((p.returncode,json.loads(out)['error'],err),(130,'cancelled',''))
 
     def decoded(self, item):
         return continuations.decode(item['ref'])['argv']

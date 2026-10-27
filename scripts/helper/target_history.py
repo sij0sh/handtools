@@ -12,11 +12,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from . import cite, commit_links, edit_hunks, git_file_history
-from .recording_scan import lineages, scan_group
-from .discovery import candidate_files, normalized_root
+from .recording_scan import scan_project
+from .discovery import normalized_root
 from .enrichment import parse_root_map, remap
 from .git_resolve import GitResolver
-from .options import TEXT_BYTES_AUTO_CAP, TEXT_BYTES_DEFAULT, DiscoveryOptions, ScanOptions, command_line
+from .options import command_line
 from .projection import clean, human, next_for
 from .records import RecordCache
 
@@ -213,32 +213,10 @@ class TargetRepository:
 
 def scan(args, root):
     scope = {"duplicates_skipped": 0}
-    options = DiscoveryOptions(files=tuple(args.recordings), project=root,
-                               also_roots=tuple(args.project_root), max_files=args.max_recordings,
-                               max_candidates=args.max_candidates)
-    groups = candidate_files(options, scope)
-    recordings, coverage = [], []
-    for harness, files, counters in groups:
-        # Like sessions.py: store full text for the bytes this group will scan, so a target mention is not cut off.
-        size = sum(os.path.getsize(f) for f in files if os.path.exists(f))
-        text = max(TEXT_BYTES_DEFAULT, min(size, args.max_scan_bytes, TEXT_BYTES_AUTO_CAP))
-        recordings.extend(scan_group(files, ScanOptions(harness=harness, max_scan_bytes=args.max_scan_bytes,
-                                                         max_events=args.max_events, max_text_bytes=text), counters))
-        coverage.append({"harness": harness, **counters})
-    keys = lineages(recordings)
-    excluded = set(args.exclude_session)
-    excluded.update(v for v in (os.environ.get("CODEX_THREAD_ID"), os.environ.get("PI_SESSION_ID"),
-                                os.environ.get("CLAUDE_SESSION_ID")) if v)
-    kept = []
-    for recording in recordings:
-        if {recording["session"], recording["file"], keys[recording["file"]]} & excluded:
-            continue
-        for event in recording["events"]:
-            event["independent_session"] = keys[recording["file"]]
-        kept.append(recording)
+    kept, coverage, keys, excluded, scanned = scan_project(args, root, scope)
     partial = not scope["discovery_complete"] or any(not g["scan_complete"] or not g["text_complete"] for g in coverage)
     return kept, {**scope, "groups": coverage, "state": "partial" if partial else "searched",
-                  "excluded_sessions": sorted(excluded), "recordings_excluded": len(recordings)-len(kept),
+                  "excluded_sessions": sorted(excluded), "recordings_excluded": scanned-len(kept),
                   "current_session_exclusion": "configured" if excluded else "unknown; pass --exclude-session",
                   "independent_sessions": len({keys[r["file"]] for r in kept})}
 

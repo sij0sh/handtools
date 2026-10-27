@@ -1,15 +1,12 @@
 """Invocation-local provider registry; shared source, Git and recording datasets."""
 import os
-from types import SimpleNamespace
 from . import catalog, cite, commit_links, edit_hunks, git_file_history, graph_cli, graph_queries, repo_files
-from .discovery import candidate_files
 from .engine import Input
 from .enrichment import remap, parse_root_map
 from .git_resolve import GitResolver
 from .graph_store import digest
-from .options import DiscoveryOptions, ScanOptions
 from .projection import clean
-from .recording_scan import lineages, scan_group, text_budget
+from .recording_scan import DiscoveryUnavailable, scan_project
 from .records import RecordCache
 
 
@@ -60,35 +57,19 @@ class Providers:
                                   "snapshot": self.graph.snapshot, "gaps": len(self.graph.body["gaps"])}
 
     def load_recordings(self):
-        args = self.args
-        scope, groups = {"duplicates_skipped": 0}, []
-        options = DiscoveryOptions(files=tuple(getattr(args, "recordings", [])), project=self.store.root,
-                                   also_roots=tuple(getattr(args, "project_root", [])),
-                                   max_files=args.max_recordings, max_candidates=args.max_candidates)
-        policy = SimpleNamespace(max_text_bytes=None, max_scan_bytes=args.max_scan_bytes)
+        scope = {"duplicates_skipped": 0}
         try:
-            candidates = candidate_files(options, scope)
-        except ValueError as error:
-            if getattr(args, "recordings", []):
+            self.recordings, groups, _, excluded, _ = scan_project(self.args, self.store.root, scope)
+        except DiscoveryUnavailable as error:
+            if getattr(self.args, "recordings", []):
                 raise
             self.tables["events"] = self.tables["rows"] = []
             self.coverage["recordings"] = {"complete": False, "state": "unavailable", "error": str(error)}
             return
-        for harness, files, counters in candidates:
-            self.deadline.check()
-            scan = ScanOptions(harness=harness, max_scan_bytes=args.max_scan_bytes, max_events=args.max_events,
-                               max_text_bytes=text_budget(policy, files, counters))
-            self.recordings.extend(scan_group(files, scan, counters))
-            groups.append(counters)
-        keys = lineages(self.recordings)
-        excluded = set(getattr(args, "exclude_session", []))
-        excluded.update(v for v in (os.environ.get("CODEX_THREAD_ID"), os.environ.get("PI_SESSION_ID"), os.environ.get("CLAUDE_SESSION_ID")) if v)
-        self.recordings = [r for r in self.recordings if not ({r["session"], r["file"], keys[r["file"]]} & excluded)]
         self.roots = {r["file"]: r.get("root") for r in self.recordings}
         rows = []
         for recording in self.recordings:
             for event in recording["events"]:
-                event["independent_session"] = keys[recording["file"]]
                 row = clean(event, complete=True)
                 row = cite.tagged(row, event["ref"])
                 row.update(repo_path=self.repo_path(event))

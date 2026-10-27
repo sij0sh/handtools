@@ -80,8 +80,8 @@ Per-file source default: 1 MiB. Recording scan byte caps: 64/256 MiB per harness
 Advanced numeric flags override policy defaults. Deadlines are cooperative at
 provider/file boundaries; SQLite queries are interruptible and Git subprocesses
 receive remaining time. A single parser operation is not forcibly preempted.
-The row/byte limits bound materialized inputs; there is no OS-level memory cap
-on SQLite. Recipes do not retry or widen scope automatically; a partial
+The row/byte limits bound materialized inputs; SQLite heap is capped at 512 MiB
+(error, not partial). Ctrl-C returns `"error": "cancelled"`, exit 130. Recipes do not retry or widen scope automatically; a partial
 standard-budget result offers one `coverage` continuation that reruns at deep.
 
 Common results use schema version 2:
@@ -92,9 +92,11 @@ Common results use schema version 2:
   source coverage. Page limits do not make complete evidence partial.
 - `next` contains executable continuation refs, with a purpose and effect.
   `delivery` reads another page; `coverage` explicitly widens a computation cap
-  or scan boundary; `expansion` reads more evidence (inspect: all target
-  history leads, same recording scope and limits, pinned snapshot). Order:
-  coverage, delivery, expansion.
+  or scan boundary; `expansion` reads more evidence. Inspect expansions: all
+  target history leads (same recording scope/limits), rest of source past the
+  80-line preview, one `inspect` per ambiguous candidate (max 5); all pinned to
+  the inspected snapshot. Order: coverage, delivery, expansion. A row larger
+  than `--max-bytes` gets one delivery continuation sized to fit it.
 
 SQL sees full bounded provider inputs before display projection or paging.
 `--limit` controls delivered rows, not aggregate input. Use SQL LIMIT/OFFSET
@@ -104,9 +106,10 @@ Continuations carry absolute scope, filters, presentation and budget settings.
 Source-query continuations pin the source snapshot. Transient inputs are
 reloaded and fingerprint-checked; changes fail explicitly instead of shifting
 pages silently. Tokens contain request metadata, not transcript payloads, and
-are versioned data rather than executable shell commands. Stdin inputs cannot
-be replayed, so their output does not offer a continuation. Preserve the input
-in a user-approved file or rerun the query with a larger output limit.
+are versioned data rather than executable shell commands. Stdin inputs are not
+saved: a continuation over `--input NAME=-` carries `stdin.tables` and needs the
+same rows piped to `show` again; different rows fail as a source change, a
+terminal stdin fails instead of blocking.
 
 The runtime's new query/inspect/session-show results remain transient. Existing
 source graph operations retain source-only snapshots/reports. Transcript text
