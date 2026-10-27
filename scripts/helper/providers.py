@@ -1,6 +1,5 @@
 """Invocation-local provider registry; shared source, Git and recording datasets."""
 import os
-from pathlib import Path
 from types import SimpleNamespace
 from . import catalog, cite, commit_links, edit_hunks, git_file_history, graph_cli, graph_queries, repo_files
 from .discovery import candidate_files

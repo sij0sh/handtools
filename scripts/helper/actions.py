@@ -15,13 +15,11 @@ from .engine import EngineError, Input, evaluate
 from .enrichment import Repository
 from .envelope import LEVELS, clip
 from .options import (CANDIDATES_DEFAULT, CANDIDATES_PROJECT, FILES_DEFAULT, FILES_PROJECT,
-                      TEXT_BYTES_AUTO_CAP, TEXT_BYTES_DEFAULT,
                       DiscoveryOptions, ScanOptions, command_line)
 from .projection import FIELDS, accepted, brief, clean, human, next_for, project_row
 from .profiles import PROFILES, content_text, detected, emitted_kinds, first, pointer
-from .records import RecordCache, new_scope, read_ref, records, safe_ref
-from .reader import scan_file
-from .recording_scan import _size, text_budget, _snapshot, lineages, scan_group
+from .records import RecordCache, read_ref, records, safe_ref
+from .recording_scan import text_budget, _snapshot, lineages, scan_group
 
 SESSIONS = str(Path(__file__).resolve().parents[1] / "sessions.py")
 

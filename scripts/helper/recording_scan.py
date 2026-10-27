@@ -25,7 +25,6 @@ def text_budget(args, files, gscope):
 
 def _snapshot(path, scope, before):
     try:
-        from pathlib import Path
         stat = Path(path).stat()
         scanned = scope.get("bytes_scanned", 0) - before
         scope.setdefault("snapshot", []).append({

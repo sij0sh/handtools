@@ -6,28 +6,20 @@ inputs. Legacy sessions/rows DuckDB interfaces remain compatibility adapters.
 import argparse
 import copy
 import json
-import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
 from . import catalog, continuations, delivery, graph_cli, session_cli, target_history
 from .bindings import parse_params, parse_types, types_for
 from .budget import Deadline, POLICIES
 from .engine import Input, SQLiteQuery, IDENTIFIER, infer_type
 from .envelope import load_rows
-from .graph_queries import DEPENDENCIES, reference, impact, evidence
-from .graph_store import Store, canonical, digest
+from .graph_queries import DEPENDENCIES, reference, impact
+from .graph_store import Store, digest
+from .operations import COMMON, GRAPH, OPERATIONS, SESSION_COMMANDS, graph_parser
 from .providers import Providers
-
-COMMON = {
-    "map": "Orient in current source.", "find": "Locate a concrete anchor.",
-    "inspect": "Collect source, consumers, dependencies and relevant history.",
-    "show": "Expand evidence or execute a returned continuation.",
-    "query": "Query built-in and custom tables; dependencies load automatically.",
-}
 
 
 @dataclass(frozen=True)
@@ -45,33 +37,7 @@ class Result:
 
 
 def parser():
-    p = graph_cli.parser()
-    p.description = "Remember: map, find, inspect, show, query. Other commands remain advanced compatibility operations."
-    sub = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction))
-    inspect = sub.add_parser("inspect", parents=[sub.choices["history"]], add_help=False,
-                             description=COMMON["inspect"], help=COMMON["inspect"])
-    inspect.add_argument("--intent", choices=("change", "bug", "review"), default="change")
-    inspect.add_argument("--plan", action="store_true", help="Describe retrieval stages without reading source/history")
-    inspect.add_argument("--depth", type=graph_cli.positive, default=2)
-    inspect.add_argument("--max-nodes", type=graph_cli.positive, default=1000)
-    query = sub.choices["query"]
-    query.description = COMMON["query"] + " SQL dialect: SQLite."
-    query._option_string_actions["--sql"].required = False
-    query.add_argument("sql_text", nargs="?", help="Read-only SQLite SELECT/CTE; --sql is a compatibility alias")
-    query.add_argument("--input", action="append", default=[], metavar="NAME=FILE", help="Register JSON/JSONL rows (or - for stdin)")
-    query.add_argument("--type", action="append", default=[], metavar="TABLE.COLUMN=TYPE")
-    query.add_argument("--plan", action="store_true", help="Validate SQL and show dependencies before loading providers")
-    for name in ("recordings", "project-root", "root-map", "exclude-session"):
-        query.add_argument("--" + name, action="append", default=[])
-    for name in ("max-recordings", "max-candidates", "max-scan-bytes", "max-events", "max-commits"):
-        query.add_argument("--" + name, type=graph_cli.positive)
-    sub.choices["describe"].add_argument("table", nargs="?", help="Focused public table schema")
-    for name in ("query", "inspect", "show"):
-        sub.choices[name].add_argument("--budget", choices=tuple(POLICIES), default="standard")
-    for name in graph_cli.SESSION_COMMANDS:
-        other = next(a for a in session_cli.parser()._actions if isinstance(a, argparse._SubParsersAction)).choices[name]
-        sub.add_parser(name, parents=[other], add_help=False, help="Advanced recording operation")
-    return p
+    return graph_parser("common", "Remember: map, find, inspect, show, query. Other commands remain advanced compatibility operations.")
 
 
 def normalize_prefix(argv):
@@ -89,7 +55,7 @@ def normalize_prefix(argv):
         index += 1
         if '=' not in token and option.nargs != 0:
             index += 1
-    if index and index < len(argv) and argv[index] in {*graph_cli.COMMANDS, *graph_cli.SESSION_COMMANDS, "inspect"}:
+    if index and index < len(argv) and argv[index] in {*GRAPH, *SESSION_COMMANDS, "inspect"}:
         return [argv[index], *argv[:index], *argv[index + 1:]]
     return argv
 
@@ -371,78 +337,108 @@ class Runtime:
         return result
 
 
+def resume(p, args, argv, incoming):
+    """Replace a continue: token with its saved request; presentation may change, evidence scope may not."""
+    saved = continuations.decode(args.ref)
+    argv = saved['argv']
+    for flag in ('--max-bytes', '--format', '--fields', '--limit'):
+        for index, token in enumerate(incoming):
+            if token == flag and index + 1 < len(incoming):
+                argv = continuations.replace_option(argv, flag, incoming[index + 1])
+            elif token.startswith(flag + '='):
+                argv = continuations.replace_option(argv, flag, token.split('=', 1)[1])
+    return normalize(p.parse_args(argv), argv), argv, saved.get('signature')
+
+
+def legacy_query(args, argv):
+    """The original graph-only query --sql shape keeps its retained v1 report; None when it does not apply."""
+    if args.sql_text is not None or args.plan or args.input or args.type or '--budget' in argv:
+        return None
+    try:
+        with SQLiteQuery(graph_cli.TABLES, args.seconds) as legacy_plan:
+            legacy_plan.plan(args.sql, parse_params(args.param))
+    except ValueError:
+        return None  # Additional tables/columns use the canonical catalog.
+    old_args, extra = graph_cli.parser().parse_known_args(argv)
+    if extra:
+        return None
+    old_args = graph_cli.defaults(old_args)
+    store = Store(old_args.repo, old_args.cache)
+    delivery.deliver("retained", graph_cli.run(old_args, store), old_args, store)
+    return 0
+
+
+def run_describe(args, argv, expected):
+    rows = catalog.describe(args.table)
+    scope = {"common_commands": COMMON, "dialect": "sqlite"}
+    if args.table is None:
+        # The overview keeps its retained v1 report; schema rows hold no recorded data.
+        rows = [{"kind": "command", "name": name, "description": description}
+                for name, description in COMMON.items()] + [{"kind": "table", **r} for r in rows]
+        doc = {"operation": "describe", "results": rows, "snapshots": [], "scope": scope, "gaps": [], "coverage": {}}
+        delivery.deliver("retained", doc, args, Store(args.repo, args.cache))
+    else:
+        doc = {"operation": "describe", "results": rows, "snapshots": [], "scope": {**scope, "retention": "transient"}}
+        delivery.deliver("common", doc, args)
+    return 0
+
+
+def run_runtime(args, argv, expected):
+    if args.action == 'query' and expected is None:
+        handled = legacy_query(args, argv)
+        if handled is not None:
+            return handled
+    if args.action == 'show' and args.ref.startswith(('snapshot:', 'report:')) and expected is None:
+        store = Store(args.repo, args.cache)
+        delivery.deliver("retained", graph_cli.show(store, args), args, store)
+        return 0
+    result = Runtime(Request(args, tuple(argv), expected)).execute()
+
+    def next_page(offset, empty):
+        following = continuations.replace_option(result.argv, '--offset', offset)
+        effect = 'delivery'
+        if args.action == 'query' and offset >= args.max_query_rows:
+            following = continuations.replace_option(following, '--max-query-rows', args.max_query_rows * 2)
+            effect = 'coverage'
+        if empty:
+            following = continuations.replace_option(following, '--max-bytes', args.max_bytes * 2)
+        return continuations.encode(following, result.signature,
+            'Increase output budget to read the next row' if empty else 'Read the next page', effect)
+    delivery.deliver("common", result.document, args, continuation=next_page if result.argv else None)
+    return 0
+
+
+def run_graph(args, argv, expected):
+    store = Store(args.repo, args.cache)
+    doc = graph_cli.run(args, store)
+    if 'text' in doc:
+        sys.stdout.write(doc['text'])
+    else:
+        delivery.deliver(OPERATIONS[args.action].delivery, doc, args, store)
+    return 0
+
+
+def run_session(args, argv, expected):
+    return session_cli.main(argv)
+
+
+ROUTES = {"runtime": run_runtime, "describe": run_describe, "graph": run_graph, "session": run_session}
+
+
 def main(argv=None):
     incoming = list(sys.argv[1:] if argv is None else argv)
     argv = normalize_prefix(incoming)
     # Legacy adapters share the package; never exec another CLI process.
-    if argv and argv[0] in graph_cli.SESSION_COMMANDS:
-        return session_cli.main(argv)
+    # Session operations own their parser; route them before the common parser sees their flags.
+    if argv and argv[0] in OPERATIONS and OPERATIONS[argv[0]].route == "session":
+        return run_session(None, argv, None)
     p = parser()
     try:
         args = normalize(p.parse_args(argv), argv)
         expected = None
         if args.action == 'show' and args.ref.startswith(continuations.PREFIX):
-            saved = continuations.decode(args.ref)
-            argv = saved['argv']
-            # Presentation may be changed explicitly without changing evidence scope.
-            for flag in ('--max-bytes', '--format', '--fields', '--limit'):
-                for index, token in enumerate(incoming):
-                    if token == flag and index + 1 < len(incoming):
-                        argv = continuations.replace_option(argv, flag, incoming[index + 1])
-                    elif token.startswith(flag + '='):
-                        argv = continuations.replace_option(argv, flag, token.split('=', 1)[1])
-            args = normalize(p.parse_args(argv), argv)
-            expected = saved.get('signature')
-        if args.action == 'query' and args.sql_text is None and not args.plan and not args.input and not args.type and '--budget' not in argv:
-            try:
-                with SQLiteQuery(graph_cli.TABLES, args.seconds) as legacy_plan:
-                    legacy_plan.plan(args.sql, parse_params(args.param))
-            except ValueError:
-                pass  # Additional tables/columns use the canonical catalog below.
-            else:
-                old_args, extra = graph_cli.parser().parse_known_args(argv)
-                if not extra:
-                    old_args = graph_cli.defaults(old_args)
-                    store = Store(old_args.repo, old_args.cache)
-                    graph_cli.deliver(store, graph_cli.run(old_args, store), old_args)
-                    return 0
-        if args.action == 'describe':
-            rows = catalog.describe(args.table)
-            doc = {"operation": "describe", "results": rows, "snapshots": [],
-                   "scope": {"common_commands": COMMON, "dialect": "sqlite", "retention": "transient"}}
-            if args.table is None:
-                doc['results'] = [{"kind": "command", "name": name, "description": description}
-                                  for name, description in COMMON.items()] + [{"kind": "table", **r} for r in rows]
-                graph_cli.deliver(Store(args.repo, args.cache), {**doc, "gaps": [], "coverage": {}}, args)
-                return 0
-            _, raw = delivery.page(doc, args)
-            sys.stdout.buffer.write(raw)
-            return 0
-        if args.action == 'show' and args.ref.startswith(('snapshot:', 'report:')) and expected is None:
-            store = Store(args.repo, args.cache)
-            graph_cli.deliver(store, graph_cli.show(store, args), args)
-            return 0
-        if args.action in ('query', 'inspect', 'show'):
-            result = Runtime(Request(args, tuple(argv), expected)).execute()
-            def next_page(offset, empty):
-                following = continuations.replace_option(result.argv, '--offset', offset)
-                effect = 'delivery'
-                if args.action == 'query' and offset >= args.max_query_rows:
-                    following = continuations.replace_option(following, '--max-query-rows', args.max_query_rows * 2)
-                    effect = 'coverage'
-                if empty:
-                    following = continuations.replace_option(following, '--max-bytes', args.max_bytes * 2)
-                return continuations.encode(following, result.signature,
-                    'Increase output budget to read the next row' if empty else 'Read the next page', effect)
-            _, raw = delivery.page(result.document, args, next_page if result.argv else None)
-            sys.stdout.buffer.write(raw)
-            return 0
-        store = Store(args.repo, args.cache)
-        doc = graph_cli.run(args, store)
-        if 'text' in doc: sys.stdout.write(doc['text'])
-        elif args.action == 'history': target_history.deliver(doc, args)
-        else: graph_cli.deliver(store, doc, args)
-        return 0
+            args, argv, expected = resume(p, args, argv, incoming)
+        return ROUTES[OPERATIONS[args.action].route](args, argv, expected)
     except (ValueError, OSError, RecursionError) as error:
         print(json.dumps({"schema_version": 2, "status": "error", "results": [], "error": str(error)[:4000]}))
         return 2

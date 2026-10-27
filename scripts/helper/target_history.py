@@ -18,7 +18,6 @@ from .enrichment import parse_root_map, remap
 from .git_resolve import GitResolver
 from .options import TEXT_BYTES_AUTO_CAP, TEXT_BYTES_DEFAULT, DiscoveryOptions, ScanOptions, command_line
 from .projection import clean, human, next_for
-from .reader import scan_file
 from .records import RecordCache
 
 
@@ -497,48 +496,3 @@ def summary(coverage):
         out["discovery_incomplete"] = True
     out["detail"] = "--verbose: every counter, alias, event row, hunk and expansion argv"
     return out
-
-
-def deliver(document, args):
-    """Bound output without persisting transcript text in graph reports."""
-    from .graph_store import canonical
-    from .graph_output import check_fields, project_rows, render_table
-    verbose = getattr(args, "verbose", False)
-    coverage = document.get("coverage", {})
-    partial = any(c.get("state") in ("partial", "unavailable") for c in coverage.get("git", []))
-    partial |= coverage.get("sessions", {}).get("state") in ("partial", "unavailable")
-    rows = document["results"] if verbose else compact(document["results"])
-    if not verbose:
-        document["coverage"] = summary(coverage)
-        scope = document.get("scope", {})
-        if "aliases" in scope:
-            scope["aliases"] = len(scope["aliases"])
-        document["expand"] = {"session": command_line([sys.executable, str(SESSIONS), "context", "--ref", "REF",
-                                                       "--mode", "exchange"]),
-                              "git": command_line(["git", "-C", document["scope"]["repo"], "show", "ID"])}
-    if getattr(args, "fields", None):
-        # sessions.py calls the same column timestamp.
-        args.fields = ["date" if f == "timestamp" else f for f in args.fields]
-    check_fields(getattr(args, "fields", None), rows)
-    fields = getattr(args, "fields", None) or (COMPACT_FIELDS if not verbose and getattr(args, "format", None) == "table" else None)
-    total = len(rows)
-    document["results"] = project_rows(rows[args.offset:args.offset + args.limit], getattr(args, "fields", None))
-    def finish():
-        following = args.offset + len(document["results"])
-        document["delivery"] = {"total": total, "returned": len(document["results"]), "offset": args.offset,
-                                "complete": following >= total}
-        document["next"] = {"action": "history", "target": args.target, "offset": following,
-                            "hint": "Repeat the same options; history is live. Increase --max-bytes if no row fits."} if following < total else None
-        if following < total:
-            document["results_truncated"] = f"{len(document['results'])} of {total} rows shown; --offset {following} or raise --limit / --max-bytes"
-        # Paging truncates; only a git or session coverage gap makes the history incomplete.
-        if partial:
-            document["status"] = "partial"
-    finish()
-    while document["results"] and len(canonical(document)) + 1 > args.max_bytes:
-        document["results"].pop()
-        finish()
-    if len(canonical(document)) + 1 > args.max_bytes:
-        document = {"operation": "history", "status": "partial", "results": [], "delivery": {"complete": False},
-                    "next": {"action": "history", "target": args.target, "hint": "Increase --max-bytes; metadata exceeds budget."}}
-    print(render_table(document, fields) if getattr(args, "format", None) == "table" else canonical(document).decode())

@@ -13,7 +13,6 @@ Examples:
     sessions.py select --kind tool_call | rows.py "SELECT tool, count(*) AS n FROM rows GROUP BY 1"
     rows.py "SELECT ..." --view calls='sessions.py select --kind tool_call --fields tool,ref'
 """
-import argparse
 import os
 import re
 import shlex
@@ -24,8 +23,10 @@ import threading
 import time
 
 from .bindings import parse_params, parse_types, types_for
-from .engine import DEFAULT_MEMORY, DEFAULT_SECONDS, Input, evaluate
-from .envelope import emit, load_rows
+from .engine import Input, evaluate
+from .delivery import deliver
+from .envelope import load_rows
+from .operations import rows_parser
 
 WINDOWS = os.name == "nt"
 VIEW = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
@@ -174,25 +175,7 @@ def run(args):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("positional", nargs="*", metavar="SQL_OR_INPUT", help="Optional SELECT, then input files")
-    p.add_argument("--input", action="append", default=[], help="Input file or '-' (repeat for joins)")
-    p.add_argument("--view", action="append", default=[], metavar="NAME=COMMAND",
-                   help="Run a producer command and register its stdout as view NAME")
-    p.add_argument("--sql")
-    p.add_argument("--describe", action="store_true")
-    p.add_argument("--shell", action="store_true", help="Evaluate --view commands through a shell; argv is the default")
-    p.add_argument("--limit", type=int, help="Output rows; defaults to the query's own LIMIT, capped at 1000")
-    p.add_argument("--max-bytes", type=int, default=8192)
-    p.add_argument("--max-input-bytes", type=int, default=16 * 1024 * 1024)
-    p.add_argument("--max-input-rows", type=int, default=100000)
-    p.add_argument("--query-seconds", type=float, default=DEFAULT_SECONDS)
-    p.add_argument("--producer-seconds", type=float, default=120.0)
-    p.add_argument("--memory-limit", default=DEFAULT_MEMORY)
-    p.add_argument("--type", action="append", default=[], metavar="[VIEW.]COLUMN=TYPE",
-                   help="Declare a column type: BIGINT, DOUBLE, VARCHAR, BOOLEAN, or JSON")
-    p.add_argument("--param", action="append", default=[], metavar="NAME=VALUE",
-                   help="Bind a named query parameter ($name)")
+    p = rows_parser()
     args = p.parse_args(argv)
     if any(v <= 0 for k, v in vars(args).items() if isinstance(v, (int, float)) and not isinstance(v, bool)
            and (k.startswith("max_") or k in ("limit", "query_seconds", "producer_seconds"))):
@@ -200,8 +183,8 @@ def main(argv=None):
     if args.sql is not None and args.positional and not all(is_input(x) for x in args.positional):
         p.error("Give the query once: positionally or with --sql")
     try:
-        emit(run(args), args.max_bytes)
+        deliver("envelope", run(args), max_bytes=args.max_bytes)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
-        emit({"status": "error", "results": [{"error": str(error)[:500]}]}, max(1024, args.max_bytes))
+        deliver("envelope", {"status": "error", "results": [{"error": str(error)[:500]}]}, max_bytes=max(1024, args.max_bytes))
         return 2
     return 0

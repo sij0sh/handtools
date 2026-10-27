@@ -2,14 +2,11 @@
 import collections
 import fnmatch
 import json
-import math
 import os
 import re
-import sqlite3
 import time
-from pathlib import PurePosixPath
 
-from .graph_build import DEPENDENCIES, is_test
+from .graph_build import DEPENDENCIES
 
 
 def reference(snapshot, section, key):

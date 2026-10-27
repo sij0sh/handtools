@@ -1,6 +1,5 @@
 """One bounded JSON envelope, coverage summary, and display clipping."""
 import json
-import sys
 
 SCHEMA_VERSION = 1
 
@@ -327,7 +326,12 @@ def _delivery(result):
 
 
 def emit(result, max_bytes=8192, render=None):
-    """Emit the most detailed level that fits; never truncate serialized bytes. render(result) -> text
+    from .delivery import write
+    write(fitted(result, max_bytes, render))
+
+
+def fitted(result, max_bytes=8192, render=None):
+    """The most detailed level that fits; never truncate serialized bytes. render(result) -> text
     replaces the JSON with a view of that same level."""
     if max_bytes < MIN_BYTES:
         raise ValueError(f"--max-bytes must be at least {MIN_BYTES}")
@@ -349,7 +353,7 @@ def emit(result, max_bytes=8192, render=None):
         if size <= max_bytes:
             break
         richer = size
-    sys.stdout.buffer.write(render(result).encode() + b"\n" if render else encoded(result))
+    return render(result).encode() + b"\n" if render else encoded(result)
 
 
 def encoded(value):

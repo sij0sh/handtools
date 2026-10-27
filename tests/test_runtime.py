@@ -1,6 +1,5 @@
 """End-to-end contracts for the common interface; standard-library fixtures only."""
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -10,8 +9,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from helper import catalog, continuations
-from helper.engine import Input, SQLiteQuery
+from helper import continuations
+from helper.engine import SQLiteQuery
 from helper.runtime import Runtime, Request, parser, normalize
 
 
@@ -257,6 +256,29 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(argv[argv.index('--snapshot')+1],out['scope']['snapshot'])
         history=self.cli('show',follow['ref'],'--max-bytes','50000')
         self.assertGreater(len(history['results']),8)
+
+
+class RegistryTests(unittest.TestCase):
+    def test_every_parser_command_has_one_registered_route(self):
+        from helper.operations import OPERATIONS, graph_parser, session_parser
+        from helper.runtime import ROUTES
+        import argparse
+        def commands(p):
+            return {n for a in p._actions if isinstance(a, argparse._SubParsersAction) for n in a.choices}
+        common, legacy, sessions = commands(graph_parser('common')), commands(graph_parser('legacy')), commands(session_parser())
+        self.assertLessEqual(common | legacy, set(OPERATIONS))
+        self.assertIn('inspect', common)
+        for name in common | legacy:
+            self.assertIn(OPERATIONS[name].route, ROUTES)
+        self.assertTrue(sessions)
+
+    def test_retained_delivery_refuses_transient_results(self):
+        from helper import delivery
+        args = parser().parse_args(['map'])
+        for doc in ({'operation': 'history', 'scope': {}}, {'operation': 'inspect', 'scope': {}},
+                    {'operation': 'query', 'scope': {'retention': 'transient'}}):
+            with self.assertRaises(ValueError):
+                delivery.retained(None, doc, args)
 
 
 if __name__ == '__main__':

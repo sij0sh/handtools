@@ -114,9 +114,15 @@ never goes through the graph report store. Selected event text may require a
 larger `--max-bytes`; an executable delivery continuation increases that cap
 without changing evidence scope.
 
+One delivery component (`helper/delivery.py`) pages and byte-fits every result
+through an explicit adapter: `retained` (graph reports, source-only, saved),
+`history`, `common` (v2) and `envelope` (sessions.py/rows.py), all transient.
+`retained` refuses history/inspect or `retention: transient` documents.
+
 ## Compatibility
 
 `sessions.py` and `rows.py` are thin adapters into the same helper package.
+All three CLIs build parsers and routes from one registry, `helper/operations.py`.
 Their established DuckDB SQL dialect and v1 envelopes remain supported and
 still require optional dependencies. No backend is silently selected based on
 installed packages. New work should use positional `remember.py query SQL`.
