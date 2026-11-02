@@ -15,11 +15,11 @@ from . import catalog, continuations, delivery, commit_rank, graph_cli, investig
 from .bindings import parse_params, parse_types, types_for
 from .budget import Deadline, POLICIES
 from .engine import Input, SQLiteQuery, IDENTIFIER, infer_type
-from .envelope import load_rows
+from .envelope import SCHEMA_VERSION, load_rows
 from .graph_output import compact_row
 from .graph_queries import DEPENDENCIES, reference, impact
 from .graph_store import Store, digest, require_current
-from .operations import COMMON, GRAPH, OPERATIONS, graph_parser
+from .operations import COMMON, OPERATIONS, derive, graph_parser
 from .providers import Providers
 
 
@@ -43,7 +43,7 @@ def parser():
 
 def normalize_prefix(argv):
     """Move recognized leading global flags after the verb, respecting option values."""
-    p = graph_cli.parser()
+    p = parser()
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -56,13 +56,13 @@ def normalize_prefix(argv):
         index += 1
         if '=' not in token and option.nargs != 0:
             index += 1
-    if index and index < len(argv) and argv[index] in {*GRAPH, "inspect", "activity", "signals", "trace", "investigate"}:
+    if index and index < len(argv) and argv[index] in OPERATIONS:
         return [argv[index], *argv[:index], *argv[index + 1:]]
     return argv
 
 
 def normalize(args, argv):
-    args = graph_cli.defaults(args)
+    args = derive(args)
     if args.action in ("query", "inspect", "show", "activity", "signals", "trace", "investigate"):
         policy = POLICIES[args.budget]
         if args.action == "investigate":
@@ -74,12 +74,8 @@ def normalize(args, argv):
                 setattr(args, key, value)
         # Continuations always carry an absolute scope, independent of the next cwd.
         args.repo = str(Path(args.repo).expanduser().resolve())
-    if args.action == "query":
-        if args.sql and args.sql_text:
-            raise ValueError("Give the query once: positionally or with --sql")
-        args.sql = args.sql or args.sql_text
-        if not args.sql:
-            raise ValueError("Supply query SQL; describe TABLE lists columns")
+    if args.action == "query" and not args.sql_text:
+        raise ValueError("Supply query SQL; describe TABLE lists columns")
     return args
 
 
@@ -167,7 +163,7 @@ class Runtime:
         schemas.update({name: item.types for name, item in supplied.items()})
         with SQLiteQuery(schemas, deadline.remaining()) as engine:
             try:
-                reads = engine.plan(args.sql, parse_params(args.param))
+                reads = engine.plan(args.sql_text, parse_params(args.param))
             except ValueError as error:
                 raise ValueError(f"{error}; use describe TABLE for columns (SQLite dialect)") from None
             names = set(reads)
@@ -606,7 +602,7 @@ def run_runtime(args, argv, expected):
 
 def run_graph(args, argv, expected):
     store = Store(args.repo, args.cache)
-    doc = graph_cli.run(args, store)
+    doc = graph_cli.show(store, args) if args.action == "show" else graph_cli.locate(args, store)
     if 'text' in doc:
         sys.stdout.write(doc['text'])
         return 0
@@ -662,9 +658,9 @@ def main(argv=None):
             args, argv, expected = resume(p, args, argv, incoming)
         return ROUTES[OPERATIONS[args.action].route](args, argv, expected)
     except (ValueError, OSError, RecursionError) as error:
-        print(json.dumps({"schema_version": 2, "status": "error", "results": [], "error": str(error)[:4000]}))
+        print(json.dumps({"schema_version": SCHEMA_VERSION, "status": "error", "results": [], "error": str(error)[:4000]}))
         return 2
     except KeyboardInterrupt:
         # Cancellation is not partial evidence: nothing was delivered or retained for this request.
-        print(json.dumps({"schema_version": 2, "status": "error", "results": [], "error": "cancelled"}))
+        print(json.dumps({"schema_version": SCHEMA_VERSION, "status": "error", "results": [], "error": "cancelled"}))
         return 130

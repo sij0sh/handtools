@@ -6,6 +6,7 @@ delivery, only coverage gaps make a result partial.
 """
 import copy
 import sys
+from .envelope import SCHEMA_VERSION
 from .graph_store import canonical
 from .graph_output import check_fields, project_rows, render_table
 
@@ -28,10 +29,6 @@ def fit(output, finish, size, max_bytes):
     return size() <= max_bytes
 
 
-def json_size(output):
-    return len(canonical(output)) + 1
-
-
 def render(output, args, fields):
     if getattr(args, "format", None) == "table":
         return render_table(output, fields).encode("utf-8") + b"\n"
@@ -45,7 +42,7 @@ def page(document, args, continuation=None):
     fields = args.fields
     total = len(rows)
     output.setdefault("status", "ok")
-    output["schema_version"] = 2
+    output["schema_version"] = SCHEMA_VERSION
     output.setdefault("scope", {}).setdefault("retention", "transient")
     selected = select(rows, args, fields)
     selected_raw = rows[args.offset:args.offset + args.limit]

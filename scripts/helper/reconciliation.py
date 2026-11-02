@@ -60,12 +60,6 @@ def command_kinds(command):
     return kinds
 
 
-def command_kind(command):
-    """Backward-compatible single class; push wins when one command names several."""
-    kinds = command_kinds(command)
-    return kinds[0] if kinds else None
-
-
 def _obs(dimension, value, evidence_kind, basis, source, **extra):
     row = {"section": "observation", "observation_id": f"{source.get('recording_id')}#{source.get('operation_id') or source.get('witness_id') or source.get('ref')}",
            "dimension": dimension, "value": value, "evidence_kind": evidence_kind, "basis": basis,

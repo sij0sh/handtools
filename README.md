@@ -92,7 +92,7 @@ python3 "$S/remember.py" query "SELECT text, cite FROM events WHERE role='user' 
 python3 "$S/remember.py" query 'SELECT path, count(*) AS n FROM changes GROUP BY path ORDER BY n DESC LIMIT 10'
 ```
 
-Tables: `nodes`, `edges`, `files`, `code_items`, `gaps`, `commits`, `changes`, `file_status`, `commit_links`, `events`, `sessions`, `operations`, `checkpoints`, `edit_hunks`, `edit_symbols`. SQL is read-only, built-in SQLite. See [runtime contracts](references/runtime.md).
+Tables: `nodes`, `edges`, `files`, `gaps`, `commits`, `changes`, `file_status`, `commit_links`, `events`, `sessions`, `operations`, `checkpoints`, `edit_hunks`, `edit_symbols`. SQL is read-only, built-in SQLite. See [runtime contracts](references/runtime.md).
 
 ### Built-in operations
 

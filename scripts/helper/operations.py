@@ -1,10 +1,11 @@
-"""Declarative operation registry: one definition per CLI operation drives parsers, help, routing and delivery.
+"""Declarative operation registry: one definition per CLI operation drives parser, help, routing and delivery.
 
-Each argument is defined once with the operations it applies to. remember.py parsers
-(legacy graph and common runtime views) are generated from it.
+Each argument is defined once with the operations it applies to; `graph_parser()` builds the CLI from it.
 """
 import argparse
 from dataclasses import dataclass
+
+from .whole_repo import MAX_LINES
 
 
 def positive(value):
@@ -24,78 +25,53 @@ def nonnegative(value):
 @dataclass(frozen=True)
 class Operation:
     name: str
-    family: str          # graph | runtime
     help: str
     route: str           # runtime | graph | describe
-    tier: str = "advanced"
     summary: str = ""    # common-interface description, when it differs from help
 
 
 OPERATIONS = {op.name: op for op in (
-    Operation("map", "graph", "List source files, directories or symbols and graph coverage (default).",
-              "graph", "common", "Orient in current source."),
-    Operation("find", "graph", "Locate names, paths and literal source occurrences; matches are candidates.",
-              "graph", "common", "Locate a concrete anchor."),
-    Operation("show", "graph", "Expand source, nodes, edges, session or commit evidence; run a continuation.",
-              "runtime", "common", "Expand evidence or execute a returned continuation."),
-    Operation("query", "graph", "Run one read-only SQLite SELECT/CTE over nodes, edges, files and gaps.",
-              "runtime", "common", "Query built-in and custom tables; dependencies load automatically."),
-    Operation("describe", "graph", "Describe commands, predicates and SQL tables without scanning source.", "describe"),
-    Operation("activity", "runtime", "Chronological recorded operations for one file or symbol target, with outcomes and witnesses.",
-              "runtime", "common", "See what was read, written, run and committed for a target."),
-    Operation("trace", "runtime", "Reconstruct the branch-aware episode around a request, failure, checkpoint or commit.",
-              "runtime", "common", "Reconstruct an episode: chronology, coverage gaps, task observations."),
-    Operation("signals", "runtime", "Recorded signals for one file or symbol: failed exchanges, corrections, checkpoint gaps, repeated reads.",
-              "runtime", "common", "Target-scoped leads: failed exchanges, corrections, checkpoint gaps, repeated reads."),
-    Operation("investigate", "runtime", "Four evidence views for a goal: pitfalls, invariants, task state, decisions.",
-              "runtime", "common", "Before building or resuming: pitfalls, invariants, task state, decisions."),
-    Operation("inspect", "runtime", "Collect source, consumers, dependencies and relevant history.",
-              "runtime", "common", "Collect source, consumers, dependencies and relevant history."),
+    Operation("map", "List source files, directories or symbols and graph coverage (default).",
+              "graph", "Orient in current source."),
+    Operation("find", "Locate names, paths and literal source occurrences; matches are candidates.",
+              "graph", "Locate a concrete anchor."),
+    Operation("show", "Expand source, nodes, edges, session or commit evidence; run a continuation.",
+              "runtime", "Expand evidence or execute a returned continuation."),
+    Operation("query", "Run one read-only SQLite SELECT/CTE over nodes, edges, files and gaps.",
+              "runtime", "Query built-in and custom tables; dependencies load automatically."),
+    Operation("describe", "Describe commands, predicates and SQL tables without scanning source.", "describe"),
+    Operation("activity", "Chronological recorded operations for one file or symbol target, with outcomes and witnesses.",
+              "runtime", "See what was read, written, run and committed for a target."),
+    Operation("trace", "Reconstruct the branch-aware episode around a request, failure, checkpoint or commit.",
+              "runtime", "Reconstruct an episode: chronology, coverage gaps, task observations."),
+    Operation("signals", "Recorded signals for one file or symbol: failed exchanges, corrections, checkpoint gaps, repeated reads.",
+              "runtime", "Target-scoped leads: failed exchanges, corrections, checkpoint gaps, repeated reads."),
+    Operation("investigate", "Four evidence views for a goal: pitfalls, invariants, task state, decisions.",
+              "runtime", "Before building or resuming: pitfalls, invariants, task state, decisions."),
+    Operation("inspect", "Collect source, consumers, dependencies and relevant history.",
+              "runtime", "Collect source, consumers, dependencies and relevant history."),
 )}
 
-
-def names(family):
-    return tuple(n for n, op in OPERATIONS.items() if op.family == family)
-
-
-GRAPH = names("graph")
-COMMON = {n: op.summary for n, op in OPERATIONS.items() if op.tier == "common"}
-
-
-class Per:
-    """An option value that differs by operation."""
-
-    def __init__(self, values, default=None):
-        self.values, self.default = values, default
-
-    def get(self, name):
-        return self.values.get(name, self.default)
+# Operations whose subcommand help shows the short common-interface summary.
+VIEWS = ("investigate", "inspect", "activity", "signals", "trace")
+COMMON = {n: op.summary for n, op in OPERATIONS.items() if op.summary}
 
 
 @dataclass(frozen=True)
 class Arg:
     flags: tuple
     options: dict
-    ops: frozenset | None   # None: every operation of the family
+    ops: frozenset | None   # None: every operation
 
     def applies(self, name):
         return self.ops is None or name in self.ops
 
     def resolved(self, name):
-        return {k: v.get(name) if isinstance(v, Per) else v for k, v in self.options.items()}
+        return dict(self.options)
 
 
 def arg(*flags, ops=None, **options):
     return Arg(flags, options, frozenset((ops,) if isinstance(ops, str) else ops) if ops is not None else None)
-
-
-def defaults(ops, **values):
-    """A set_defaults entry for the listed operations."""
-    return arg(ops=ops, _defaults=values)
-
-
-def every(*excluded, family=GRAPH + ("inspect",)):
-    return tuple(n for n in family if n not in excluded)
 
 
 # Shared remember.py options; each subcommand repeats them so they work before or after the verb.
@@ -123,8 +99,6 @@ TRACE = ("trace",)
 INVESTIGATE = ("investigate",)
 GRAPH_ARGS = (
     arg("--kind", ops=("map", "find"), action="append", choices=("file", "directory", "symbol", "external", "occurrence")),
-    # The primer belongs to map; elsewhere these flags are accepted and ignored.
-    arg("--primer", "--no-primer", ops=every("map"), dest="ignored_primer", action="store_true", help=argparse.SUPPRESS),
     arg("path", ops="map", nargs="?", help="Limit rows to this file, directory or symbol's file"),
     arg("--whole-repo-lines", ops="map", type=nonnegative, default="MAX_LINES",
         help="Bare map prints every source file as text at or under this many lines; 0 disables"),
@@ -139,7 +113,7 @@ GRAPH_ARGS = (
     arg("text", ops="find", nargs="?"),
     arg("--word", ops="find", action="store_true", help="Match whole words only"),
     arg("--case-sensitive", ops="find", action="store_true", help="Match case exactly (default ignores case)"),
-    arg("--regex", ops="find", nargs="?", const=True, default=False, help="Python regex PATTERN; legacy TEXT --regex also works"),
+    arg("--regex", ops="find", default=False, help="Python regex PATTERN; supply instead of TEXT"),
     arg("--path", ops="find", action="append", help="Include result path glob or directory; repeatable"),
     arg("--not-path", ops="find", action="append", default=[], help="Exclude result path glob or directory; repeatable"),
     arg("--count-by", ops="find", choices=("path",), help="Count matching result rows per path"),
@@ -155,18 +129,16 @@ GRAPH_ARGS = (
     arg("--max-commits", ops=TARGET_HISTORY + TRACE, type=positive, default=30),
     arg("--max-recordings", ops=TARGET_HISTORY + ACTIVITY + TRACE, type=positive, default=25, help="Per-harness recording limit"),
     arg("--max-candidates", ops=TARGET_HISTORY + ACTIVITY + TRACE, type=positive, default=20000,
-        help="Per-harness discovery header limit (20000, as sessions.py with a project filter)"),
+        help="Per-harness discovery header limit (20000)"),
     arg("--max-scan-bytes", ops=TARGET_HISTORY + ACTIVITY + TRACE, type=positive, default=64 * 1024 * 1024, help="Per-harness scan byte limit"),
     arg("--max-events", ops=TARGET_HISTORY + ACTIVITY + TRACE, type=positive, default=25000, help="Per-harness event limit"),
-    arg("ref", ops="show", help="Returned snapshot/report/source/node/edge reference"),
+    arg("ref", ops="show", help="Returned snapshot/source/node/edge reference"),
     arg("--start-line", ops="show", type=positive, default=1),
     arg("--lines", ops="show", type=positive, default=80),
-    arg("--sql", ops="query", required=False),
     arg("--param", ops="query", action="append", default=[], help="Bind NAME=VALUE to :NAME"),
     arg("--max-query-rows", ops="query", type=positive),
     arg("--seconds", ops="query", type=positive, default=5),
-    # Query: positional SQL, custom inputs, planning and recording scope.
-    arg("sql_text", ops="query", nargs="?", help="Read-only SQLite SELECT/CTE; --sql is a compatibility alias"),
+    arg("sql_text", ops="query", nargs="?", help="Read-only SQLite SELECT/CTE"),
     arg("--input", ops="query", action="append", default=[], metavar="NAME=FILE",
         help="Register JSON/JSONL rows (or - for stdin)"),
     arg("--type", ops="query", action="append", default=[], metavar="TABLE.COLUMN=TYPE"),
@@ -196,6 +168,7 @@ GRAPH_ARGS = (
     arg("--budget", ops=("query", "inspect", "show", "activity", "signals", "trace", "investigate"), choices="POLICIES", default="standard"),
 )
 
+
 def constants():
     """Values owned by other modules, resolved when a parser is built (avoids import cycles)."""
     from .budget import POLICIES
@@ -205,15 +178,50 @@ def constants():
             "MAX_LINES": MAX_LINES, "MAX_BYTES": MAX_BYTES, "TEXT_BYTES": TEXT_BYTES}
 
 
+def derive(args):
+    """Fill CLI defaults and derived values; the one place both live."""
+    args.action = args.action or "map"
+    explicit_limit = getattr(args, "limit", None)
+    if args.action == "query":
+        args.limit = explicit_limit or args.max_query_rows or 200
+        args.max_query_rows = max(args.max_query_rows or 1000, args.limit + getattr(args, "offset", 0))
+    for key, value in {"repo": ".", "cache": None, "snapshot": None, "exclude": [], "max_files": 20000,
+                       "max_file_bytes": 1024*1024, "max_total_bytes": 32*1024*1024,
+                       "limit": 30, "offset": 0, "max_bytes": 12000, "verbose": False,
+                       "format": None, "fields": None, "path": None, "kind": None,
+                       "whole_repo_lines": MAX_LINES, "whole": False}.items():
+        if not hasattr(args, key):
+            setattr(args, key, value)
+    if args.max_bytes < 2048:
+        raise ValueError("--max-bytes must be at least 2048")
+    if args.fields is not None:
+        args.fields = [f.strip() for f in args.fields.split(",") if f.strip()]
+        if not args.fields:
+            raise ValueError("--fields requires at least one column")
+    if args.action == "map":
+        # A bare invocation has no map subparser, so its options are absent.
+        for key, value in {"primer": None, "primer_bytes": 2048, "recordings": [], "project_root": [],
+                           "exclude_session": []}.items():
+            if not hasattr(args, key):
+                setattr(args, key, value)
+        text_mode = not (args.path or args.kind or args.format or args.fields)
+        explicit = getattr(args, "primer", None)
+        args.primer_explicit = explicit is not None
+        args.primer = text_mode if explicit is None else explicit
+        if args.primer_bytes < 512:
+            raise ValueError("--primer-bytes must be at least 512")
+    else:
+        args.primer = False
+        args.primer_explicit = False
+    return args
+
+
 def add(parser, args, name=None):
     names = constants()
     for item in args:
         if not item.applies(name):
             continue
         options = item.resolved(name)
-        if "_defaults" in options:
-            parser.set_defaults(**options["_defaults"])
-            continue
         for key in ("choices", "default"):
             if isinstance(options.get(key), str) and options[key] in names:
                 options[key] = names[options[key]]
@@ -239,9 +247,8 @@ def graph_parser():
     shared = add(argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS), GRAPH_SHARED)
     p = GraphParser(description="Remember: investigate, map, find, inspect, trace, activity, signals, show, query.", parents=[shared])
     sub = p.add_subparsers(dest="action")
-    for name in GRAPH + ("investigate", "inspect", "activity", "signals", "trace"):
-        op = OPERATIONS[name]
-        text = op.summary if name in ("investigate", "inspect", "activity", "signals", "trace") else op.help
+    for name, op in OPERATIONS.items():
+        text = op.summary if name in VIEWS else op.help
         q = sub.add_parser(name, help=text, description=text, parents=[shared])
         add(q, GRAPH_ARGS, name)
     sub.choices["query"].description = COMMON["query"] + " SQL dialect: SQLite."

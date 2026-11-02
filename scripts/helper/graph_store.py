@@ -324,9 +324,6 @@ class Store:
         return body
 
     def load_stored(self, key):
-        if key.startswith("report:"):
-            raise ValueError("Report refs are retired; rerun the original request. "
-                             "Full gaps: query 'SELECT * FROM gaps'")
         if not ID.fullmatch(key):
             raise ValueError("Invalid snapshot reference; use a returned snapshot ID")
         path = self.path / (key.replace(":", "-") + ".json")
@@ -338,6 +335,9 @@ class Store:
             raise ValueError(f"Corrupt retained reference: {key}") from None
         if digest(body) != key.split(":", 1)[1]:
             raise ValueError(f"Retained reference failed integrity check: {key}")
+        if body.get("schema") != SCHEMA:
+            raise ValueError(f"Retained reference has an old schema; recapture source (found {body.get('schema')!r}, "
+                             f"expected {SCHEMA})")
         touch(path)
         return body
 
@@ -378,7 +378,7 @@ class Store:
         """Keep only the newest snapshot and its lookup; older refs fail instead of serving old code."""
         keep = {key.replace(":", "-") + ".json", lookup.name}
         for entry in self.path.glob("*.json"):
-            if entry.name not in keep and entry.name.startswith(("snapshot-", "source-", "report-")):
+            if entry.name not in keep and entry.name.startswith(("snapshot-", "source-")):
                 try:
                     entry.unlink()
                 except OSError:

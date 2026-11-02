@@ -2,7 +2,7 @@
 
 Each language is a small table: which node kinds define a symbol, what the symbol
 is called, and which literal target an import names. One iterative walker turns
-those into code_items rows with the same columns and meanings as Python's ast
+those into item rows with the same columns and meanings as Python's ast
 rows. Grammars are optional; a missing one makes the file ``parser_unavailable``.
 Import targets are literal source text only: nothing is resolved or expanded.
 """

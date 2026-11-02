@@ -216,7 +216,7 @@ def run(args, store, get_graph, scanned=None):
             raise ValueError("--root-map requires OLD=NEW with nonempty paths")
     args.project_root = [str(Path(p).expanduser()) for p in args.project_root]
     target, graph = resolve(args, store, get_graph)
-    result = {"schema_version": 1, "operation": "history", "status": "ok", "target": target,
+    result = {"operation": "history", "status": "ok", "target": target,
               "scope": {"repo": store.root, "retention": "transient", "history": "live", "symbol_identity": "not inferred across versions"},
               "coverage": {}, "results": []}
     if target["resolution"] in ("ambiguous", "unresolved"):

@@ -18,7 +18,7 @@ Full history: `.agents/artifacts/decisions-archive-2026-11-02.md`, `.agents/arti
 ## Decisions
 
 ### Reference files
-- [x] D86: Keep rule per sentence? Delete unless the fact changes how a run interprets or acts on output. Delete anything already printed by `--help`, `describe`, `--plan`, an error message, or SKILL.md/README - reason: agent-instructions §3, a sentence whose deletion changes nothing is a no-op.
+- [x] D86: Keep rule per sentence? Delete unless the fact changes how a run interprets or acts on output. Delete anything already printed by `--help`, `describe`, `--plan`, an error message, or SKILL.md/README - reason: agent-instructions section 3, a sentence whose deletion changes nothing is a no-op.
 - [x] D87: Leaf ownership? `reader` = setup only. `runtime` = envelope/paging/continuations/budgets/SQL + operation contracts not in SKILL.md. `graph` = source capture, `map`/`find`, `inspect` relationships. `history` = `investigate`/`signals`/`activity`/`trace` + `inspect` history lane + recordings.
 - [x] D88: Shared facts? State the interpretation rule inline once in each leaf that needs it, one sentence, no cross-leaf pointer - leaves route nowhere; a pointer would be a dangling read.
 - [x] D89: Version language? Refs describe one current format with no `schema version 2`, `v2`, "retired", or "legacy" wording - stateless calls cannot meet another version; version talk only invites compatibility work.
@@ -38,7 +38,7 @@ Full history: `.agents/artifacts/decisions-archive-2026-11-02.md`, `.agents/arti
 | `operations.py` | `Operation.family`/`tier`, `names()`, `--sql` alias, optional `--regex`, ignored `--primer/--no-primer`, "legacy" help | remove (D96, D97) |
 | `graph_cli.py` | second `parser()`, duplicate `defaults()`, legacy `run()` dispatcher | fold into `runtime`/`operations` (D96) |
 | `graph_store.py` | `report:` guard, `report-` cleanup prefix | delete (D100) |
-| `graph_output.py` | "retained graph reports" docstring, `report` table fallback, unused `COLUMNS` | delete (D100, D101) |
+| `graph_output.py` | "retained graph reports" docstring, `report` table fallback | reword/delete (D100) |
 | `reconciliation.py` | `command_kind()` backward-compatible single class | delete dead wrapper (D101) |
 | `graph_queries.py` | `inputs()` "compatibility SQL" docstring | reword (D101) |
 
@@ -47,13 +47,18 @@ Full history: `.agents/artifacts/decisions-archive-2026-11-02.md`, `.agents/arti
 - [x] D98: Envelope input? Accept a JSON array, JSONL, or object with `schema_version == SCHEMA_VERSION` and `results[]`. Reject other versions, `rows[]`, `links[]`, grouped `harnesses[]`. Export `SCHEMA_VERSION` from `envelope.py`; `delivery`/`runtime` errors use it; drop `target_history` `schema_version: 1` - stateless: no producer emits old shapes.
 - [x] D99: Cache schema mismatch? `load_stored` raises `ValueError` when `body["schema"] != SCHEMA`; current-capture reuse catches it and rebuilds; a pinned `--snapshot` ref returns the error - user directive; rebuild is safe because the snapshot is derived.
 - [x] D100: Retired refs? Delete `report:` guard, `report-` supersede prefix, `graph_output` `report` fallback; a bad ref gets the generic invalid-reference error - no `report:` ref can exist in a stateless system.
-- [x] D101: Dead code? Delete `command_kind`, `graph_output.COLUMNS`, `ignored_primer`, `delivery.json_size` (no caller). Reword stale docstrings in `catalog`, `operations`, `graph_queries` - each is a second, drifting description.
+- [x] D101: Dead code? Delete `command_kind`, `ignored_primer`, `delivery.json_size`, `investigate.summary_text` (no caller). Keep `graph_output.COLUMNS` (used by table rendering). Reword stale docstrings in `catalog`, `operations`, `graph_queries` - each is a second, drifting description.
 - [x] D102: Public SQL tables (after: O1)? Drop `rows`; drop `code_items` and build the internal `items_by_path` map from graph symbol nodes. Update README table list, refs, `test_runtime` - `nodes` is the sole symbol identity; `code_items` is a derived second copy (defaults §2).
 - [x] D103: Tests? Update call sites for removed aliases; keep one retirement guard per removed surface (argparse error, unknown table) per D81; add cache-schema rebuild test and envelope-version rejection test - pins removals without restoring old paths.
-- [x] D104: Order? Code refactor -> tests green -> rewrite refs to post-refactor behavior -> size guard -> VERSION 0.5.1 -> one commit - docs must describe the shipped surface, not the old one.
+- [x] D104: Order? Code refactor -> tests green -> rewrite refs to post-refactor behavior -> size guard -> VERSION 0.5.2 (0.5.1 went to the design-record commit) -> one commit - docs must describe the shipped surface, not the old one.
 
 ## Open
-- [ ] O1: Accept the breaking public surface (remove `--sql`, TEXT+`--regex`, `CATALOG["rows"]`, `code_items`)? Recommend yes - stateless and single-owner defaults; a published skill may have external SQL that names them.
+- [x] O1: Accept the breaking public surface (remove `--sql`, TEXT+`--regex`, `CATALOG["rows"]`, `code_items`)? Yes - operator confirmed all four; stateless and single-owner defaults outweigh any external SQL naming them.
+
+## Outcome
+- 274 tests OK in 5.8 s; refs 15.1 KB total (reader 0.5, runtime 4.0, graph 4.6, history 6.0 KB).
+- One owner each: `operations.derive` for defaults, `envelope.SCHEMA_VERSION` for version, `graph_store.SCHEMA` checked on load.
+- Removed all four surfaces plus `report:`/`report-` handling, `load_rows` legacy shapes, `command_kind`, `json_size`, `summary_text`, stale docstrings; guards added for each removed alias and table.
 
 ## Challenge
 Two implementers could still diverge on (a) which of the listed audit rows are public contract breaks - fixed by O1; (b) how much per-language graph detail survives - fixed by D93 keep/delete lists; (c) whether shared facts are duplicated inline - fixed by D88. No other material choice left once O1 is answered.

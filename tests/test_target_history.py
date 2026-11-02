@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests"))
 from helper import graph_cli, runtime, target_history
+from helper.operations import derive
 from helper.edit_hunks import anchor
 from helper.graph_store import Store
 from helper.budget import Deadline
@@ -81,7 +82,7 @@ class TargetHistoryTests(unittest.TestCase):
         return dest
 
     def args(self, *argv):
-        return graph_cli.defaults(runtime.parser().parse_args([*argv, "--repo", str(self.repo), "--cache", str(self.cache)]))
+        return derive(runtime.parser().parse_args([*argv, "--repo", str(self.repo), "--cache", str(self.cache)]))
 
     def run_command(self, *argv):
         args = self.args(*argv)

@@ -1,4 +1,4 @@
-"""Compact presentation shared by retained graph reports and transient history."""
+"""Compact row and table presentation for every operation."""
 import json
 
 COLUMNS = ('section', 'kind', 'role', 'dimension', 'action', 'tool', 'outcome', 'relation',
@@ -66,9 +66,9 @@ def render_table(output, fields=None):
     values = [[cell(row.get(k)) for k in columns] for row in rows]
     widths = [max(len(k), *(len(row[i]) for row in values)) if values else len(k) for i, k in enumerate(columns)]
     delivery = output.get('delivery', {})
-    lines = [f"{output.get('status', 'ok')} | {output.get('operation', 'report')} | "
-             f"{len(rows)} of {delivery.get('total', '?')} rows | {output.get('report', 'transient')}"]
     scope = output.get('scope', {})
+    lines = [f"{output.get('status', 'ok')} | {output.get('operation', '')} | "
+             f"{len(rows)} of {delivery.get('total', '?')} rows | {scope.get('retention', 'transient')}"]
     for key in ('path_result', 'assessment', 'unresolved_mentions'):
         if key in scope:
             lines.append(f'{key}: {json.dumps(scope[key], ensure_ascii=True)}')

@@ -29,8 +29,6 @@ CATALOG = {
     "gaps": Table(TABLES["gaps"], "graph", "one unresolved occurrence"),
     "files": Table({**TABLES["files"], "content": "TEXT", "lines": "INTEGER", "language": "TEXT"},
                    "graph", "one captured source path", ("path",)),
-    "code_items": Table({**repo_files.ITEM_COLUMNS, "id": "TEXT", "ref": "TEXT"}, "graph",
-                        "one captured symbol (legacy imports remain available through sessions.py)", ("id",)),
     "events": Table(EVENT_COLUMNS, "recordings", "one recorded event", ("recording_id", "event_id"), "transient"),
     "sessions": Table(SESSION_COLUMNS, "recordings", "one recorded session file; join events USING(recording_id)",
                       ("recording_id",), "transient"),
@@ -45,8 +43,6 @@ CATALOG = {
     "checkpoints": Table(operation_facts.CHECKPOINT_COLUMNS, "checkpoints", operation_facts.CHECKPOINT_GRAIN,
                          ("checkpoint_id",), "transient"),
 }
-# Compatibility event alias. No positional t0/rows aliases for unrelated built-ins.
-CATALOG["rows"] = CATALOG["events"]
 DEPENDENCIES = {"graph": (), "recordings": (), "git": (), "links": ("recordings",),
                 "edits": ("recordings", "graph"), "operations": ("recordings",),
                 "checkpoints": ("recordings",), "status": ()}

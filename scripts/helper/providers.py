@@ -72,11 +72,12 @@ class Providers:
                                   "lines": len(row["text"].splitlines()) if row.get("text") is not None else None,
                                   "language": (self.graph.files.get(row["path"]) or {}).get("language")}
                                  for row in self.tables["files"]]
-        self.tables["code_items"] = [{**self.graph.public(n), "kind": n.get("symbol_kind"), "repo_id": self.store.root}
-                                     for n in self.graph.nodes.values() if n["kind"] == "symbol"]
         self.by_path = {row["path"]: row for row in self.tables["files"]}
         self.items_by_path = {}
-        for item in self.tables["code_items"]:
+        for node in self.graph.nodes.values():
+            if node["kind"] != "symbol":
+                continue
+            item = {**self.graph.public(node), "kind": node.get("symbol_kind"), "repo_id": self.store.root}
             self.items_by_path.setdefault(item["path"], []).append(item)
         doc = self.graph.document("query", [])
         gaps = graph_cli.incomplete(doc, self.graph)

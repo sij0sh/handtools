@@ -30,9 +30,9 @@ def omitted_rows(omissions):
 
 
 def undelivered(value):
-    """v2 rows a paged envelope did not deliver: None when unknown (more rows, total unknown)."""
+    """Rows a paged envelope did not deliver: None when unknown (more rows, total unknown)."""
     delivery = value.get("delivery") if isinstance(value.get("delivery"), dict) else {}
-    if value.get("schema_version") != 2 or delivery.get("complete") is not False:
+    if value.get("schema_version") != SCHEMA_VERSION or delivery.get("complete") is not False:
         return 0
     total = delivery.get("total")
     if not isinstance(total, int):
@@ -68,13 +68,8 @@ def incomplete(value, scope):
 def coverage(value):
     """A small summary of an input envelope's coverage, not a copy of its scope."""
     scope = value.get("scope", {}) if isinstance(value.get("scope"), dict) else {}
-    groups = value.get("harnesses") if isinstance(value.get("harnesses"), list) else []
     omissions = {k: v for k, v in value.get("omissions", {}).items() if v} if isinstance(value.get("omissions"), dict) else {}
-    for g in groups:
-        for k, v in (g.get("omissions", {}) if isinstance(g, dict) else {}).items():
-            if v:
-                omissions[f"{g.get('harness')}.{k}"] = v
-    dropped = omitted_rows(value.get("omissions", {})) + sum(omitted_rows(g.get("omissions", {})) for g in groups)
+    dropped = omitted_rows(value.get("omissions", {}))
     dropped += undelivered(value) or 0
     summary = {"scope": {k: scope[k] for k in ("files_scanned", "scan_complete", "discovery_complete",
                                               "project_filter", "harnesses", "text_complete",
@@ -95,7 +90,7 @@ def coverage(value):
 
 
 def load_rows(raw):
-    """Parse an envelope, array or JSONL into rows; unknown envelopes are errors."""
+    """Parse a current remember envelope, a JSON array, or JSONL object rows; anything else is an error."""
     try:
         value = json.loads(raw)
     except ValueError:
@@ -103,34 +98,23 @@ def load_rows(raw):
             return [json.loads(line) for line in raw.splitlines() if line.strip()], {}
         except ValueError:
             raise ValueError("Input is not JSON, a JSON envelope, or JSONL object rows") from None
-    if isinstance(value, dict):
-        version = value.get("schema_version")
-        if isinstance(version, int) and version > SCHEMA_VERSION:
-            raise ValueError(f"Envelope schema_version {version} is newer than supported {SCHEMA_VERSION}")
-        omissions = value.get("omissions") if isinstance(value.get("omissions"), dict) else {}
-        if omissions.get("envelope_omitted"):
-            # A coverage-only envelope lost its rows to the byte budget: unavailable, never zero rows.
-            more = value.get("detail", {}).get("more_bytes") if isinstance(value.get("detail"), dict) else None
-            raise ValueError("Input envelope omitted its rows to fit --max-bytes; rerun the producer with "
-                             + (f"--max-bytes {more} or more" if more else "a larger --max-bytes"))
-        if isinstance(value.get("harnesses"), list) and not isinstance(value.get("results"), list):
-            # Grouped sessions.py envelopes (overview): one table of all harnesses' rows, each row tagged.
-            rows = []
-            for group in value["harnesses"]:
-                if not isinstance(group, dict):
-                    raise ValueError("harnesses[] entries must be objects")
-                body = group.get("results", group.get("rows", group.get("links")))
-                if not isinstance(body, list):
-                    raise ValueError("Every harness group must hold results[], rows[], or links[]")
-                rows.extend(body)
-            return rows, coverage(value)
-        body = value.get("results", value.get("rows", value.get("links")))
-        if not isinstance(body, list):
-            raise ValueError("Expected a JSON envelope with results[] or rows[] (or links[]), an array, or JSONL object rows")
-        return body, coverage(value)
-    if not isinstance(value, list):
+    if isinstance(value, list):
+        return value, {}
+    if not isinstance(value, dict):
         raise ValueError("Expected a JSON envelope, array, or JSONL object rows")
-    return value, {}
+    version = value.get("schema_version")
+    if version != SCHEMA_VERSION:
+        raise ValueError(f"Unsupported envelope schema_version {version!r}; expected {SCHEMA_VERSION}")
+    omissions = value.get("omissions") if isinstance(value.get("omissions"), dict) else {}
+    if omissions.get("envelope_omitted"):
+        # A coverage-only envelope lost its rows to the byte budget: unavailable, never zero rows.
+        more = value.get("detail", {}).get("more_bytes") if isinstance(value.get("detail"), dict) else None
+        raise ValueError("Input envelope omitted its rows to fit --max-bytes; rerun the producer with "
+                         + (f"--max-bytes {more} or more" if more else "a larger --max-bytes"))
+    body = value.get("results")
+    if not isinstance(body, list):
+        raise ValueError("Expected a current JSON envelope with results[]")
+    return body, coverage(value)
 
 
 # Sections shed before the rows a command was asked for: ref-bearing examples first, then

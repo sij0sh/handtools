@@ -517,10 +517,6 @@ def validate_paths(paths):
     return [relative(p) for p in paths]
 
 
-def summary_text(views_):
-    return {k: v["state"] for k, v in views_.items()}
-
-
 def collect(args, providers, deadline, goal, paths, errors, sessions=True):
     """Shared lifecycle: freeze the active frontier, one scheduled scan, classify. Returns (packet, active state)."""
     packet = Packet(providers, goal, paths, errors)

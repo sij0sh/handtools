@@ -77,8 +77,9 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(out['scope']['providers'], ['graph'])
         self.assertEqual(out['status'], 'ok')
 
-    def test_symbol_graph_reused_for_code_items(self):
-        out = self.cli('query', "SELECT f.path, s.qualname FROM files f JOIN code_items s USING(path) WHERE s.qualname='save'")
+    def test_symbol_nodes_join_files(self):
+        out = self.cli('query', "SELECT f.path, s.qualname FROM files f JOIN nodes s ON s.path = f.path "
+                                "WHERE s.kind='symbol' AND s.qualname='save'")
         self.assertEqual(out['results'], [{'path':'core.py','qualname':'save'}])
         self.assertEqual(out['scope']['providers'], ['graph'])
 
@@ -99,10 +100,24 @@ class RuntimeTests(unittest.TestCase):
         self.cli('query', 'SELECT 1', '--input', 'FILES=unused.json', ok=False)
 
     def test_external_page_coverage_survives_join(self):
-        data = self.root/'page.json';data.write_text(json.dumps({'schema_version':1,'results':[{'x':1}], 'omissions':{'selection':5}}))
+        data = self.root/'page.json';data.write_text(json.dumps({'schema_version':2,'results':[{'x':1}], 'omissions':{'selection':5}}))
         out=self.cli('query','SELECT count(*) AS n FROM supplied','--input',f'supplied={data}')
         self.assertEqual(out['results'],[{'n':1}]);self.assertEqual(out['status'],'partial')
         self.assertTrue(out['delivery']['complete'])
+
+    def test_old_or_malformed_envelopes_are_rejected(self):
+        old = self.root/'old.json'; old.write_text(json.dumps({'schema_version': 1, 'results': [{'x': 1}]}))
+        self.cli('query', 'SELECT * FROM supplied', '--input', f'supplied={old}', ok=False)
+        rows = self.root/'rows.json'; rows.write_text(json.dumps({'schema_version': 2, 'rows': [{'x': 1}]}))
+        self.cli('query', 'SELECT * FROM supplied', '--input', f'supplied={rows}', ok=False)
+
+    def test_retired_aliases_are_rejected(self):
+        for argv in (['query', 'SELECT 1', '--sql', 'SELECT 2'], ['find', 'value', '--regex'],
+                     ['query', 'SELECT 1', '--no-primer']):
+            process = invoke([*argv, '--repo', str(self.repo), '--cache', str(self.cache)])
+            self.assertEqual(process.returncode, 2, process.stdout + process.stderr)
+        self.cli('describe', 'rows', ok=False)
+        self.cli('query', 'SELECT * FROM code_items', ok=False)
 
     def test_events_auto_load_without_include(self):
         out=self.cli('query',"SELECT text, ref FROM events WHERE role='user'",'--recordings',self.recording)

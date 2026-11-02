@@ -4,50 +4,7 @@ import collections
 
 from .graph_queries import Graph, evidence, warnings, path_matches
 from .graph_store import require_current
-from .whole_repo import MAX_BYTES, MAX_LINES, TEXT_BYTES, render, summary
-
-from .operations import graph_parser
-
-
-def parser():
-    return graph_parser()
-
-
-def defaults(args):
-    args.action = args.action or "map"
-    explicit_limit = getattr(args, "limit", None)
-    if args.action == "query":
-        args.limit = explicit_limit or args.max_query_rows or 200
-        args.max_query_rows = max(args.max_query_rows or 1000, args.limit + getattr(args, "offset", 0))
-    for key, value in {"repo": ".", "cache": None, "snapshot": None, "exclude": [], "max_files": 20000,
-                       "max_file_bytes": 1024*1024, "max_total_bytes": 32*1024*1024,
-                       "limit": 30, "offset": 0, "max_bytes": 12000, "verbose": False,
-                       "format": None, "fields": None, "path": None, "kind": None, "whole_repo_lines": MAX_LINES,
-                       "whole": False}.items():
-        if not hasattr(args, key):
-            setattr(args, key, value)
-    if args.max_bytes < 2048:
-        raise ValueError("--max-bytes must be at least 2048")
-    if args.fields is not None:
-        args.fields = [f.strip() for f in args.fields.split(",") if f.strip()]
-        if not args.fields:
-            raise ValueError("--fields requires at least one column")
-    if args.action == "map":
-        # A bare invocation has no map subparser, so its options are absent.
-        for key, value in {"primer": None, "primer_bytes": 2048, "recordings": [], "project_root": [],
-                           "exclude_session": []}.items():
-            if not hasattr(args, key):
-                setattr(args, key, value)
-        text_mode = not (args.path or args.kind or args.format or args.fields)
-        explicit = getattr(args, "primer", None)
-        args.primer_explicit = explicit is not None
-        args.primer = text_mode if explicit is None else explicit
-        if args.primer_bytes < 512:
-            raise ValueError("--primer-bytes must be at least 512")
-    else:
-        args.primer = False
-        args.primer_explicit = False
-    return args
+from .whole_repo import MAX_BYTES, TEXT_BYTES, render, summary
 
 
 def get_graph(store, args, pin=None):
@@ -94,9 +51,8 @@ def show(store, args):
 
 
 
-def run(args, store):
-    if args.action == "show":
-        return show(store, args)
+def locate(args, store):
+    """map and find over one captured snapshot."""
     graph = get_graph(store, args)
     if args.action == "map":
         if not args.path and not args.kind and not args.format and not args.fields:
@@ -130,7 +86,7 @@ def run(args, store):
         elif not args.primer_explicit and not args.offset:
             doc["primer"] = "omitted: --path/--kind/--format/--fields given; add --primer"
     elif args.action == "find":
-        if isinstance(args.regex, str):
+        if args.regex:
             if args.text is not None:
                 raise ValueError("Supply TEXT or --regex PATTERN, not both")
             args.text = args.regex

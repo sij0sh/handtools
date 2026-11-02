@@ -27,9 +27,9 @@ class GraphTests(GraphCase):
 
     def test_unknown_fields_fail_instead_of_blank_columns(self):
         self.fixture()
-        error = self.cli("query", "--sql", "SELECT path FROM files", "--fields", "path,bogus", success=False)
+        error = self.cli("query", "SELECT path FROM files", "--fields", "path,bogus", success=False)
         self.assertIn("no column bogus", error["error"])
-        self.assertTrue(all(set(r) <= {"path"} for r in self.cli("query", "--sql", "SELECT path, 1 AS n FROM files", "--fields", "path")["results"]))
+        self.assertTrue(all(set(r) <= {"path"} for r in self.cli("query", "SELECT path, 1 AS n FROM files", "--fields", "path")["results"]))
 
     def test_witnesses_expand_to_retained_source(self):
         self.fixture()
@@ -83,8 +83,8 @@ class GraphTests(GraphCase):
         self.fixture()
         a = self.cli("find", "no-such-text-a")
         self.assertEqual((a["schema_version"], a["scope"]["text"], a["scope"]["retention"]), (2, "no-such-text-a", "transient"))
-        self.assertEqual(list(self.cache.rglob("report-*")), [])
-        self.assertIn("retired", self.cli("show", "report:" + "a"*64, success=False)["error"])
+        self.assertFalse([p.name for p in self.cache.rglob("*.json") if p.name.startswith(("report-", "pending-"))])
+        self.assertIn("Invalid snapshot reference", self.cli("show", "report:" + "a"*64, success=False)["error"])
 
     def test_targets_accept_returned_refs_and_path_tails(self):
         self.fixture()
@@ -390,7 +390,7 @@ class GraphTests(GraphCase):
             engine.evaluate(10)
 
     def test_sql_blob_and_nonfinite_values_are_json_safe(self):
-        out = self.cli("query", "--sql", "SELECT x'00ff' AS blob, 1e999 AS value")
+        out = self.cli("query", "SELECT x'00ff' AS blob, 1e999 AS value")
         self.assertEqual(out["results"], [{"blob": {"encoding": "hex", "value": "00ff"}, "value": "inf"}])
 
     def test_envelope_coverage_reports_omitted_rows(self):
@@ -422,12 +422,12 @@ class GraphTests(GraphCase):
         self.assertEqual(lines("unwrap"), [2, 3, 4])
         self.assertEqual(lines("unwrap", "--word"), [2, 4])
         self.assertEqual(lines("unwrap", "--word", "--case-sensitive"), [2])
-        self.assertEqual(lines(r"unwrap_\w+", "--regex"), [3])
-        self.assertIn("Invalid --regex", self.cli("find", "(", "--regex", success=False)["error"])
+        self.assertEqual(lines("--regex", r"unwrap_\w+"), [3])
+        self.assertIn("Invalid --regex", self.cli("find", "--regex", "(", success=False)["error"])
 
     def test_gap_calls_column(self):
         self.write("a.py", "def f(obj):\n    return obj.run()\n")
-        out = self.cli("query", "--sql", "SELECT sum(calls) AS calls FROM gaps WHERE area = 'calls'")
+        out = self.cli("query", "SELECT sum(calls) AS calls FROM gaps WHERE area = 'calls'")
         self.assertEqual(out["results"], [{"calls": 1}])
 
     def test_bare_map_prints_small_repository_whole(self):

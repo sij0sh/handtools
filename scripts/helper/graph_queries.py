@@ -400,7 +400,7 @@ TABLES = {
 
 
 def inputs(graph):
-    """Canonical graph tables shared by compatibility SQL and the runtime catalog."""
+    """Canonical graph tables for the runtime catalog and SQL providers."""
     from .engine import Input
     sources = {
         "nodes": [graph.public(n) for n in graph.body["nodes"]],

@@ -31,14 +31,14 @@ class FeatureTests(GraphCase):
 
     def test_query_limit_and_paging(self):
         sql = 'WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1200) SELECT x FROM n'
-        result = self.cli('query', '--sql', sql)
+        result = self.cli('query', sql)
         self.assertEqual(len(result['results']), 200)
         self.assertIn('follow next', result['results_truncated'])
-        result = self.cli('query', '--sql', sql, '--limit', '1200', '--max-bytes', '50000')
+        result = self.cli('query', sql, '--limit', '1200', '--max-bytes', '50000')
         self.assertEqual(len(result['results']), 1200)
         self.assertTrue(result['delivery']['complete'])
         self.assertNotIn('results_truncated', result)
-        result = self.cli('query', '--sql', sql, '--offset', '1100', '--limit', '100')
+        result = self.cli('query', sql, '--offset', '1100', '--limit', '100')
         self.assertEqual(result['results'][0], {'x': 1101})
         self.assertEqual(len(result['results']), 100)
 
@@ -78,12 +78,12 @@ class FeatureTests(GraphCase):
     def test_query_table_keeps_aliases_and_aggregates_in_select_order(self):
         self.fixture()
         sql = "SELECT path, count(*) AS n FROM nodes WHERE path IS NOT NULL GROUP BY path ORDER BY path"
-        rows = self.cli('query', '--sql', sql)['results']
-        lines = self.raw('query', '--sql', sql, '--format', 'table').splitlines()
+        rows = self.cli('query', sql)['results']
+        lines = self.raw('query', sql, '--format', 'table').splitlines()
         header = next(i for i, line in enumerate(lines) if line.split()[:2] == ['path', 'n'])
         for row, line in zip(rows, lines[header + 1:]):
             self.assertEqual(line.split(), [row['path'], str(row['n'])])
-        table = self.raw('query', '--sql', 'SELECT count(*) AS c, min(path) AS p FROM files', '--format', 'table')
+        table = self.raw('query', 'SELECT count(*) AS c, min(path) AS p FROM files', '--format', 'table')
         self.assertIn('c  p', table)
 
     def test_subcommand_errors_name_the_subcommand(self):
@@ -118,7 +118,7 @@ class FeatureTests(GraphCase):
         self.write('src/index.ts', 'export const a = 1;\n')
         self.write('.github/workflows/ci.yml', 'jobs:\n  t:\n    steps:\n      - uses: actions/checkout@v4\n'
                    '      - run: ./scripts/check.sh && node scripts/build.mjs\n')
-        edges = self.cli('query', '--sql', "SELECT s.path AS src, t.path AS dst FROM edges e JOIN nodes s ON s.id = e.source "
+        edges = self.cli('query', "SELECT s.path AS src, t.path AS dst FROM edges e JOIN nodes s ON s.id = e.source "
                          "JOIN nodes t ON t.id = e.target WHERE e.predicate = 'REFERENCES' ORDER BY 1, 2")['results']
         self.assertEqual({(r['src'], r['dst']) for r in edges},
                          {('package.json', 'scripts/build.mjs'), ('package.json', 'worker'),
@@ -134,7 +134,7 @@ class FeatureTests(GraphCase):
         self.write('src/b.ts', "import { a } from './a';\nexport type B = typeof a;\n")
         self.write('src/c.ts', "import { type D } from './d';\nimport { d } from './d';\nexport const c: D = d;\n")
         self.write('src/d.ts', "import { c } from './c';\nexport const d = 1;\nexport type D = number;\nexport const e = c;\n")
-        edges = self.cli('query', '--sql', "SELECT s.path AS src, e.type_only FROM edges e JOIN nodes s ON s.id = e.source "
+        edges = self.cli('query', "SELECT s.path AS src, e.type_only FROM edges e JOIN nodes s ON s.id = e.source "
                          "WHERE e.predicate = 'IMPORTS' ORDER BY 1, 2")['results']
         self.assertIn({'src': 'src/a.ts', 'type_only': 1}, edges)
         self.assertIn({'src': 'src/c.ts', 'type_only': 1}, edges)

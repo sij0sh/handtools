@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from helper.graph_store import CACHE_TTL_SECONDS, Store, prune
+from helper.graph_store import CACHE_TTL_SECONDS, SCHEMA, Store, prune
 
 
 class CacheTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class CacheTests(unittest.TestCase):
             self.store.load(key)
 
     def test_read_refreshes_age(self):
-        key = self.store.save("snapshot", {"x": 2})
+        key = self.store.save("snapshot", {"schema": SCHEMA, "x": 2})
         path = self.age(key, CACHE_TTL_SECONDS + 60)
         self.store.load_stored(key)
         prune(self.base, now=time.time() + 2 * 86400)
@@ -52,6 +52,20 @@ class CacheTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "superseded"):
             self.store.load(old)
         self.store.load(new)
+
+    def test_old_schema_reference_fails_and_current_capture_rebuilds(self):
+        repo = Path(self.store.root)
+        (repo / "a.py").write_text("x = 1\n")
+        key, _ = self.store.snapshot()
+        stale = self.store.save("snapshot", {"schema": 0})
+        with self.assertRaisesRegex(ValueError, "old schema"):
+            self.store.load(stale)
+        lookup = next(self.store.path.glob("source-*.json"))
+        lookup.write_text('{"snapshot": "%s"}' % stale)
+        rebuilt, body = self.store.snapshot()
+        self.assertNotEqual(rebuilt, stale)
+        self.assertEqual(body["schema"], SCHEMA)
+        self.store.load(rebuilt)
 
     def test_sweep_runs_at_most_once_per_interval(self):
         self.store.save("snapshot", {"x": 3})  # first save sweeps and stamps the marker

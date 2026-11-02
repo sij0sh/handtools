@@ -141,7 +141,7 @@ def language_of(path, data):
 
 
 def snapshot(resolver, worktree, max_files, max_file_bytes, content=False, symbols=False):
-    """(files, code_items, coverage) for one worktree; reads at most max_file_bytes per file."""
+    """(files, items, coverage) for one worktree; reads at most max_file_bytes per file."""
     repo_id = resolver.identity(worktree)
     listed = resolver.run(worktree, "ls-files", "-z", "--cached", "--others", "--exclude-standard",
                           "--deduplicate", timeout=60)

@@ -9,7 +9,7 @@ the file as it was at the edit, so symbols come from one stated basis per hunk:
 - ``at_edit``: the pre-edit file was recorded; the patch is replayed and the
   post-edit file parsed, naming what the edit changed at that moment.
 - ``current``: the hunk's new-side text is found, unchanged and unique, in today's
-  file, and today's ``code_items`` give the definitions at those lines.
+  file, and today's graph symbol nodes give the definitions at those lines.
 - ``none``: neither applies. Nothing is guessed from a stale line number.
 """
 import re
