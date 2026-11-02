@@ -156,3 +156,7 @@ First release.
 ## 0.2.6 - 2026-11-02
 
 - Expand `references/defaults.md` rules 2-4 with drift, local-reasoning, and boundary-detail clarifications.
+
+## 0.2.7 - 2026-11-02
+
+- Use "SWE" instead of "competent implementers" in the Challenge step.

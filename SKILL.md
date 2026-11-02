@@ -33,16 +33,16 @@ Read a reference when a decision turns on its topic:
 
 ## Loop
 
-**prerequisite** Rewrite `.agents/design/decisions.md` to briefly summarize its current state so prior work is condensed into a small historic record. 
+**prerequisite** Rewrite `.agents/design/decisions.md` to briefly summarize its current state so prior work is condensed into a small historic record.
 
 1. **Ground:** Establish the goal, constraints, success criteria, and relevant existing decisions or code. Record to `.agents/design/decisions.md`.
 2. **Branch:** List open material questions. Link a dependency when one answer requires another. Update `.agents/design/decisions.md`.
 3. **Decide:** Resolve questions whose dependencies are settled, using Precedence. State the reason for each non-obvious choice. Add questions the answers raise; drop questions that became irrelevant. Update `.agents/design/decisions.md`.
-4. **Challenge:** Imagine two competent implementers following every decision. If they could make materially different choices, add the missing questions. Update `.agents/design/decisions.md`. 
+4. **Challenge:** Imagine two competent SWEs following every decision. If they could make materially different choices, add the missing questions. Update `.agents/design/decisions.md`.
 
 **loop** Repeat steps 2 through 4 until enough decisions are made that no two SWEs could implement a materially different solution following the decisions.
 
-## Format 
+## Format
 
 - `[x]` resolved; `[ ]` open.
 - `D#` stable ID.
