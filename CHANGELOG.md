@@ -152,3 +152,7 @@ First release.
 ## 0.2.5 - 2026-11-02
 
 - Restate `references/contract.md` rules as questions, add a one-line ownership summary, and spell out the three resource owners.
+
+## 0.2.6 - 2026-11-02
+
+- Expand `references/defaults.md` rules 2-4 with drift, local-reasoning, and boundary-detail clarifications.
