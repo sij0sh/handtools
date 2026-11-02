@@ -185,6 +185,58 @@ class IngestionTests(unittest.TestCase):
             self.assertIsNone(missing["turn"])
             self.assertEqual(missing["turn_basis"], "unresolved_ancestry")
 
+    def test_followup_continues_the_lane_and_descendants_cannot_split_off(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "followup.jsonl"
+            rows = [
+                {"type": "session", "id": "followup", "cwd": temp},
+                {"type": "message", "id": "u1", "message": {"role": "user", "content": "Open the exchange"}},
+                {"type": "message", "id": "a1", "parentId": "u1", "message": {"role": "assistant", "content": "First branch"}},
+                {"type": "message", "id": "u2", "parentId": "a1", "message": {"role": "user", "content": "Follow up"}},
+                {"type": "message", "id": "a2", "parentId": "u2", "message": {"role": "assistant", "content": [
+                    {"type": "toolCall", "id": "c", "name": "read", "arguments": {"path": "a.py"}}]}},
+                {"type": "message", "id": "side", "parentId": "u1", "message": {"role": "assistant", "content": "Sibling branch"}},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            recording = scan_file(path, ScanOptions(harness="pi"), new_scope())
+            by_id = {event.get("external_message_id"): event for event in recording["events"]
+                     if event.get("external_message_id")}
+            self.assertEqual(by_id["u2"]["lane"], "u1")
+            self.assertEqual(by_id["u2"]["lane_basis"], "continued_exchange")
+            self.assertEqual(by_id["a2"]["lane"], "u1")
+            self.assertEqual(by_id["a2"]["branch"], "a2")
+            self.assertEqual(by_id["a1"]["branch"], "a1")
+            self.assertEqual(by_id["side"]["branch"], "side")
+            self.assertNotEqual(by_id["a1"]["branch"], by_id["side"]["branch"])
+
+    def test_ancestry_status_and_ambiguous_message_ids_are_exposed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "ambiguous.jsonl"
+            rows = [
+                {"type": "session", "id": "ambiguous", "cwd": temp},
+                {"type": "message", "id": "dup", "message": {"role": "user", "content": "One"}},
+                {"type": "message", "id": "dup", "message": {"role": "user", "content": "Two"}},
+                {"type": "message", "id": "a", "parentId": "dup", "message": {"role": "assistant", "content": "Reply"}},
+                {"type": "message", "id": "child", "parentId": "absent", "message": {"role": "assistant", "content": "Orphan"}},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            recording = scan_file(path, ScanOptions(harness="pi"), new_scope())
+            by_id = {event.get("external_message_id"): event for event in recording["events"]
+                     if event.get("external_message_id")}
+            self.assertTrue(by_id["dup"]["message_ambiguous"])
+            self.assertEqual(by_id["a"]["ancestry_status"], "ambiguous")
+            self.assertEqual(by_id["child"]["ancestry_status"], "missing")
+            self.assertEqual(by_id["a"]["ancestry_depth"], 0)
+            self.assertIn(by_id["a"]["request_basis"], ("ambiguous", "unresolved_ancestry"))
+
+    def test_projection_carries_order_and_branch_fields(self):
+        recording, _ = self.scan()
+        by_id = {event.get("external_message_id"): event for event in recording["events"]
+                 if event.get("external_message_id")}
+        for field in ("seq", "branch", "branch_basis", "message_id", "ancestry_status", "ancestry_depth"):
+            self.assertIn(field, by_id["u1"])
+        self.assertEqual(by_id["a1"]["request_ref"], by_id["u1"]["ref"])
+
     def test_truncated_jsonl_is_a_gap_without_a_phantom_event(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "truncated.jsonl"

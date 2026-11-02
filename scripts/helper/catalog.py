@@ -16,7 +16,8 @@ class Table:
 
 EVENT_COLUMNS = {name: "TEXT" for name in (*FIELDS, "cite", "repo_path")}
 EVENT_COLUMNS.update({name: "INTEGER" for name in ("exit_code", "text_chars", "text_start", "text_omitted",
-                                                    "is_shell", "byte_offset", "item_index")})
+                                                    "is_shell", "byte_offset", "item_index", "seq",
+                                                    "ancestry_depth", "message_ambiguous")})
 SESSION_COLUMNS = {name: "TEXT" for name in (
     "session", "parent_session", "independent_session", "harness", "harness_version", "recording_id", "root",
     "started_at", "ended_at", "first_request", "first_request_cite")}

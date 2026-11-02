@@ -62,6 +62,77 @@ def _store_text(event, text, options, scope):
     event.update(shown, text_state="budget_omitted")
 
 
+def message_graph(events):
+    """Recorded message ancestry: duplicate-aware parents, nearest-first chains and cycle status.
+
+    Message identity is the harness's original message ID. Items of one message share it.
+    Two records claiming the same ID at different offsets are ambiguous, not one message.
+    """
+    by_id = {}
+    for event in events:
+        message_id = event.get("external_message_id")
+        if message_id:
+            by_id.setdefault(message_id, []).append(event)
+
+    def offsets(message_id):
+        return {event.get("ref", {}).get("offset") for event in by_id.get(message_id, [])}
+
+    def ambiguous(message_id):
+        return len(offsets(message_id)) > 1
+
+    def parent(message_id):
+        group = by_id.get(message_id) or []
+        parents = {event.get("external_parent_id") for event in group if event.get("external_parent_id")}
+        if len(parents) > 1:
+            return None, "ambiguous"
+        return (next(iter(parents)) if parents else None), "ok"
+
+    cache = {}
+
+    def chain(message_id):
+        """Strict ancestor message IDs, nearest first; ('root'|'missing'|'cycle'|'ambiguous') status."""
+        if message_id in cache:
+            return cache[message_id]
+        found, seen, current = [], set(), message_id
+        while True:
+            if not current or ambiguous(current):
+                result = (found, "ambiguous") if current else (found, "root")
+                break
+            upstream, state = parent(current)
+            if state != "ok":
+                result = (found, "ambiguous")
+                break
+            if not upstream:
+                result = (found, "root")
+                break
+            if upstream in seen:
+                result = (found, "cycle")
+                break
+            seen.add(upstream)
+            if upstream not in by_id:
+                result = (found, "missing")
+                break
+            found.append(upstream)
+            current = upstream
+        cache[message_id] = result
+        return result
+
+    def is_ancestor(ancestor, message_id):
+        """(True|False, status) for a strict ancestor; unsupported ancestry is never a negative proof."""
+        ancestors, status = chain(message_id)
+        return (ancestor in ancestors), status
+
+    def end_event(message_id):
+        """The last recorded content item of one unambiguous message, else None."""
+        if not message_id or ambiguous(message_id):
+            return None
+        group = by_id.get(message_id) or []
+        return max(group, key=lambda event: (event.get("order") or 0, event.get("ref", {}).get("item", 0))) if group else None
+
+    return {"by_id": by_id, "offsets": offsets, "ambiguous": ambiguous, "parent": parent,
+            "chain": chain, "is_ancestor": is_ancestor, "end_event": end_event}
+
+
 def scan_file(path, options, scope, ranges=None):
     profile = None
     events = []
@@ -293,7 +364,8 @@ def scan_file(path, options, scope, ranges=None):
     # Physical order is (byte offset, item index); `order` is a comparable sequence
     # over the scanned range so head and tail rows share one unit.
     for index, e in enumerate(events):
-        e["order"] = index
+        # `order` is the internal sequence; `seq` is its public SQL-safe name.
+        e["order"] = e["seq"] = index
         e["byte_offset"] = e["ref"]["offset"]
         e["item_index"] = e["ref"].get("item", 0)
         e["position"] = [e["byte_offset"], e["item_index"]]
@@ -332,6 +404,11 @@ def scan_file(path, options, scope, ranges=None):
                 found = (chain, "missing")
                 ancestry_cache[start] = found
                 return found
+            if len({item.get("ref", {}).get("offset") for item in group}) > 1:
+                # The same native message ID at different records is not one proven ancestor.
+                found = (chain, "ambiguous")
+                ancestry_cache[start] = found
+                return found
             event = representative(group)
             chain.append(event)
             parent = event.get("external_parent_id")
@@ -349,13 +426,14 @@ def scan_file(path, options, scope, ranges=None):
             f"{x['ref']['offset']}:{x['ref'].get('item', 0)}"
 
     current_turn = None
-    current_lane = None
     for e in events:
         chain, status = ancestry(e)
-        if status in ("missing", "cycle"):
+        if status in ("missing", "cycle", "ambiguous"):
             scope["ancestry_unknown"] += 1
             if status == "cycle":
                 scope["ancestry_cycles"] += 1
+            if status == "ambiguous":
+                scope["ancestry_ambiguous"] = scope.get("ancestry_ambiguous", 0) + 1
         own = e if e.get("kind") == "user_message" else None
         candidates = ([own] if own is not None else []) + chain
         request = next((x for x in candidates if x.get("kind") == "user_message"), None)
@@ -369,10 +447,12 @@ def scan_file(path, options, scope, ranges=None):
             e["request_origin"] = "unknown"
         if chosen is not None:
             e["request_ref"] = chosen["ref"]
-            e["request_basis"] = ("self" if chosen is e else "recorded_ancestry" if any(chosen is x for x in chain)
-                                  else "unresolved_ancestry" if status in ("missing", "cycle") else "recorded_ancestry")
+            e["request_basis"] = ("self" if chosen is e else "unresolved_ancestry"
+                                  if status in ("missing", "cycle", "ambiguous") else "recorded_ancestry")
             e["turn"] = turn_id(chosen)
-            e["turn_basis"] = "self" if chosen is e else "recorded_ancestry"
+            e["turn_basis"] = "self" if chosen is e else ("unresolved_ancestry"
+                                                          if status in ("missing", "cycle", "ambiguous")
+                                                          else "recorded_ancestry")
         elif e.get("external_turn_id"):
             e["turn"] = e["external_turn_id"]
             e["turn_basis"] = "recorded_turn"
@@ -383,26 +463,53 @@ def scan_file(path, options, scope, ranges=None):
             e["request_basis"] = "record_order"
         else:
             e["turn"] = None
-            e["turn_basis"] = "unresolved_ancestry" if status in ("missing", "cycle") else "record_order"
-            e["request_basis"] = status if status in ("missing", "cycle") else "unresolved"
-        outer = chain[-1] if chain else e
-        branch = human_request or request or outer
-        lane = branch.get("external_message_id") or branch.get("external_turn_id") or turn_id(branch)
-        parent_event = representative(by_mid[e["external_parent_id"]]) if e.get("external_parent_id") in by_mid else None
-        if human_user(e):
-            # A follow-up under an assistant/result continues that branch; a user message
-            # parented directly to another user starts a sibling lane.
-            if parent_event is None:
-                lane = current_lane or lane
-            elif parent_event.get("kind") == "user_message":
-                lane = e.get("external_message_id") or turn_id(e)
+            e["turn_basis"] = "unresolved_ancestry" if status in ("missing", "cycle", "ambiguous") else "record_order"
+            e["request_basis"] = status if status in ("missing", "cycle", "ambiguous") else "unresolved"
+        # Lane is the conversation lane of the nearest supported request. A follow-up under
+        # an assistant/result continues that lane; a user message parented to a user starts
+        # a sibling lane. Descendants inherit the request's lane, so they cannot split off.
+        parent_message = representative(by_mid[e["external_parent_id"]]) if e.get("external_parent_id") in by_mid else None
+        if own is not None and human_user(own):
+            if parent_message is not None and parent_message.get("kind") != "user_message" and parent_message.get("lane"):
+                lane, lane_basis = parent_message["lane"], "continued_exchange"
             else:
-                lane = parent_event.get("lane") or lane
-        e["lane"] = lane
+                lane, lane_basis = turn_id(own), "self"
+        elif human_request is not None:
+            lane, lane_basis = human_request.get("lane") or turn_id(human_request), "recorded_ancestry"
+        elif request is not None:
+            lane, lane_basis = request.get("lane") or turn_id(request), "recorded_ancestry"
+        else:
+            lane, lane_basis = turn_id(e), "unresolved"
+        e["lane"], e["lane_basis"] = lane, lane_basis
+        # Branch is the top-level segment under the exchange request: sibling descendants
+        # (parallel assistant messages, forks) stay separate even inside one lane.
+        exchange_root = human_request or request
+        branch_basis = "self"
+        if exchange_root is None:
+            branch_key = turn_id(e)
+            branch_basis = "unresolved"
+        elif exchange_root is e:
+            branch_key = turn_id(e)
+        else:
+            at = next((index for index, item in enumerate(chain)
+                       if item is exchange_root or (item.get("external_message_id")
+                                                    and item.get("external_message_id") == exchange_root.get("external_message_id"))), None)
+            if at is None:
+                branch_key, branch_basis = turn_id(e), "unresolved_ancestry"
+            elif at == 0:
+                branch_key = turn_id(e)
+            else:
+                branch_key, branch_basis = turn_id(chain[at - 1]), "recorded_ancestry"
+        e["branch"], e["branch_basis"] = branch_key, branch_basis
+        e["message_id"] = e.get("external_message_id") or turn_id(e)
+        e["ancestry_status"] = status if e.get("external_parent_id") else "root"
+        e["ancestry_depth"] = len(chain)
+        if e.get("external_message_id"):
+            e["message_ambiguous"] = len({x.get("ref", {}).get("offset") for x in by_mid[e["external_message_id"]]}) > 1
+            if e["message_ambiguous"]:
+                scope["ambiguous_message_ids"] = scope.get("ambiguous_message_ids", 0) + 1
         if own is not None and human_user(own):
             current_turn = turn_id(own)
-            if not own.get("external_parent_id") and current_lane is None:
-                current_lane = e["lane"]
         if e["kind"] == "tool_call" and e.get("call_id"):
             calls.setdefault(e["call_id"], []).append(e)
     scope["ambiguous_call_ids"] += sum(len(v) > 1 for v in calls.values())

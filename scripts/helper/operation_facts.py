@@ -11,6 +11,7 @@ recorded branch identity, never by publication time.
 import json
 
 from .profiles import pointer, resolve_path
+from .reader import message_graph
 
 OPERATION_GRAIN = "one operation/path association; counts use distinct operation_id"
 CHECKPOINT_GRAIN = "one original checkpoint item; join events USING(recording_id)"
@@ -28,11 +29,11 @@ OPERATION_COLUMNS = {
 }
 CHECKPOINT_COLUMNS = {
     "checkpoint_id": "VARCHAR", "recording_id": "VARCHAR", "session": "VARCHAR",
-    "independent_session": "VARCHAR", "harness": "VARCHAR", "lane": "VARCHAR",
+    "independent_session": "VARCHAR", "harness": "VARCHAR", "lane": "VARCHAR", "branch": "VARCHAR",
     "order": "BIGINT", "timestamp": "VARCHAR", "publication_event_id": "VARCHAR",
     "publication_ref": "JSON", "original_event_id": "VARCHAR", "coverage_end_id": "VARCHAR",
     "boundary_status": "VARCHAR", "boundary_ref": "JSON", "boundary_event_id": "VARCHAR",
-    "boundary_order": "BIGINT", "structured": "JSON", "version": "VARCHAR",
+    "boundary_order": "BIGINT", "boundary_items": "BIGINT", "structured": "JSON", "version": "VARCHAR",
     "adapter": "VARCHAR", "basis": "VARCHAR", "interpretation": "VARCHAR",
 }
 STRUCTURED_GIT = {"git_plan_context": "plan_snapshot", "git_commit_plan": "commit_plan",
@@ -116,6 +117,7 @@ def operations(recordings, cache):
     for recording in recordings:
         by_ref = {(e["ref"]["offset"], e["ref"].get("item", 0)): e for e in recording["events"]}
         seen_operations = set()
+        association_counts = {}
         for event in recording["events"]:
             if event.get("kind") == "tool_result":
                 if event.get("call_ref"):
@@ -128,11 +130,12 @@ def operations(recordings, cache):
                 continue
             operation_id = _operation_id(event)
             new_operation = operation_id not in seen_operations
+            # Outcome belongs to every association of this operation, not only its first row.
+            outcome = event.get("outcome") or "unknown"
             if new_operation:
                 seen_operations.add(operation_id)
                 coverage["operations"] += 1
                 coverage[pairing] += 1
-                outcome = event.get("outcome") or "unknown"
                 if outcome == "unknown":
                     coverage["unknown_outcome"] += 1
                 elif outcome == "failed":
@@ -175,7 +178,11 @@ def operations(recordings, cache):
                 paired = by_ref.get((event["result_ref"].get("offset", -1),
                                      event["result_ref"].get("item", 0)))
                 result_event_id = paired.get("event_id") if paired else None
-            for index, association in enumerate(associations or [(None, None, None, None)]):
+            # Association indexes run over the whole operation, so multi-item tools
+            # cannot reuse a key that another path of the same call already holds.
+            for association in (associations or [(None, None, None, None)]):
+                index = association_counts.get(operation_id, 0)
+                association_counts[operation_id] = index + 1
                 path, raw, location, path_basis = association
                 coverage["locations"][location or "none"] = coverage["locations"].get(location or "none", 0) + 1
                 rows.append({
@@ -210,10 +217,7 @@ def checkpoints(recordings, cache):
                 "off_branch": 0, "invalid": 0, "unsupported": 0}
     for recording in recordings:
         events = recording["events"]
-        by_mid = {}
-        for event in events:
-            if event.get("external_message_id"):
-                by_mid.setdefault(event["external_message_id"], []).append(event)
+        graph = message_graph(events)
         for event in events:
             if event.get("kind") != "checkpoint":
                 continue
@@ -221,36 +225,43 @@ def checkpoints(recordings, cache):
             payload = _decoded(event, cache)
             structured = payload if isinstance(payload, (dict, list)) else event.get("text")
             coverage_end = event.get("coverage_end_id")
-            matches = by_mid.get(coverage_end, []) if isinstance(coverage_end, str) and coverage_end else []
+            own_message = event.get("external_message_id")
+            origin, origin_status = graph["chain"](own_message) if own_message else ([], "missing")
+            boundary = None
             if not isinstance(coverage_end, str) or not coverage_end:
-                status, boundary = "invalid", None
-            elif not matches:
-                status, boundary = "missing", None
+                status = "invalid"
+            elif coverage_end == own_message:
+                # A summary cannot end at the message that publishes it.
+                status = "invalid"
+            elif coverage_end not in graph["by_id"]:
+                status = "missing"
+            elif graph["ambiguous"](coverage_end):
+                status = "ambiguous"
+            elif origin_status in ("missing", "cycle", "ambiguous"):
+                # Without supported ancestry, absence from the chain is not proof of another branch.
+                status = "ambiguous"
+            elif coverage_end in origin:
+                boundary, status = graph["end_event"](coverage_end), "resolved"
             else:
-                same_lane = [x for x in matches if x.get("lane") == event.get("lane")]
-                # One message may emit several content items; distinct byte offsets
-                # with the same ID are a duplicate-ID ambiguity, not normal content.
-                offsets = {x.get("ref", {}).get("offset") for x in same_lane}
-                if len(offsets) > 1:
-                    boundary, status = same_lane[0], "ambiguous"
-                elif same_lane:
-                    boundary, status = same_lane[0], "resolved"
-                else:
-                    boundary, status = matches[0], "off_branch"
+                # Keep the recorded candidate visible, but never treat it as a usable boundary.
+                boundary, status = graph["end_event"](coverage_end), "off_branch"
             coverage[status] += 1
             if not isinstance(structured, (dict, list)):
                 coverage["unsupported"] += 1
             version = structured.get("version") if isinstance(structured, dict) else None
+            boundary_group = graph["by_id"].get(coverage_end) or []
             rows.append({
                 "checkpoint_id": f"{event.get('recording_id')}#{event.get('event_id')}",
                 "recording_id": event.get("recording_id"), "session": recording.get("session"),
                 "independent_session": event.get("independent_session"), "harness": event.get("harness"),
-                "lane": event.get("lane"), "order": event.get("order"), "timestamp": event.get("timestamp"),
+                "lane": event.get("lane"), "branch": event.get("branch"),
+                "order": event.get("order"), "timestamp": event.get("timestamp"),
                 "publication_event_id": event.get("event_id"), "publication_ref": event.get("ref"),
                 "original_event_id": event.get("event_id"), "coverage_end_id": coverage_end,
                 "boundary_status": status, "boundary_ref": boundary.get("ref") if boundary else None,
                 "boundary_event_id": boundary.get("event_id") if boundary else None,
                 "boundary_order": boundary.get("order") if boundary else None,
+                "boundary_items": len(boundary_group) if boundary_group else None,
                 "structured": structured, "version": str(version) if version is not None else None,
                 "adapter": f"{event.get('harness')}:checkpoint", "basis": "recorded_checkpoint",
                 "interpretation": "structured" if isinstance(structured, (dict, list)) else "unsupported",

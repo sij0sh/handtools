@@ -1,5 +1,6 @@
 """Transient operation/checkpoint facts and structured commit witnesses."""
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -149,6 +150,185 @@ class OperationFactTests(unittest.TestCase):
             self.assertFalse(ok["failed"])
             self.assertEqual(ok["subject"], "Record it")
             self.assertIsNone(bad["sha"])
+
+    def test_codex_multi_path_associations_keep_unique_keys(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "codex-multi.jsonl"
+            rows = [
+                {"type": "session_meta", "payload": {"id": "codex", "cwd": temp}},
+                {"type": "event_msg", "payload": {"type": "item_completed", "item": {
+                    "type": "UserMessage", "content": [{"type": "text", "text": "Change both"}]}}},
+                {"type": "event_msg", "payload": {"type": "item_completed", "item": {
+                    "type": "FileChange", "status": "completed", "changes": {
+                        "a.py": {"type": "add", "content": "x=1\n"},
+                        "b.py": {"type": "add", "content": "y=1\n"},
+                        "c.py": {"type": "add", "content": "z=1\n"}}}}},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            recording = scan_file(path, ScanOptions(harness="codex"), new_scope())
+            facts, coverage = operation_facts.operations([recording], RecordCache())
+            self.assertEqual(len(facts), 3)
+            self.assertEqual(len({row["association_key"] for row in facts}), 3)
+            self.assertEqual({row["operation_id"] for row in facts}, {facts[0]["operation_id"]})
+            self.assertEqual({row["outcome"] for row in facts}, {"succeeded"})
+
+    def test_checkpoint_boundary_resolves_by_ancestry_across_exchanges(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "cross.jsonl"
+            rows = [
+                {"type": "session", "id": "cross", "cwd": temp},
+                {"type": "message", "id": "u1", "message": {"role": "user", "content": "Open"}},
+                {"type": "message", "id": "a1", "parentId": "u1", "message": {"role": "assistant", "content": [
+                    {"type": "toolCall", "id": "c1", "name": "read", "arguments": {"path": "a.py"}},
+                    {"type": "toolCall", "id": "c2", "name": "read", "arguments": {"path": "b.py"}}]}},
+                {"type": "message", "id": "u2", "parentId": "a1", "message": {"role": "user", "content": "Follow up"}},
+                {"type": "message", "id": "a2", "parentId": "u2", "message": {"role": "assistant", "content": "Done"}},
+                {"type": "shadow-compact.checkpoint", "id": "cp", "parentId": "a2", "coverageEndEntryId": "a1",
+                 "structured": {"version": 1, "objective": "Cross"}},
+                {"type": "shadow-compact.checkpoint", "id": "cp-self", "parentId": "a2",
+                 "coverageEndEntryId": "cp-self", "structured": {"version": 1}},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            recording = scan_file(path, ScanOptions(harness="pi"), new_scope())
+            facts, coverage = operation_facts.checkpoints([recording], RecordCache())
+            cross = next(row for row in facts if row["coverage_end_id"] == "a1")
+            self.assertEqual(cross["boundary_status"], "resolved")
+            a1_orders = [event["order"] for event in recording["events"]
+                         if event.get("external_message_id") == "a1"]
+            self.assertEqual(cross["boundary_items"], len(a1_orders))
+            self.assertEqual(cross["boundary_order"], max(a1_orders))
+            own = next(row for row in facts if row["coverage_end_id"] == "cp-self")
+            self.assertEqual(own["boundary_status"], "invalid")
+            self.assertEqual(coverage["resolved"], 1)
+            self.assertEqual(coverage["invalid"], 1)
+
+    def test_duplicate_boundary_ids_are_ambiguous_not_resolved(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "dups.jsonl"
+            rows = [
+                {"type": "session", "id": "dups", "cwd": temp},
+                {"type": "message", "id": "dup", "message": {"role": "user", "content": "One"}},
+                {"type": "message", "id": "dup", "message": {"role": "user", "content": "Two"}},
+                {"type": "message", "id": "a", "parentId": "dup", "message": {"role": "assistant", "content": "A"}},
+                {"type": "shadow-compact.checkpoint", "id": "cp", "parentId": "a", "coverageEndEntryId": "dup",
+                 "structured": {"version": 1}},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            recording = scan_file(path, ScanOptions(harness="pi"), new_scope())
+            facts, coverage = operation_facts.checkpoints([recording], RecordCache())
+            self.assertEqual(facts[0]["boundary_status"], "ambiguous")
+            self.assertIsNone(facts[0]["boundary_ref"])
+            self.assertFalse(coverage["complete"])
+
+    def test_missing_shell_result_cannot_infer_a_commit_by_subject(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "a@b.c"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "A"], check=True)
+            (repo / "a.py").write_text("x\n")
+            subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "Record it"], check=True)
+            path = Path(temp) / "missing-result.jsonl"
+            rows = [
+                {"type": "session", "id": "missing", "cwd": str(repo)},
+                {"type": "message", "id": "u", "message": {"role": "user", "content": "Commit it"}},
+                {"type": "message", "id": "a", "parentId": "u", "message": {"role": "assistant", "content": [
+                    {"type": "toolCall", "id": "c", "name": "bash",
+                     "arguments": {"command": "git commit -m 'Record it'"}}]}},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            recording = scan_file(path, ScanOptions(harness="pi"), new_scope())
+            facts = commit_links.witnesses([recording], GitResolver(), RecordCache(), str(repo))
+            self.assertTrue(facts)
+            witness = facts[0]
+            self.assertIsNone(witness["sha"])
+            self.assertEqual(witness["confidence"], "unresolved")
+            self.assertEqual(witness["resolution"], "missing_result")
+            self.assertEqual(witness["observation"], "missing_result")
+            self.assertEqual(witness["order"], 2)
+            self.assertEqual(witness["lane"], "u")
+            self.assertEqual(witness["branch"], "a")
+
+    def test_structured_base_and_parent_shas_are_not_new_commit_witnesses(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "base.jsonl"
+            rows = [
+                {"type": "session", "id": "base", "cwd": temp},
+                {"type": "message", "id": "u", "message": {"role": "user", "content": "Commit"}},
+                {"type": "message", "id": "a", "parentId": "u", "message": {"role": "assistant", "content": [
+                    {"type": "toolCall", "id": "c", "name": "git_commit_plan", "arguments": {"subject": "Plan"}}]}},
+                {"type": "message", "id": "r", "parentId": "a", "message": {"role": "toolResult",
+                 "toolCallId": "c", "isError": False, "content": [{"type": "text", "text": json.dumps(
+                     {"base": "a" * 40, "parent": "c" * 40, "commits": []})}]}},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            recording = scan_file(path, ScanOptions(harness="pi"), new_scope())
+            facts = commit_links.witnesses([recording], GitResolver(), RecordCache(), str(Path(temp)))
+            self.assertEqual(len(facts), 1)
+            self.assertIsNone(facts[0]["recorded_sha"])
+            self.assertIsNone(facts[0]["sha"])
+            self.assertEqual(facts[0]["observation"], "unsupported_result")
+
+    def test_compound_failure_preserves_a_directly_observed_commit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "a@b.c"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "A"], check=True)
+            (repo / "a.py").write_text("x\n")
+            subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "Record it"], check=True)
+            sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True,
+                                 text=True, check=True).stdout.strip()
+            path = Path(temp) / "compound.jsonl"
+            rows = [
+                {"type": "session", "id": "compound", "cwd": str(repo)},
+                {"type": "message", "id": "u", "message": {"role": "user", "content": "Commit then fail"}},
+                {"type": "message", "id": "a", "parentId": "u", "message": {"role": "assistant", "content": [
+                    {"type": "toolCall", "id": "c", "name": "bash",
+                     "arguments": {"command": "git commit -m 'Record it' && false"}}]}},
+                {"type": "message", "id": "r", "parentId": "a", "message": {"role": "toolResult",
+                 "toolCallId": "c", "isError": True,
+                 "content": [{"type": "text", "text": f"[main {sha}] Record it\n1 file changed"}]}},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            recording = scan_file(path, ScanOptions(harness="pi"), new_scope())
+            facts = commit_links.witnesses([recording], GitResolver(), RecordCache(), str(repo))
+            witnessed = next(row for row in facts if row["sha"] == sha)
+            self.assertTrue(witnessed["failed"])
+            self.assertEqual(witnessed["confidence"], "recorded")
+            self.assertEqual(witnessed["observation"], "direct_result_in_failed_command")
+            self.assertEqual(witnessed["resolution"], "failed")
+            self.assertFalse(any(row["observation"] == "direct_result" and row["failed"] for row in facts))
+
+    def test_real_pi_commit_details_commits_are_witnesses(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "details-commits.jsonl"
+            rows = [
+                {"type": "session", "id": "details", "cwd": temp},
+                {"type": "message", "id": "u", "message": {"role": "user", "content": "Commit both"}},
+                {"type": "message", "id": "a", "parentId": "u", "message": {"role": "assistant", "content": [
+                    {"type": "toolCall", "id": "c", "name": "git_commit_plan", "arguments": {"subject": "Plan"}}]}},
+                {"type": "message", "id": "r", "parentId": "a", "message": {"role": "toolResult",
+                 "toolCallId": "c", "isError": False,
+                 "content": [{"type": "text", "text": "Recorded 2 commits: abcdef123456 (one), 123456abcdef (two)."}],
+                 "details": {"base": "9" * 40, "order": ["one", "two"], "commits": [
+                     {"id": "one", "sha": "a" * 40, "subject": "One", "paths": ["a.py"]},
+                     {"id": "two", "sha": "b" * 40, "subject": "Two", "paths": ["b.py"]}],
+                     "stillDirty": False}}},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            recording = scan_file(path, ScanOptions(harness="pi"), new_scope())
+            facts = commit_links.witnesses([recording], GitResolver(), RecordCache(), str(Path(temp)))
+            shas = {row["sha"] for row in facts}
+            self.assertEqual(shas, {"a" * 40, "b" * 40})
+            self.assertNotIn("9" * 40, shas)
+            self.assertEqual({row["subject"] for row in facts}, {"One", "Two"})
+            self.assertTrue(all(row["confidence"] == "recorded" for row in facts))
+            self.assertTrue(all(row["observation"] == "direct_result" for row in facts))
 
     def test_structured_commit_result_is_a_witness_but_failure_is_not(self):
         rows = commit_links.witnesses([self.recording], GitResolver(), RecordCache(), ROOT)

@@ -8,8 +8,9 @@ from .options import command_line
 
 # Every row has this schema, whatever the harness; fields a harness did not record are absent.
 FIELDS = ("session", "parent_session", "independent_session", "harness", "kind", "role", "turn", "turn_basis",
-          "request_ref", "request_basis", "request_origin", "lane", "position", "byte_offset", "item_index",
-          "timestamp", "tool", "call_id",
+          "request_ref", "request_basis", "request_origin", "lane", "lane_basis", "branch", "branch_basis",
+          "message_id", "ancestry_status", "ancestry_depth", "message_ambiguous", "seq", "position",
+          "byte_offset", "item_index", "timestamp", "tool", "call_id",
           "operation", "path", "path_raw", "path_location", "command", "outcome", "exit_code",
           "representation", "reason", "text", "text_chars", "text_start", "text_omitted", "ref",
           "payload_pointer", "call_ref", "result_ref", "external_turn_id", "external_message_id",
