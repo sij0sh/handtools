@@ -1,21 +1,13 @@
-"""CLI regressions for the evaluation's search, graph and delivery failures."""
+"""Search, projection, paging and parser edge cases over the graph CLI."""
 import json
-import subprocess
-import sys
-import unittest
-import test_graph
+from graph_fixture import GraphCase
 from helper.graph_queries import impact
+from support import invoke
 
 
-class FeatureTests(unittest.TestCase):
-    setUp = test_graph.GraphTests.setUp
-    write = test_graph.GraphTests.write
-    cli = test_graph.GraphTests.cli
-    fixture = test_graph.GraphTests.fixture
+class FeatureTests(GraphCase):
     def raw(self, *args):
-        result = subprocess.run([sys.executable, str(test_graph.ROOT/'scripts/remember.py'),
-                                 *args, '--repo', str(self.repo), '--cache', str(self.cache)],
-                                text=True, capture_output=True, timeout=20)
+        result = invoke([*args, '--repo', str(self.repo), '--cache', str(self.cache)])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stderr, '')
         return result.stdout
@@ -23,7 +15,7 @@ class FeatureTests(unittest.TestCase):
     def test_unresolved_mentions_are_a_gap(self):
         self.write('core.py', 'def save(x):\n    return x\n')
         self.write('caller.py', 'def run(obj):\n    return obj.save(1)\n')
-        gap = next(g for g in impact(test_graph.GraphTests.graph(self), ['core.py::save'])['gaps']
+        gap = next(g for g in impact(self.graph(), ['core.py::save'])['gaps']
                    if g.get('reason') == 'unresolved_mentions')
         self.assertEqual(gap['examples'], [{'path': 'caller.py', 'line': 2}])
 
@@ -64,20 +56,20 @@ class FeatureTests(unittest.TestCase):
 
     def test_large_map_summary_and_explicit_formats(self):
         self.write('src/a.py', '# source\n' * 3001)
-        text = self.raw('map')
-        self.assertIn('DIRECTOR', text)
+        text = self.raw('map', '--no-primer')
+        self.assertIn('DIRECTORIES', text)
         self.assertIn('3001', text)
         self.assertIn('src/a.py', text)
         self.assertIn('snapshot:', text)
-        self.assertIn('results', json.loads(self.raw('map', '--format', 'json')))
-        self.assertIn('path', self.raw('map', '--format', 'table'))
-        self.assertNotIn('WHOLE REPOSITORY', self.raw('map', '--fields', 'path'))
+        self.assertIn('results', json.loads(self.raw('map', '--format', 'json', '--no-primer')))
+        self.assertIn('path', self.raw('map', '--format', 'table', '--no-primer'))
+        self.assertNotIn('WHOLE REPOSITORY', self.raw('map', '--fields', 'path', '--no-primer'))
 
     def test_summary_bounds_and_empty_capture(self):
-        self.assertIn('0 readable files', self.raw('map'))
+        self.assertIn('0 readable files', self.raw('map', '--no-primer'))
         for i in range(40):
             self.write(f'dir{i}/a.py', '# line\n' * 80)
-        text = self.raw('map')
+        text = self.raw('map', '--no-primer')
         directory_rows = text.split('DIRECTORIES', 1)[1].split('LARGEST FILES', 1)[0].splitlines()[1:]
         self.assertLessEqual(len([r for r in directory_rows if r.strip()]), 25)
         self.assertIn('(other directories)', text)
@@ -96,9 +88,7 @@ class FeatureTests(unittest.TestCase):
 
     def test_subcommand_errors_name_the_subcommand(self):
         self.fixture()
-        result = subprocess.run([sys.executable, str(test_graph.ROOT/'scripts/remember.py'), 'find', 'save',
-                                 '--bogus', '--repo', str(self.repo), '--cache', str(self.cache)],
-                                text=True, capture_output=True, timeout=20)
+        result = invoke(['find', 'save', '--bogus', '--repo', str(self.repo), '--cache', str(self.cache)])
         self.assertEqual(result.returncode, 2)
         self.assertIn('usage: remember.py find', result.stderr)
 
@@ -176,7 +166,7 @@ class FeatureTests(unittest.TestCase):
         self.write('saver.py', 'from core import save\ndef run():\n    return save(1)\n')
         self.write('loader.py', 'from core import load\ndef run():\n    return load()\n')
         self.write('api.py', 'from saver import run\ndef go():\n    return run()\n')
-        graph = test_graph.GraphTests.graph(self)
+        graph = self.graph()
         result = impact(graph, ['core.py::save'])
         reach = {r['path']: r['reach'] for r in result['results'] if r.get('role') == 'possible_consumer'}
         self.assertEqual(reach, {'saver.py': 'direct', 'loader.py': 'file_only', 'api.py': 'indirect'})

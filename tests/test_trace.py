@@ -14,6 +14,7 @@ from helper import continuations, operations, reconciliation
 from helper.options import ScanOptions
 from helper.reader import scan_file
 from helper.records import new_scope
+from support import invoke
 
 FIXTURE = ROOT / "tests/fixtures/recordings/pi-trace.jsonl"
 
@@ -52,11 +53,9 @@ class TraceFixtureTests(unittest.TestCase):
         self.refs = refs()
 
     def cli(self, *args, ok=True, timeout=60):
-        result = subprocess.run([sys.executable, str(ROOT / "scripts/remember.py"), *map(str, args),
-                                 "--repo", str(self.repo), "--cache", str(self.cache)],
-                                capture_output=True, text=True, timeout=timeout)
+        result = invoke([*map(str, args), "--repo", str(self.repo), "--cache", str(self.cache)])
         self.assertEqual(result.returncode, 0 if ok else 2, result.stdout + result.stderr)
-        return json.loads(result.stdout)
+        return result.json()
 
     def trace(self, name, *extra, ok=True):
         return self.cli("trace", self.refs[name], "--recordings", str(FIXTURE), *extra, ok=ok)
@@ -92,11 +91,8 @@ class TraceFixtureTests(unittest.TestCase):
         self.assertEqual(dims["live_confirmed"]["state"], "unknown")
 
     def test_table_and_fields_render_the_episode(self):
-        result = subprocess.run(
-            [sys.executable, str(ROOT / "scripts/remember.py"), "trace", self.refs["r-commit"],
-             "--recordings", str(FIXTURE), "--format", "table", "--max-bytes", "40000",
-             "--repo", str(self.repo), "--cache", str(self.cache)],
-            capture_output=True, text=True, timeout=60)
+        result = invoke(["trace", self.refs["r-commit"], "--recordings", str(FIXTURE), "--format", "table",
+                         "--max-bytes", "40000", "--repo", str(self.repo), "--cache", str(self.cache)])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("section", result.stdout)
         self.assertIn("operation", result.stdout)
@@ -319,11 +315,10 @@ class CommitTraceTests(unittest.TestCase):
     def cli(self, *args, ok=True, recordings=None, context=True):
         extra = (["--recordings", str(recordings or self.recs), "--project-root", str(self.repo)]
                  if context else [])
-        result = subprocess.run([sys.executable, str(ROOT / "scripts/remember.py"), *map(str, args),
-                                 "--repo", str(self.repo), "--cache", str(self.cache), *extra,
-                                 "--max-bytes", "60000"], capture_output=True, text=True, timeout=60)
+        result = invoke([*map(str, args), "--repo", str(self.repo), "--cache", str(self.cache), *extra,
+                         "--max-bytes", "60000"])
         self.assertEqual(result.returncode, 0 if ok else 2, result.stdout + result.stderr)
-        return json.loads(result.stdout)
+        return result.json()
 
     def test_commit_trace_keeps_witness_lanes_and_path_context(self):
         out = self.cli("trace", self.sha)

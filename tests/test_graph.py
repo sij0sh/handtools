@@ -3,54 +3,19 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+from graph_fixture import GraphCase
 from helper.graph_store import Store, capture, read_file
 from helper.engine import SQLiteQuery
-from helper.graph_queries import TABLES, Graph, impact, reference
+from helper.graph_queries import TABLES, impact, reference
 
 
-class GraphTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.home = Path(self.temp.name)
-        self.repo = self.home / "repo"
-        self.repo.mkdir()
-        self.cache = self.home / "cache"
-        self.store = Store(self.repo, self.cache)
-
-    def write(self, path, text):
-        dest = self.repo / path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(text, newline="")
-        return dest
-
-    def graph(self, **kwargs):
-        pin, body = self.store.snapshot(**kwargs)
-        return Graph(pin, body)
-
-    def cli(self, *args, success=True, **env):
-        proc = subprocess.run([sys.executable, str(ROOT/"scripts/remember.py"), *args,
-                               "--repo", str(self.repo), "--cache", str(self.cache)],
-                              capture_output=True, text=True, timeout=20,
-                              env={**os.environ, **env})
-        self.assertEqual(proc.returncode, 0 if success else 2, proc.stderr + proc.stdout)
-        self.assertEqual(proc.stderr, "")
-        return json.loads(proc.stdout)
-
-    def fixture(self):
-        self.write("core.py", "def save(value):\n    return value\n")
-        self.write("service.py", "from core import save\ndef work(value):\n    return save(value)\n")
-        self.write("api.py", "from service import work\ndef request(value):\n    return work(value)\n")
-        self.write("unrelated.py", "def other():\n    return 42\n")
-        self.write("tests/test_service.py", "import service\nimport unrelated\ndef test_work():\n    assert service.work(1) == 1\n")
-
+class GraphTests(GraphCase):
     def test_directory_without_git_or_recordings(self):
         self.fixture()
         with patch("helper.graph_store.git", return_value=None):
@@ -428,10 +393,10 @@ class GraphTests(unittest.TestCase):
         out = self.cli("query", "--sql", "SELECT x'00ff' AS blob, 1e999 AS value")
         self.assertEqual(out["results"], [{"blob": {"encoding": "hex", "value": "00ff"}, "value": "inf"}])
 
-    def test_graph_pagination_preserves_legacy_envelope_coverage(self):
+    def test_envelope_coverage_reports_omitted_rows(self):
         from helper.envelope import load_rows
         self.write("a.py", "")
-        out = self.cli("map", "--whole-repo-lines", "0", "--limit", "1")
+        out = self.cli("map", "--whole-repo-lines", "0", "--limit", "1", "--no-primer")
         _, coverage = load_rows(json.dumps(out))
         self.assertFalse(coverage["complete"])
         self.assertEqual(coverage["rows_omitted"], 1)
@@ -470,24 +435,31 @@ class GraphTests(unittest.TestCase):
         self.write("package-lock.json", "{}\n")
         (self.repo / ".tools").mkdir()
         self.write("run.sh", "python3 .tools/check.py\n")
-        proc = subprocess.run([sys.executable, str(ROOT/"scripts/remember.py"), "--repo", str(self.repo),
-                               "--cache", str(self.cache)], capture_output=True, text=True, timeout=20)
+        empty = self.home / "empty-recordings"
+        empty.mkdir()
+        settings = self.home / "settings.json"
+        settings.write_text(json.dumps({"recordings": {name: [str(empty)]
+                                                       for name in ("pi", "codex", "claude-code")}}))
+        proc = subprocess.run([sys.executable, str(ROOT/"scripts/remember.py"),
+                               "--repo", str(self.repo), "--cache", str(self.cache)],
+                              capture_output=True, text=True, timeout=20,
+                              env={**os.environ, "TRACE_SESSIONS_SETTINGS": str(settings)})
         text = proc.stdout
         self.assertTrue(text.startswith("WHOLE REPOSITORY: all 6 readable captured files"), text[:200])
         self.assertIn("==> core.py <==\ndef save(value):\n    return value\n", text)
         self.assertIn("not shown: package-lock.json (lockfile)", text)
         self.assertIn("not captured but used: .tools/ (referenced at run.sh:1)", text)
         self.assertEqual(sorted(self.cache.rglob("*.md")), [])
-        listing = self.cli("map", "--whole-repo-lines", "0")
+        listing = self.cli("map", "--whole-repo-lines", "0", "--no-primer")
         self.assertIn("core.py", {r["path"] for r in listing["results"]})
 
     def test_paging_replays_pinned_capture_and_fails_once_superseded(self):
         self.fixture()
-        page = self.cli("map", "--whole-repo-lines", "0", "--limit", "1")
+        page = self.cli("map", "--whole-repo-lines", "0", "--limit", "1", "--no-primer")
         following = self.cli("show", page["next"][0]["ref"], "--limit", "100")
         self.assertEqual(following["delivery"]["total"], page["delivery"]["total"])
         self.write("later.py", "")
-        self.cli("map", "--whole-repo-lines", "0", "--limit", "1")
+        self.cli("map", "--whole-repo-lines", "0", "--limit", "1", "--no-primer")
         self.assertIn("superseded", self.cli("show", page["next"][0]["ref"], success=False)["error"])
 
     def test_invalid_expired_and_corrupt_references(self):
@@ -508,7 +480,8 @@ class GraphTests(unittest.TestCase):
     def test_common_flags_before_action(self):
         self.fixture()
         proc = subprocess.run([sys.executable, str(ROOT/"scripts/remember.py"), "--repo", str(self.repo),
-                               "--cache", str(self.cache), "--limit", "1", "map", "--whole-repo-lines", "0"],
+                               "--cache", str(self.cache), "--limit", "1", "map", "--whole-repo-lines", "0",
+                               "--no-primer"],
                               capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertEqual(len(json.loads(proc.stdout)["results"]), 1)

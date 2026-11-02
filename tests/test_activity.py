@@ -1,6 +1,5 @@
 """Thin activity projection over shared operation facts."""
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -9,7 +8,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from helper import catalog, graph_cli, runtime
+from helper import catalog, runtime
+from support import invoke
 
 FIXTURE = ROOT / "tests/fixtures/recordings/pi-slice1.jsonl"
 
@@ -26,12 +26,11 @@ class ActivityTests(unittest.TestCase):
         self.cache = self.home / "cache"
 
     def cli(self, *args):
-        result = subprocess.run([sys.executable, str(ROOT / "scripts/remember.py"), *map(str, args),
-                                 "--recordings", str(FIXTURE), "--project-root", "/work/project",
-                                 "--root-map", f"/work/project={self.repo}", "--repo", str(self.repo),
-                                 "--cache", str(self.cache)], capture_output=True, text=True)
+        result = invoke([*map(str, args), "--recordings", str(FIXTURE), "--project-root", "/work/project",
+                         "--root-map", f"/work/project={self.repo}", "--repo", str(self.repo),
+                         "--cache", str(self.cache)])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        return json.loads(result.stdout)
+        return result.json()
 
     def args(self, *argv):
         full = [*argv, "--recordings", str(FIXTURE), "--project-root", "/work/project",
@@ -71,11 +70,10 @@ class ActivityTests(unittest.TestCase):
              "isError": False, "content": [{"type": "text", "text": "other"}]}},
         ]
         other.write_text("".join(json.dumps(row) + "\n" for row in rows))
-        result = subprocess.run([sys.executable, str(ROOT / "scripts/remember.py"), "activity", "src/app.py",
-                                 "--recordings", str(other), "--repo", str(self.repo), "--cache", str(self.cache)],
-                                capture_output=True, text=True)
+        result = invoke(["activity", "src/app.py", "--recordings", str(other),
+                         "--repo", str(self.repo), "--cache", str(self.cache)])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        out = json.loads(result.stdout)
+        out = result.json()
         self.assertEqual(out["results"], [])
         self.assertTrue(out["coverage"]["activity"]["none_found_in_scanned_scope"])
 
@@ -128,11 +126,9 @@ class ActivityTests(unittest.TestCase):
     def test_returned_continuation_replays_activity_not_inspect(self):
         out = self.cli("activity", "src/app.py", "--max-bytes", "6000", "--max-events", "1")
         token = next(item["ref"] for item in out["next"] if item.get("effect") == "coverage")
-        result = subprocess.run([sys.executable, str(ROOT / "scripts/remember.py"), "show", token,
-                                 "--repo", str(self.repo), "--cache", str(self.cache)],
-                                capture_output=True, text=True)
+        result = invoke(["show", token, "--repo", str(self.repo), "--cache", str(self.cache)])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout)["operation"], "activity")
+        self.assertEqual(result.json()["operation"], "activity")
 
     def test_small_page_has_executable_continuation(self):
         out = self.cli("activity", "src/app.py", "--limit", "1", "--max-bytes", "6000")
