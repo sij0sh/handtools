@@ -46,7 +46,9 @@ Results are leads with evidence refs, not conclusions. The agent reads the sourc
 
 ## Install
 
-Requires Python 3.11+. Git and recordings are optional; without them, source tools still work.
+`remember` is standard agent skill that only needs to be placed in your harness skill folder. 
+
+The scripts require Python 3.11+. Git and recordings are optional; without them, source tools still work.
 
 ```bash
 git clone https://github.com/sij0sh/remember.git ~/.agents/skills/remember
