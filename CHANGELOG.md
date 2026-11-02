@@ -143,3 +143,8 @@ First release.
 
 - Add `languages/agent-instructions.md` profile for skills, `AGENTS.md`, and `CLAUDE.md`.
 - Route SKILL reference loading and README language coverage to the new profile.
+
+## 0.2.4 - 2026-11-02
+
+- Make `SKILL.md` write every loop step to `.agents/design/decisions.md`, add a condense prerequisite, and loop steps 2-4 to a stop test.
+- Move the record format above the example and retarget the handoff to a readability edit pass.
