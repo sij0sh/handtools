@@ -148,3 +148,7 @@ First release.
 
 - Make `SKILL.md` write every loop step to `.agents/design/decisions.md`, add a condense prerequisite, and loop steps 2-4 to a stop test.
 - Move the record format above the example and retarget the handoff to a readability edit pass.
+
+## 0.2.5 - 2026-11-02
+
+- Restate `references/contract.md` rules as questions, add a one-line ownership summary, and spell out the three resource owners.
