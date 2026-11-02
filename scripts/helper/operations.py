@@ -44,6 +44,8 @@ OPERATIONS = {op.name: op for op in (
     Operation("describe", "graph", "Describe commands, predicates and SQL tables without scanning source.", "describe", "common"),
     Operation("activity", "runtime", "Chronological recorded operations for one file or symbol target, with outcomes and witnesses.",
               "runtime", "common", "common", "See what was read, written, run and committed for a target."),
+    Operation("trace", "runtime", "Reconstruct the branch-aware episode around a request, failure, checkpoint or commit.",
+              "runtime", "common", "common", "Reconstruct an episode: chronology, coverage gaps, task observations."),
     Operation("recall", "runtime", "Rank past commits like a planned feature, with linked requests and current path state.",
               "runtime", "common", "common", "Before building: find prior similar work to extend."),
     Operation("inspect", "runtime", "Collect source, consumers, dependencies and relevant history.",
@@ -115,6 +117,7 @@ GRAPH_SHARED = (
 
 TARGET_HISTORY = ("inspect",)
 ACTIVITY = ("activity",)
+TRACE = ("trace",)
 RECALL = ("recall",)
 GRAPH_ARGS = (
     arg("--kind", ops=("map", "find"), action="append", choices=("file", "directory", "symbol", "external", "occurrence")),
@@ -141,18 +144,19 @@ GRAPH_ARGS = (
     arg("--count-by", ops="find", choices=("path",), help="Count matching result rows per path"),
     arg("target", ops=TARGET_HISTORY),
     arg("target", ops=ACTIVITY, help="Repository-relative path, path::qualified.name, or returned node ref"),
-    arg("--recordings", ops=TARGET_HISTORY + ACTIVITY, action="append", default=[], help="Recording file/directory; repeatable"),
-    arg("--project-root", ops=TARGET_HISTORY + ACTIVITY, action="append", default=[], help="Additional historical recording project root"),
+    arg("ref", ops=TRACE, help="Recorded event JSON ref, cite token, or full commit SHA (optional git: prefix)"),
+    arg("--recordings", ops=TARGET_HISTORY + ACTIVITY + TRACE, action="append", default=[], help="Recording file/directory; repeatable"),
+    arg("--project-root", ops=TARGET_HISTORY + ACTIVITY + TRACE, action="append", default=[], help="Additional historical recording project root"),
     arg("--history-repo", ops=TARGET_HISTORY, action="append", default=[], help="Explicit old Git repository and path prefix: REPO=PREFIX"),
-    arg("--root-map", ops=TARGET_HISTORY + ACTIVITY, action="append", default=[], help="Rewrite recorded path prefix OLD=NEW; discovery uses --project-root"),
-    arg("--exclude-session", ops=TARGET_HISTORY + ACTIVITY, action="append", default=[], help="Exclude session ID or recording path, including its lineage"),
+    arg("--root-map", ops=TARGET_HISTORY + ACTIVITY + TRACE, action="append", default=[], help="Rewrite recorded path prefix OLD=NEW; discovery uses --project-root"),
+    arg("--exclude-session", ops=TARGET_HISTORY + ACTIVITY + TRACE, action="append", default=[], help="Exclude session ID or recording path, including its lineage"),
     arg("--no-sessions", ops=TARGET_HISTORY, action="store_true"),
-    arg("--max-commits", ops=TARGET_HISTORY, type=positive, default=30),
-    arg("--max-recordings", ops=TARGET_HISTORY + ACTIVITY, type=positive, default=25, help="Per-harness recording limit"),
-    arg("--max-candidates", ops=TARGET_HISTORY + ACTIVITY, type=positive, default=20000,
+    arg("--max-commits", ops=TARGET_HISTORY + TRACE, type=positive, default=30),
+    arg("--max-recordings", ops=TARGET_HISTORY + ACTIVITY + TRACE, type=positive, default=25, help="Per-harness recording limit"),
+    arg("--max-candidates", ops=TARGET_HISTORY + ACTIVITY + TRACE, type=positive, default=20000,
         help="Per-harness discovery header limit (20000, as sessions.py with a project filter)"),
-    arg("--max-scan-bytes", ops=TARGET_HISTORY + ACTIVITY, type=positive, default=64 * 1024 * 1024, help="Per-harness scan byte limit"),
-    arg("--max-events", ops=TARGET_HISTORY + ACTIVITY, type=positive, default=25000, help="Per-harness event limit"),
+    arg("--max-scan-bytes", ops=TARGET_HISTORY + ACTIVITY + TRACE, type=positive, default=64 * 1024 * 1024, help="Per-harness scan byte limit"),
+    arg("--max-events", ops=TARGET_HISTORY + ACTIVITY + TRACE, type=positive, default=25000, help="Per-harness event limit"),
     arg("ref", ops="show", help="Returned snapshot/report/source/node/edge reference"),
     arg("--start-line", ops="show", type=positive, default=1),
     arg("--lines", ops="show", type=positive, default=80),
@@ -181,7 +185,7 @@ GRAPH_ARGS = (
     *(arg("--" + name, ops=RECALL, type=positive)
       for name in ("max-recordings", "max-candidates", "max-scan-bytes", "max-events", "max-commits")),
     arg("--no-sessions", ops=RECALL, action="store_true", help="Git only; skip recordings"),
-    arg("--budget", ops=("query", "inspect", "show", "recall", "activity"), choices="POLICIES", default="standard"),
+    arg("--budget", ops=("query", "inspect", "show", "recall", "activity", "trace"), choices="POLICIES", default="standard"),
 )
 
 def constants():
@@ -225,11 +229,11 @@ class GraphParser(argparse.ArgumentParser):
 def graph_parser():
     """remember.py: every operation, one parser."""
     shared = add(argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS), GRAPH_SHARED)
-    p = GraphParser(description="Remember: recall, map, find, inspect, activity, show, query.", parents=[shared])
+    p = GraphParser(description="Remember: recall, map, find, inspect, trace, activity, show, query.", parents=[shared])
     sub = p.add_subparsers(dest="action")
-    for name in GRAPH + ("inspect", "recall", "activity"):
+    for name in GRAPH + ("inspect", "recall", "activity", "trace"):
         op = OPERATIONS[name]
-        text = op.summary if name in ("inspect", "recall", "activity") else op.help
+        text = op.summary if name in ("inspect", "recall", "activity", "trace") else op.help
         q = sub.add_parser(name, help=text, description=text, parents=[shared])
         add(q, GRAPH_ARGS, name)
     sub.choices["query"].description = COMMON["query"] + " SQL dialect: SQLite."

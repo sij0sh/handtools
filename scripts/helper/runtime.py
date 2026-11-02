@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import catalog, continuations, delivery, graph_cli, recall, session_show, target_history
+from . import catalog, continuations, delivery, graph_cli, recall, session_show, target_history, trace
 from .bindings import parse_params, parse_types, types_for
 from .budget import Deadline, POLICIES
 from .engine import Input, SQLiteQuery, IDENTIFIER, infer_type
@@ -55,14 +55,14 @@ def normalize_prefix(argv):
         index += 1
         if '=' not in token and option.nargs != 0:
             index += 1
-    if index and index < len(argv) and argv[index] in {*GRAPH, "inspect", "recall", "activity"}:
+    if index and index < len(argv) and argv[index] in {*GRAPH, "inspect", "recall", "activity", "trace"}:
         return [argv[index], *argv[:index], *argv[index + 1:]]
     return argv
 
 
 def normalize(args, argv):
     args = graph_cli.defaults(args)
-    if args.action in ("query", "inspect", "show", "recall", "activity"):
+    if args.action in ("query", "inspect", "show", "recall", "activity", "trace"):
         policy = POLICIES[args.budget]
         if args.action == "recall":
             # Old work is the point: always read the deep commit/recording window.
@@ -401,6 +401,11 @@ class Runtime:
                               "meaning": "recorded operations; matching a path does not prove a commit contains the edit"},
                     "next": [recover] if recover else []}
         return Result(document, digest([selected, coverage]), argv)
+
+    def trace(self, deadline):
+        providers = Providers(self.args, self.store, deadline)
+        document, signature = trace.build(self.args, self.store, providers, deadline, self.base_argv())
+        return Result(document, signature, self.base_argv())
 
     def recall(self, deadline):
         args = self.args

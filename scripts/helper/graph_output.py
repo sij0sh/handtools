@@ -1,9 +1,11 @@
 """Compact presentation shared by retained graph reports and transient history."""
 import json
 
-COLUMNS = ('kind', 'role', 'path', 'line', 'qualname', 'name', 'distance', 'via',
-           'consumers', 'test_consumers', 'dependencies', 'callers', 'caller_files',
-           'lines', 'size', 'count', 'state', 'reason', 'files')
+COLUMNS = ('section', 'kind', 'role', 'dimension', 'action', 'tool', 'outcome', 'relation',
+           'path', 'paths', 'line', 'qualname', 'name', 'distance', 'via', 'consumers',
+           'test_consumers', 'dependencies', 'callers', 'caller_files', 'lines', 'size',
+           'count', 'state', 'reason', 'files', 'sha', 'boundary_status', 'value',
+           'subject', 'text', 'request')
 
 
 # Defaults and identifiers already carried by `ref`; --verbose keeps them.

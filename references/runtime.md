@@ -3,7 +3,7 @@
 ## Operations
 
 `remember.py` is the common entrypoint. `recall`, `map`, `find`, `inspect`,
-`show`, and `query` cover ordinary work.
+`activity`, `trace`, `show`, and `query` cover ordinary work.
 
 `recall WORDS` ranks non-merge commits against feature words: each term weighs
 log(1 + commits / commits containing it); subject x3, body x1, best path x2,
@@ -24,6 +24,21 @@ algorithm, including separately labeled direct/file-only/indirect consumers.
 collect evidence; they do not establish root cause or security findings.
 Ambiguity returns candidates without searching history. `--plan` describes the
 recipe without executing it. `--no-sessions` disables its recording lane.
+
+`trace REF` reconstructs one bounded episode around a returned event JSON ref,
+cite token, or full commit SHA. Default scope is the anchor's human exchange;
+parallel branches stay separate lanes and are never merged by timestamp. It
+reports branch-local operations, checkpoint claims and their coverage gaps
+(boundary to publication, publication to frontier), and independent observations
+for requested, edited, verified, committed, pushed, live-confirmed and
+blocked/remaining. A test pass, commit, push and live run stay distinct; unknown
+outcomes and unsupported checkpoint shapes stay visible. Commit anchors keep each
+witness exchange separate and add path-overlap context labeled `related_context`
+(shared path, not proven contribution). `next` offers `show` expansions plus
+`trace` widen refs for neighboring exchanges, forks, gaps and related lanes. An
+exact event ref reads only its recording; a commit anchor uses the bounded
+recording archive, with a targeted SHA/subject rescan when the archive horizon
+omits the witness. Results are transient.
 
 `show` accepts retained source/node/edge/report refs, session citation tokens or
 JSON refs, full commit SHAs (`git:SHA` also works), and `continue:...` tokens.
@@ -122,7 +137,7 @@ saved: a continuation over `--input NAME=-` carries `stdin.tables` and needs the
 same rows piped to `show` again; different rows fail as a source change, a
 terminal stdin fails instead of blocking.
 
-query/inspect/recall/session-show results are transient. `map`/`find` retain
+query/inspect/recall/activity/trace/session-show results are transient. `map`/`find` retain
 source-only snapshots/reports. Transcript text
 never goes through the graph report store. Selected event text may require a
 larger `--max-bytes`; an executable delivery continuation increases that cap

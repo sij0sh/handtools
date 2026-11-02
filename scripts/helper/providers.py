@@ -1,13 +1,16 @@
 """Invocation-local provider registry; shared source, Git and recording datasets."""
 import os
+from types import SimpleNamespace
 from . import (catalog, cite, commit_links, edit_hunks, git_file_history, graph_cli, graph_queries,
                 operation_facts, repo_files)
 from .engine import Input
 from .root_map import parse_root_map, remap
 from .git_resolve import GitResolver
 from .graph_store import digest
+from .options import DiscoveryOptions, ScanOptions, TEXT_BYTES_DEFAULT
 from .projection import clean, human
-from .recording_scan import DiscoveryUnavailable, scan_project
+from .recording_scan import DiscoveryUnavailable, lineages, scan_group, scan_project, text_budget
+from .discovery import candidate_files
 from .records import RecordCache
 
 
@@ -43,6 +46,8 @@ class Providers:
         self.repo_id = None
         self.roots = {}
         self.mapped_events = set()
+        # Focused scans read one referenced recording first instead of the bounded archive.
+        self.recording_files = None
 
     def load(self, names):
         for provider in catalog.providers_for(names):
@@ -76,10 +81,78 @@ class Providers:
         self.coverage["graph"] = {"complete": not gaps, "incomplete_reasons": sorted({g["area"] for g in gaps}),
                                   "snapshot": self.graph.snapshot, "gaps": len(self.graph.body["gaps"])}
 
+    def candidate_recordings(self):
+        """Bounded discovery of every project-matched candidate, without scanning them."""
+        options = DiscoveryOptions(
+            files=tuple(getattr(self.args, "recordings", None) or ()), harness="auto",
+            project=self.store.root, max_files=getattr(self.args, "max_candidates", 20000),
+            max_candidates=getattr(self.args, "max_candidates", 20000),
+            max_record_bytes=getattr(self.args, "max_record_bytes", 2 * 1024 * 1024),
+            also_roots=tuple(m.partition("=")[0] for m in getattr(self.args, "root_map", None) or ()))
+        return candidate_files(options, {"duplicates_skipped": 0})
+
+    def match_recordings(self, sha, subject):
+        """Find candidate recordings whose bytes name this commit, before a bounded rescan."""
+        needles = [sha.lower().encode()]
+        if subject and len(subject.strip()) >= 8:
+            needles.append(subject.strip()[:120].lower().encode())
+        budget = getattr(self.args, "max_scan_bytes", 64 * 1024 * 1024)
+        per_file = getattr(self.args, "max_record_bytes", 2 * 1024 * 1024)
+        files, read, matched, scanned = 0, 0, [], 0
+        for _, group_files, _ in self.candidate_recordings():
+            files += len(group_files)
+            for name in group_files:
+                if read >= budget:
+                    break
+                try:
+                    with open(name, "rb") as stream:
+                        blob = stream.read(min(per_file, budget - read))
+                except OSError:
+                    continue
+                read += len(blob)
+                scanned += 1
+                if any(needle in blob.lower() for needle in needles):
+                    matched.append(name)
+            if read >= budget:
+                break
+        return matched, {"candidates": files, "files_read": scanned,
+                         "files_matched": len(matched), "bytes_scanned": read,
+                         "complete": read < budget, "basis": "sha_or_subject_text"}
+
+    def reload_recordings(self, files):
+        """Replace recording-derived tables with a targeted scan, keeping Git facts loaded."""
+        self.recording_files = list(files)
+        self.recordings = []
+        keep = {"recordings", "operations", "checkpoints", "links"}
+        self.loaded = [name for name in self.loaded if name not in keep]
+        for key in ("events", "rows", "sessions", "operations", "checkpoints", "commit_links"):
+            self.tables.pop(key, None)
+        self.load({"recordings", "operations", "checkpoints", "commit_links"})
+
     def load_recordings(self):
         scope = {"duplicates_skipped": 0}
+        focused = bool(self.recording_files)
         try:
-            self.recordings, groups, _, excluded, _ = scan_project(self.args, self.store.root, scope)
+            if focused:
+                # An exact ref is already the anchor: read that file, still within the same budgets.
+                files = tuple(str(item) for item in self.recording_files)
+                groups, excluded = [], ()
+                options = DiscoveryOptions(files=files, harness="auto", project=None, max_files=len(files),
+                                           max_candidates=max(len(files), 1),
+                                           max_record_bytes=getattr(self.args, "max_record_bytes", 2 * 1024 * 1024))
+                for harness, group_files, counters in candidate_files(options, scope):
+                    policy = SimpleNamespace(max_text_bytes=None, max_scan_bytes=self.args.max_scan_bytes)
+                    scan = ScanOptions(harness=harness, max_scan_bytes=self.args.max_scan_bytes,
+                                       max_events=self.args.max_events,
+                                       max_text_bytes=text_budget(policy, group_files, counters))
+                    self.recordings.extend(scan_group(group_files, scan, counters))
+                    groups.append({"harness": harness, **counters})
+                keys = lineages(self.recordings)
+                for recording in self.recordings:
+                    for event in recording["events"]:
+                        event["independent_session"] = keys[recording["file"]]
+            else:
+                self.recordings, groups, _, excluded, _ = scan_project(self.args, self.store.root, scope)
         except DiscoveryUnavailable as error:
             if getattr(self.args, "recordings", []):
                 raise
@@ -114,7 +187,11 @@ class Providers:
                                           or interpretation["ambiguous_call_ids"])
         self.coverage["recordings"] = {"complete": not reasons, "incomplete_reasons": reasons,
                                        "files_scanned": sum(g.get("files_scanned", 0) for g in groups),
-                                       "project": self.store.root, "current_session_exclusion": "configured" if excluded else "unknown",
+                                       "project": self.store.root,
+                                       "scope": (("selected recording" if len(files) == 1
+                                                  else "selected recordings") if focused else "matched archive"),
+                                       "current_session_exclusion": ("not_applied_focused" if focused else
+                                                                     "configured" if excluded else "unknown"),
                                        "interpretation": interpretation,
                                        "signature": digest([g.get("snapshot", []) for g in groups])}
 

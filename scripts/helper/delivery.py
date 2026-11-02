@@ -13,7 +13,7 @@ from .graph_store import canonical
 from .graph_output import check_fields, compact_row, project_rows, render_table
 
 # Operations whose results may carry transcript-derived text; they never reach the report store.
-TRANSIENT_OPERATIONS = {"inspect"}
+TRANSIENT_OPERATIONS = {"inspect", "trace"}
 # Room for the continuation token itself when sizing a budget for an oversized row.
 NEXT_MARGIN = 2048
 

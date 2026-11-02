@@ -27,8 +27,12 @@ or add `--repo DIR`. Use Python 3.11+ (`python` or `py -3` on Windows).
 | `find TEXT` | Locate a concrete path, symbol, error or contract. |
 | `inspect TARGET` | Source, potential consumers, dependencies and history for one target. |
 | `activity TARGET` | Recorded operations for one file or symbol: action, path, outcome, basis, witnesses. |
+| `trace REF` | Branch-aware episode around a request, failure, checkpoint or commit: chronology, coverage gaps, per-dimension observations, deepen/widen refs. |
 | `show REF` | Expand source, session or commit evidence; execute a returned continuation. |
 | `query 'SELECT ...'` | SQLite over built-in tables; `describe TABLE` gives columns. |
+
+Before resuming work or after a reported failure, `trace` the last relevant event
+or commit. A checkpoint is a claim with a coverage boundary, not current state.
 
 Read the evidence before judging behavior, root cause, ownership or safety.
 Static relationships are potential links, not proof. Check historical assumptions
