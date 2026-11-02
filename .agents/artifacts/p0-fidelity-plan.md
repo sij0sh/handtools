@@ -157,8 +157,8 @@ Minimum operation fields:
 - Semantics: tool, action, outcome, exit code when known, interpretation status,
   adapter/basis.
 - Evidence: normalized path and raw path/location, requested or observed range
-  with range basis, submitted/observed content refs, optional witnessed commit SHA
-  and link basis. Unknown fields remain null. Hash only exact available content;
+  with range basis and submitted/observed content refs. Commit witnesses join
+  through `commit_links`, not a scalar commit SHA on the operation. Unknown fields remain null. Hash only exact available content;
   do not present a partial read hash as a whole-file version.
 
 Minimum checkpoint fields:
@@ -235,6 +235,131 @@ input rejection, deep coverage widening and transient retention checks pass.
 - [ ] Replay tokens contain refs/arguments/fingerprints, never transcript payloads;
   no new retained transcript/checkpoint/operation artifact.
 - [ ] Existing recall golden path and inspect/request evidence tests remain green.
+
+## Critical review: joins and remaining-slice contracts
+
+Proposed amendments for review; no implementation authorized. These refine F2,
+F7, F11 and the handoff to slices 2-4, not expand slice 1 into investigation.
+
+### Gaps in current code
+
+- `recall.py:requests` groups by native session, chooses one prior request and
+  retains one request per SHA. Recording/branch identity and multiple contexts
+  are lost; `rank` only returns commits. Session scanning != session recall.
+- `target_history.py:compact` groups commits by SHA and keeps one `recorded_in`;
+  turn grouping uses session/turn rather than recording/branch identity.
+- `catalog.py` has composite commit keys and recording keys, but no witness key.
+  Operation/path rows with one optional SHA cannot express all commit relations.
+- `primer.py` uses first request/last reply heuristics and drops session material
+  before commits under budget pressure. Long/final replies are not decisions.
+- Existing D30-D39 set the right direction but lack measurable retrieval,
+  eligibility and cross-session presentation gates.
+
+### Proposed decisions
+
+- [x] R1: Join identities? Events/turns use recording plus original event/branch
+  identity; native session IDs are metadata. Commits use `(repo_id, sha)`.
+  Preserve recorded cwd/worktree scope: shared repository identity does not prove
+  two sessions observed the same working state.
+- [x] R2 (after: R1): Witness cardinality? Extend transient `commit_links` with
+  stable `witness_id`, optional `operation_id`, relation/basis, original refs,
+  recorded/resolved SHA and separate repository-resolution/validation status.
+  One operation may witness multiple commits; one commit may have many witnesses.
+  IDs derive from source event/context ordinal, not a possibly unresolved SHA.
+  Keep operation/path and witness relations separate; aggregate each before joins
+  to avoid path x witness multiplication. Count distinct operations/recordings.
+- [x] R3 (after: R2): Several sessions before one commit? Retrieve all eligible
+  related session lanes within scanned scope, not only the committing session.
+  Distinguish `commit_witness`, `related_context`, and supported content linkage.
+  Related context can use explicit references or scoped path/content matches,
+  carrying its basis; chronology alone is insufficient. Matching a path does not
+  prove contribution, and matching content does not prove authorship.
+  Keep weaker candidates expandable, not silently promoted to contributors.
+- [x] R4 (after: R3): Relation owner? Slice 1 preserves witnesses and raw facts.
+  Slice 2 builds transient related-context projections from existing evidence;
+  no global task graph or new persistent association store. Each relation carries
+  commit identity, recording/event identity, evidence refs and basis. Keep request
+  and decision-only context eligible even without an edit. Preserve multiplicity
+  through compact views with bounded excerpts, omission counts and continuation.
+- [x] R5: Independent recall? Operations, requests and checkpoints are available
+  with empty commits/links or unavailable Git. Legacy public recall may remain
+  commit-oriented until migration; new shared retrieval must not inherit that gate.
+- [x] R6 (after: R5): Frequency? Slice 3 searches bounded session and commit lanes
+  on every ordinary investigate, including when commit hits are strong. Skill
+  triggers: before implementation, resume, changed goal, new failure. Search often;
+  show only eligible useful leads. Exact evidence tools remain uninjected.
+  No harness guarantee if the skill is not invoked.
+- [x] R7 (after: R6): High signal? Scope/provenance eligibility precedes ranking.
+  Explicit requirements, supported choice/rationale exchanges, failed/corrected
+  attempts and unresolved claims qualify as leads, not established conclusions.
+  Acknowledgements, wrappers, copied packets, generic progress and routine reads
+  do not independently qualify for proactive delivery; remain in explicit history.
+  Short constraints survive; verbose/final assistant text gains no special status.
+  Filter wrappers in displayed excerpts as well as selection. Repetition is not
+  independent support. Never fill empty categories with weak evidence.
+- [x] R8 (after: R7): Fairness? Reserve bounded scan work for older/repo-context
+  evidence and output room for eligible session-only leads. Diversify first-page
+  excerpts across recordings/episodes without merging distinct identical requests.
+  Disclose selected horizon and eligible overflow; continuations expose the rest.
+  Do not claim all relevant sessions were found in a bounded archive.
+
+### Join contract / expected example
+
+`events -> sessions USING(recording_id)`; operation facts retain that identity.
+`commit_links -> commits ON repo_id AND sha`; witnesses retain event/operation refs.
+Related-context projections are separate many-to-many joins, not fabricated
+commit witnesses. Null/unresolved joins retain original evidence via left joins.
+Do not join recordings to commits by bare session ID, timestamp or SHA alone.
+
+Example: A records a requirement, B implements/revises it, C commits. A commit
+result can show A's requirement, B's observed edits and C's witness in separate
+lanes, each with its association basis. Only supported evidence establishes that
+B's content is present in the commit; unrelated earlier session D is excluded.
+Missing contribution proof must not hide relevant A/B context. Missing context
+proof must not label every earlier session as related.
+
+### Slice gates and ownership
+
+1. **Fidelity:** fix identity/multiplicity losses in existing consumers; add witness
+   keys/status and independent-input tests. Preserve recording/cwd/content refs
+   needed later. Distinguish scan, interpretation and delivery coverage.
+2. **Trace:** start from requests/failures/checkpoints without commits; expose
+   multi-session commit context with labeled noncausal relations. Reconcile only
+   supported branch evidence; assistant reports remain claims. Explicitly test
+   compound shell failure after a successful commit: overall failure does not
+   erase a directly observed commit or imply all suboperations succeeded.
+3. **Investigate:** enforce R6-R8 through shared selection for skill/inspect/map.
+   Replace primer's implicit ancestor-root fallback with explicit historical roots.
+   Report discovered/scanned/interpretable/eligible/selected/delivered separately;
+   suppression reasons belong to selection, not scan incompleteness.
+4. **Cleanup/signals:** retire old paths only after session-only and multi-session
+   parity, not merely reusable-commit parity. Signals cannot turn repetition or
+   context associations into causality.
+
+### Additional acceptance / evaluation
+
+- [ ] A/B/C example returns every eligible lane; unrelated D excluded; bounded
+  omissions visible. Several witnesses/requests never collapse into one intent.
+- [ ] Reused native session/turn IDs, sibling branches, multiple worktrees and
+  identical SHAs across repository lanes cannot cross-attribute requests.
+- [ ] One operation/multiple commits and multiple paths/witnesses do not multiply
+  operation or independent-session counts. Unknown links remain inspectable.
+- [ ] Session-only invariant/failure/decision lead survives no Git and strong commit
+  hits; no-commit trace works without loading commit discovery.
+- [ ] >100-recording noise archive: older scoped constraint in the allocated scan
+  survives recent progress chatter; all-noise archive yields qualified empty views.
+- [ ] Short prohibition beats verbose generic status; copied memory/current
+  invocation cannot corroborate itself; sibling correction cannot supersede it.
+- [ ] Tiny budgets preserve category states and eligible-session continuation.
+- [ ] Future-hidden labeled replay compares baseline/candidate under equal budgets:
+  session-search execution rate at eligible triggers; session-only recall@budget;
+  first-page precision; low-signal byte fraction; single-session dominance;
+  scanned age/horizon, latency and omitted eligible leads. No persistent metrics DB.
+  Deterministic fixtures require zero false cross-branch links/accepted decisions.
+  Choose numeric quality targets after labeling replay cases; volume is not success.
+
+Open implementation input remains real structured-tool/checkpoint samples. Real
+usage frequency and retrieval quality are not established by current unit tests.
 
 ## Inputs, risks, handoff
 
