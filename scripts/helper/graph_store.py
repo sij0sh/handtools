@@ -28,6 +28,20 @@ def digest(value):
     return hashlib.sha256(canonical(value)).hexdigest()
 
 
+def canonical_path(name):
+    """One spelling for one file: compare paths after resolve(), not literally.
+
+    Symlinked roots (/var vs /private/var, macOS tempdirs) and NTFS short names
+    or junctions make the same file spell differently mid-run: argv helpers resolve
+    paths while recorded refs keep the harness spelling. Absolute fallback keeps
+    the comparison total for paths whose ancestors are unreadable or missing.
+    """
+    try:
+        return str(Path(name).expanduser().resolve())
+    except OSError:
+        return str(Path(name).absolute())
+
+
 def git(root, *args):
     try:
         p = subprocess.run(["git", "--no-optional-locks", "-C", str(root), *args],

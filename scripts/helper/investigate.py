@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import cite, commit_links, commit_rank, operation_facts, reconciliation
 from .budget import check
-from .graph_store import digest
+from .graph_store import canonical_path, digest
 from .options import ScanOptions
 from .projection import human
 from .reader import scan_file
@@ -135,7 +135,7 @@ def identify(args, providers):
         return {"state": "unknown", "reason": f"discovery unavailable: {error}"}
     found = sorted({name for _, files, _ in groups for name in files
                     if cite.recording_id(name) in ids
-                    or (session_file and os.path.abspath(name) == os.path.abspath(session_file))})
+                    or (session_file and canonical_path(name) == canonical_path(session_file))})
     if not found:
         return {"state": "unknown", "reason": "harness identity matched no recording of this repository"}
     if len(found) > 1:

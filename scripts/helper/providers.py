@@ -6,7 +6,7 @@ from . import (catalog, cite, commit_links, edit_hunks, git_file_history, graph_
 from .engine import Input
 from .root_map import parse_root_map, remap
 from .git_resolve import GitResolver
-from .graph_store import digest
+from .graph_store import canonical_path, digest
 from .options import DiscoveryOptions, ScanOptions, TEXT_BYTES_DEFAULT
 from .projection import clean, human
 from .recording_scan import DiscoveryUnavailable, lineages, scan_group, scan_project, scan_scheduled, text_budget
@@ -278,8 +278,9 @@ class Providers:
         path, _ = remap(path, self.root_map)
         path = os.path.abspath(path)
         try:
-            if os.path.commonpath([path, self.store.root]) == self.store.root:
-                return os.path.relpath(path, self.store.root).replace(os.sep, "/")
+            real, root = canonical_path(path), canonical_path(self.store.root)
+            if os.path.commonpath([real, root]) == root:
+                return os.path.relpath(real, root).replace(os.sep, "/")
         except ValueError:
             pass
         return None

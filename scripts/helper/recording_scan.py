@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from .graph_store import canonical_path
 from .reader import scan_file
 from .budget import check
 from .options import TEXT_BYTES_DEFAULT, TEXT_BYTES_AUTO_CAP
@@ -126,8 +127,8 @@ def schedule(groups, files, exclude=()):
     First half: newest-first, harnesses rotated. Second half: the rest alternating
     oldest/newest, harnesses rotated. Returns [(harness, path, lane)] and omitted count.
     """
-    exclude = {str(Path(p).absolute()) for p in exclude}
-    queues = [(h, [f for f in fs if str(Path(f).absolute()) not in exclude]) for h, fs, _ in groups]
+    exclude = {canonical_path(p) for p in exclude}
+    queues = [(h, [f for f in fs if canonical_path(f) not in exclude]) for h, fs, _ in groups]
     queues = [(h, list(fs)) for h, fs in queues if fs]
     total = sum(len(fs) for _, fs in queues)
     newest_quota = (min(files, total) + 1) // 2
