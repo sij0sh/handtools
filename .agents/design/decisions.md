@@ -1,46 +1,59 @@
 # Goal
-`remember` is stateless evidence memory: rebuild source, Git and session tables per call, expose refs, keep only one textless source snapshot per repository.
+Slim `references/{reader,runtime,graph,history}.md` to facts that change an agent's behavior, and remove legacy/deprecated code so one authoritative command surface remains.
 
 ## Constraints
-- Python 3.11+ standard library; optional tree-sitter extras; Linux/macOS/Windows.
-- Read-only on repositories and recordings; transcript text never enters the snapshot cache.
-- Agent entry point = `investigate`, then `trace`/`show`; one CLI (`scripts/remember.py`).
+- Python 3.11+ stdlib; optional tree-sitter. Stateless: no migration, no compatibility layer, no retained results.
+- Public command set stays 10 operations: `map`, `find`, `show`, `query`, `describe`, `activity`, `trace`, `signals`, `investigate`, `inspect`.
+- Envelope field set stays: `operation`, `status`, `results`, `scope`, `coverage`, `delivery`, `next`, `snapshots`, `views`.
+- Docs in scope: the four leaves only. README stays except for surfaces removed by D102. SKILL.md unchanged.
+- Suite green (270 tests, <20 s), VERSION +0.0.1 at commit.
 
 ## Condensed prior state
-Historical detail: `.agents/artifacts/decisions-archive-2026-11-02.md`.
-- D1-D16: single CLI, stdlib SQLite, prior-work recall, cache eviction. DuckDB/session verbs retired.
-- D40-D53: one derived snapshot per repo; newest only; reports retired; signed continuations; textless snapshots; investigate packet.
-- D54-D76: `recall` retired (now `commit_rank`); `investigate`/`signals`/`orientation`; inspect order source/packet/history; current `VERSION` 0.5.0.
-- Current commands: `map`, `find`, `show`, `query`, `describe`, `activity`, `trace`, `signals`, `investigate`, `inspect`.
-
-# Test suite refactor (2026-11-02)
-
-## Goal
-Keep coverage of current contracts, run the whole suite under 20 s, remove tests that test the wrong owner or duplicate another layer.
-
-## Evidence
-- Baseline: 271 tests, 24.4 s. 235 CLI invocations each started `remember.py` (~60 ms import/startup); test_graph + test_graph_features alone were 9.7 s.
-- Graph tests without explicit `--no-primer` ran bare-map orientation against the developer's real recordings (`TRACE_SESSIONS_SETTINGS` default), making runs slow and environment-dependent (`test_bare_map...` ~1 s).
-- `tests/test_graph_features.py` imported `tests/test_graph.py` and borrowed its `setUp`/`cli`/`fixture`.
-- `test_runtime.test_sql_timeout` duplicated `test_graph.test_sql_timeout` (same engine path).
-- No test targeted a removed command except explicit retirement guards (`recall`, removed primer flags).
+Full history: `.agents/artifacts/decisions-archive-2026-11-02.md`, `.agents/artifacts/p0-*.md`.
+- D1-D16: one CLI, stdlib SQLite, DuckDB/session verbs retired.
+- D40-D53: one derived textless snapshot per repo; newest only; reports, `recall`, primer lanes retired; signed continuations.
+- D54-D76: `investigate`/`signals`/`orientation`; `inspect` order source > packet > relationships > history; `recall` -> `commit_rank`.
+- D77-D85: in-process test harness; 270 tests, 5.9 s; retirement guards kept.
 
 ## Decisions
-- [x] D77: Budget? Under 20 s locally, measured not enforced. A timing assertion would be flaky on CI; profile per test instead.
-- [x] D78: CLI execution owner? `tests/support.invoke` calls `runtime.main` in-process for contract tests. Real subprocess stays for entrypoint smoke, SIGINT, and commands the test executes. Reason: preserves argparse, routing, envelopes and exit codes; removes 235 interpreter starts.
-- [x] D79 (after: D78): In-process isolation owner? `tests/support.py` patches stdout/stderr/stdin, restores env/cwd/settings, and clears `cite._recording` between calls. Reason: `discovery.SETTINGS` and cite lookup are process-global; tests must not inherit the developer archive.
-- [x] D80 (after: D78): Shared graph fixture? `tests/graph_fixture.GraphCase`; no test module imports another test module. Reason: `FeatureTests.setUp = GraphTests.setUp` coupled two files and hid fixture ownership.
-- [x] D81: Delete deprecated tests? None found; remove only the duplicate engine timeout test. Keep one-line retirement guards: they pin the current argparse error.
-- [x] D82 (after: D78): Over-engineered layers? Collapse `cli`/`raw` subprocess wrappers onto `support`; keep E2E assertion detail, including table formatting and pinned-ref failures. Do not reduce parser/resolver/reconciliation tables: they are pure, fast, and the main correctness evidence.
-- [x] D83 (after: D79): Orientation in graph tests? Always `--no-primer` or a temp empty recording settings. Bare map is the exception: it gets a temp settings file so the entrypoint still runs the default primer path without reading user archives.
-- [x] D84 (after: D78): Windows? Skip the SIGINT test on `win32`; `preexec_fn` is POSIX-only. In-process support uses only portable stdlib APIs.
-- [x] D85 (after: D81): Test count? 270; README command `python3 -m unittest discover -s tests` unchanged. No production behavior change.
+
+### Reference files
+- [x] D86: Keep rule per sentence? Delete unless the fact changes how a run interprets or acts on output. Delete anything already printed by `--help`, `describe`, `--plan`, an error message, or SKILL.md/README - reason: agent-instructions §3, a sentence whose deletion changes nothing is a no-op.
+- [x] D87: Leaf ownership? `reader` = setup only. `runtime` = envelope/paging/continuations/budgets/SQL + operation contracts not in SKILL.md. `graph` = source capture, `map`/`find`, `inspect` relationships. `history` = `investigate`/`signals`/`activity`/`trace` + `inspect` history lane + recordings.
+- [x] D88: Shared facts? State the interpretation rule inline once in each leaf that needs it, one sentence, no cross-leaf pointer - leaves route nowhere; a pointer would be a dangling read.
+- [x] D89: Version language? Refs describe one current format with no `schema version 2`, `v2`, "retired", or "legacy" wording - stateless calls cannot meet another version; version talk only invites compatibility work.
+- [x] D90: Size guard? Add `tests/test_layout.py` case: each leaf <= 6 KB, total <= 16 KB (current 28 KB) - pins the slimming against regrowth; cheap and deterministic.
+- [x] D91: `reader.md` keeps: Python 3.11+, stdlib, optional tree-sitter grammars + "reported, not installed", macOS Xcode 3.9 gotcha, `scripts/profiles`/`settings.json` as the recording-source config. Deletes: envelope/omissions paragraph, `describe`/`--help` pointer, orientation paragraph, graph/history pointers.
+- [x] D92: `runtime.md` keeps: `investigate` goal-word rule and `--path` expansion cap 3, active-session/`archive_horizon` meaning; `inspect` recipe order, intents, ambiguity, `--plan`, "no root cause"; `trace` lane/dimension/commit-anchor rules; `show` accepted refs + `selected`; SQL one-SELECT/read-only/params/`--input`/`--type`/CTE/no-DDL + one example; standard vs deep budget table; coverage vs delivery vs next semantics, oversized-row recovery, `views` per page; continuation scope/pinning/stdin replay, token data-not-shell, PowerShell 5.1 quoting; exit 0/2/130 and partial-vs-truncated. Deletes: operations prose duplicated in SKILL.md/help, table-of-tables, 4 of 5 SQL examples, cache details, `--sql` alias line, `report:` line.
+- [x] D93: `graph.md` keeps: snapshot/cache lifecycle (one per workspace, rebuild on mismatch, superseded/expired/corrupt refs fail, 14-day idle, worktree isolation); `map` bare primer behavior and `--snapshot` omission; `inspect` intents/`reach` tiers/bounds; predicate table trimmed to consequence; traversal = `IMPORTS`+`CALLS_STATIC`, tests never bridge, potential not runtime; gaps = unknown not absent; manifest missing vs not-captured; generated/vendored/lockfile listing; capture exclusions + `.rememberignore`; `find` filter semantics (`*` crosses `/`, plain path covers descendants, filters do not change capture, `--count-by` after filtering); paging/`--verbose`/`--fields`. Deletes: per-language resolver rules, exit-code/status section (runtime owns), duplicate examples, `code_items` reference.
+- [x] D94: `history.md` keeps: four view semantics + state meanings; `prior_work` weights/generic-word drop/5 paths/2000-commit window; scheduled-scan allocation and suppression (policy not gap); active-session frontier; `signals` four kinds + pi-only checkpoints + "leads not verdicts"; `inspect` history order, ranking tiers, `possible_correction`, alias/no-widening matching, symbol-identity caveats, per-harness caps; `--no-sessions` marks the lane `not_searched`; the not-built list (failure-after-fix, unchanged-content rereads); cite tokens, JSON refs, human/agent/tool separation, copied-text caveat. Deletes: duplicated `investigate` prose from runtime, primer paragraph, PowerShell note (runtime owns), `describe events` pointer, "results are transient" duplicate.
+- [x] D95: Audit inventory below is exhaustive for this pass; any legacy item not listed stays. See table.
+
+### Legacy audit
+| Site | Current | Action |
+|---|---|---|
+| `envelope.load_rows` | accepts `rows[]`/`links[]`, grouped `harnesses[]`, any `schema_version <= 2` | current envelope only (D98) |
+| `delivery.py`, `runtime.py` errors, `target_history.py` | literal `2`, `2`, internal `schema_version: 1` | one `SCHEMA_VERSION`; drop internal field (D98) |
+| `catalog.py` | `CATALOG["rows"] = events`; `code_items` grain cites gone `sessions.py` | delete alias; delete `code_items` (D102) |
+| `operations.py` | `Operation.family`/`tier`, `names()`, `--sql` alias, optional `--regex`, ignored `--primer/--no-primer`, "legacy" help | remove (D96, D97) |
+| `graph_cli.py` | second `parser()`, duplicate `defaults()`, legacy `run()` dispatcher | fold into `runtime`/`operations` (D96) |
+| `graph_store.py` | `report:` guard, `report-` cleanup prefix | delete (D100) |
+| `graph_output.py` | "retained graph reports" docstring, `report` table fallback, unused `COLUMNS` | delete (D100, D101) |
+| `reconciliation.py` | `command_kind()` backward-compatible single class | delete dead wrapper (D101) |
+| `graph_queries.py` | `inputs()` "compatibility SQL" docstring | reword (D101) |
+
+- [x] D96: Single command owner? `operations.py` declares operation, args, defaults, route, summary. `runtime.normalize` derives `limit`/`max_query_rows`/primer mode. `Operation.route` dispatches; `graph_cli` keeps only `get_graph`/`show`/map-find implementations. Delete `family`, `tier`, `names()`, `GRAPH`, `graph_cli.parser`, `graph_cli.defaults`, `run()` dispatch - one owner per defaults/dispatch (defaults §2).
+- [x] D97: CLI aliases? Remove `--sql`, optional-value `--regex` (TEXT form errors), and silent `--primer/--no-primer` acceptance outside `map`; update tests to positional SQL and `--regex PATTERN` - one authoritative invocation per operation.
+- [x] D98: Envelope input? Accept a JSON array, JSONL, or object with `schema_version == SCHEMA_VERSION` and `results[]`. Reject other versions, `rows[]`, `links[]`, grouped `harnesses[]`. Export `SCHEMA_VERSION` from `envelope.py`; `delivery`/`runtime` errors use it; drop `target_history` `schema_version: 1` - stateless: no producer emits old shapes.
+- [x] D99: Cache schema mismatch? `load_stored` raises `ValueError` when `body["schema"] != SCHEMA`; current-capture reuse catches it and rebuilds; a pinned `--snapshot` ref returns the error - user directive; rebuild is safe because the snapshot is derived.
+- [x] D100: Retired refs? Delete `report:` guard, `report-` supersede prefix, `graph_output` `report` fallback; a bad ref gets the generic invalid-reference error - no `report:` ref can exist in a stateless system.
+- [x] D101: Dead code? Delete `command_kind`, `graph_output.COLUMNS`, `ignored_primer`, `delivery.json_size` (no caller). Reword stale docstrings in `catalog`, `operations`, `graph_queries` - each is a second, drifting description.
+- [x] D102: Public SQL tables (after: O1)? Drop `rows`; drop `code_items` and build the internal `items_by_path` map from graph symbol nodes. Update README table list, refs, `test_runtime` - `nodes` is the sole symbol identity; `code_items` is a derived second copy (defaults §2).
+- [x] D103: Tests? Update call sites for removed aliases; keep one retirement guard per removed surface (argparse error, unknown table) per D81; add cache-schema rebuild test and envelope-version rejection test - pins removals without restoring old paths.
+- [x] D104: Order? Code refactor -> tests green -> rewrite refs to post-refactor behavior -> size guard -> VERSION 0.5.1 -> one commit - docs must describe the shipped surface, not the old one.
+
+## Open
+- [ ] O1: Accept the breaking public surface (remove `--sql`, TEXT+`--regex`, `CATALOG["rows"]`, `code_items`)? Recommend yes - stateless and single-owner defaults; a published skill may have external SQL that names them.
 
 ## Challenge
-Two implementers could differ on which CLI assertions become in-process (D78), how global settings/caches are isolated (D79), or whether to delete "low-value" retirement guards (D81). D83 fixes the archive dependence; D84 fixes the Windows gap. No material choice left open.
-
-## Outcome (2026-11-02)
-- 270 tests, OK, 5.9 s locally (target <20 s); repeated runs stable. Slowest: SIGINT test ~1.0 s; all others <0.12 s.
-- Removed: duplicate `test_runtime.test_sql_timeout`; per-module subprocess CLI boilerplate; cross-module test inheritance.
-- Added: `tests/support.py`, `tests/graph_fixture.py`; `--no-primer`/empty-settings isolation in graph tests; Windows skip for SIGINT.
-- Evaluation: no deprecated tests; two retirement guards kept; over-engineering was infrastructure (235 process launches, borrowed fixtures), not assertion depth. `test_large_map...` asserted the substring `DIRECTOR`; now `DIRECTORIES`.
+Two implementers could still diverge on (a) which of the listed audit rows are public contract breaks - fixed by O1; (b) how much per-language graph detail survives - fixed by D93 keep/delete lists; (c) whether shared facts are duplicated inline - fixed by D88. No other material choice left once O1 is answered.
