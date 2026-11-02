@@ -59,7 +59,9 @@ their schema even during planning.
 | `events` (`rows` alias) | Normalized recorded event |
 | `sessions` | One recording: span, counts, first request; join `events USING(recording_id)` |
 | `commits`, `changes` | Git commits and changes against each parent basis |
-| `commit_links` | Recorded/inferred/unresolved event-to-commit witness |
+| `commit_links` | Recorded/inferred/unresolved event-to-commit witness; one operation may have many |
+| `operations` | One operation/path association; missing outcome stays `unknown` |
+| `checkpoints` | Original checkpoint claim plus branch-resolved coverage boundary |
 | `edit_hunks`, `edit_symbols` | Recorded edit evidence and explicitly qualified symbol mappings |
 | `file_status` | Live Git worktree metadata; distinct from pinned `files` |
 

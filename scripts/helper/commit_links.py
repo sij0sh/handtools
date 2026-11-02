@@ -8,14 +8,18 @@ shared by several nearby commits stays ``ambiguous_subject``. Commands whose SHA
 cannot be recovered stay as ``unresolved`` witnesses with a null SHA.
 """
 import datetime as dt
+import json
+import re
 
 from .git_commands import (assign_shas, command_cwd, commit_contexts, extract_message,
                            normalize_subject, output_shas)
+from .profiles import pointer
 
 GRAIN = "one event-to-commit witness"
 # Subject matches farther than this from the recorded command are not candidates.
 WINDOW_SECONDS = 24 * 3600
-COLUMNS = {"recording_id": "VARCHAR", "event_id": "VARCHAR", "session": "VARCHAR", "harness": "VARCHAR",
+COLUMNS = {"witness_id": "VARCHAR", "operation_id": "VARCHAR", "relation": "VARCHAR",
+           "recording_id": "VARCHAR", "event_id": "VARCHAR", "session": "VARCHAR", "harness": "VARCHAR",
            "timestamp": "VARCHAR", "repo_id": "VARCHAR", "repo": "VARCHAR", "command_cwd": "VARCHAR",
            "sha": "VARCHAR", "recorded_sha": "VARCHAR", "subject": "VARCHAR", "command_subject": "VARCHAR",
            "command_offset": "BIGINT", "basis": "VARCHAR", "confidence": "VARCHAR", "failed": "BOOLEAN",
@@ -37,15 +41,104 @@ def _subject_match(resolver, repo, subject, when):
         return rows[0][0], rows[0][1], "repo_subject"
     return None, None, "ambiguous_subject" if rows else None
 
+def _shas(value):
+    """Every full SHA named by a structured commit result, in payload order."""
+    found = []
+    def walk(item):
+        if isinstance(item, dict):
+            for key, value in item.items():
+                if isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F]{40}", value):
+                    found.append(value.lower())
+                else:
+                    walk(value)
+        elif isinstance(item, list):
+            for child in item:
+                walk(child)
+        elif isinstance(item, str):
+            found.extend(match.lower() for match in re.findall(r"\b[0-9a-fA-F]{40}\b", item))
+    try:
+        walk(json.loads(value) if isinstance(value, str) and value.lstrip().startswith(("{", "[")) else value)
+    except ValueError:
+        walk(value)
+    return list(dict.fromkeys(found))
+
+
+def _result_details(result_event, cache):
+    """The recorded tool-result details object, if the harness kept one."""
+    if not result_event:
+        return {}
+    try:
+        record = cache.get(result_event["ref"])
+        for path in ("/message/details", "/details", result_event.get("payload_pointer", "")):
+            value = pointer(record, path)
+            if isinstance(value, dict):
+                return value
+        return {}
+    except (KeyError, IndexError, TypeError, ValueError, OSError):
+        return {}
+
+
+def _structured_witnesses(event, recording, by_ref, cache, resolver, fallback):
+    """Commit witnesses read from a structured commit-plan/record result; failures never establish a commit."""
+    if event.get("tool") not in ("git_commit_plan", "git_record"):
+        return []
+    result_ref = event.get("result_ref") or {}
+    result_event = by_ref.get((result_ref.get("offset"), result_ref.get("item", 0)))
+    # A missing result is unknown; never infer a commit from the submitted arguments.
+    output = cache.payload(result_event) if result_event else ""
+    details = _result_details(result_event, cache)
+    try:
+        payload = json.loads(output) if isinstance(output, str) and output.lstrip().startswith(("{", "[")) else None
+    except ValueError:
+        payload = None
+    # A commit result may also echo its base; only the result's commit field is a new commit.
+    named = [details.get("sha")] if isinstance(details.get("sha"), str) else []
+    if not named and isinstance(payload, dict):
+        named = [payload.get(key) for key in ("sha", "commit", "commitSha", "new_sha", "head")
+                 if isinstance(payload.get(key), str)]
+    shas = named or _shas(output)
+    failed = (event.get("outcome") == "failed" or (result_event and result_event.get("outcome") == "failed"))
+    repo = resolver.repo(event.get("cwd") or recording.get("root")) or resolver.repo(fallback)
+    subject = None
+    if isinstance(payload, dict):
+        subject = payload.get("subject") or payload.get("message")
+        commits = payload.get("commits")
+        if not subject and isinstance(commits, list) and commits and isinstance(commits[0], dict):
+            subject = commits[0].get("subject") or commits[0].get("message")
+    if not subject and isinstance(details, dict):
+        subject = details.get("subject") or details.get("message")
+    rows = []
+    for index, recorded in enumerate(shas or [None]):
+        full = resolver.full(repo, recorded) if repo and recorded and not failed else None
+        rows.append({
+            "witness_id": f"{event.get('recording_id')}#{event.get('event_id')}#structured:{index}",
+            "operation_id": f"{event.get('recording_id')}#call:{event.get('event_id')}",
+            "relation": "commit",
+            "recording_id": event.get("recording_id"), "event_id": event.get("event_id"),
+            "session": recording.get("session"), "harness": recording.get("harness"),
+            "timestamp": event.get("timestamp"), "repo_id": resolver.identity(repo), "repo": repo,
+            "command_cwd": event.get("cwd") or recording.get("root"), "sha": full,
+            "recorded_sha": recorded, "subject": subject, "command_subject": None, "command_offset": None,
+            "basis": ("structured_commit_record" if event.get("tool") == "git_record"
+                      else "structured_commit_result") + ("+repo" if full else ""),
+            "confidence": "recorded" if full and not failed else "unresolved",
+            "failed": bool(failed), "command": f"structured {event.get('tool')} result",
+            "output_excerpt": (output or "")[:500] or None,
+            "ref": event["ref"], "result_ref": event.get("result_ref")})
+    return rows
+
 
 def _event_witnesses(event, recording, by_ref, cache, resolver, fallback):
+    if event.get("tool") in ("git_commit_plan", "git_record"):
+        return _structured_witnesses(event, recording, by_ref, cache, resolver, fallback)
     command = event.get("command") or cache.payload(event)
     contexts = commit_contexts(command)
     if not contexts:
         return []
     result_ref = event.get("result_ref") or {}
     result_event = by_ref.get((result_ref.get("offset"), result_ref.get("item", 0)))
-    output = cache.payload(result_event) if result_event else cache.payload(event)
+    # A missing result is unknown; never infer a commit from the submitted arguments.
+    output = cache.payload(result_event) if result_event else ""
     direct = any(item[1] for item in contexts)
     assignments = assign_shas(contexts, output_shas(output, strong_only=not direct))
     failed = event.get("outcome") == "failed" or event.get("exit_code") not in (None, 0)
@@ -71,6 +164,9 @@ def _event_witnesses(event, recording, by_ref, cache, resolver, fallback):
             subject = matched or subject
             confidence = "inferred" if full else "unresolved"
         rows.append({
+            "witness_id": f"{event.get('recording_id')}#{event.get('event_id')}#{offset}",
+            "operation_id": f"{event.get('recording_id')}#call:{event.get('event_id')}",
+            "relation": "commit",
             "recording_id": event.get("recording_id"), "event_id": event.get("event_id"),
             "session": recording.get("session"), "harness": recording.get("harness"),
             "timestamp": event.get("timestamp"), "repo_id": resolver.identity(repo), "repo": repo,

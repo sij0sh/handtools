@@ -44,16 +44,32 @@ def when(value):
 
 def note(event):
     """A recorded message as a short locator: enough to judge relevance before expanding it."""
+    if human(event):
+        origin = "human"
+    elif event.get("origin") == "assistant":
+        origin = "assistant"
+    elif event.get("origin") == "harness":
+        origin = "harness"
+    elif event.get("request_origin") == "harness":
+        origin = "harness"
+    else:
+        origin = "delegated"
     return {"text": " ".join(str(event.get("text") or "").split())[:300], "timestamp": event.get("timestamp"),
-            "origin": "human" if human(event) else "delegated", "ref": event["ref"]}
+            "origin": origin, "ref": event["ref"]}
 
 
-def intent(event, requests, humans, orders, responses=None):
+def intent(event, requests, humans, orders, responses=None, request_refs=None):
     """The request that opened the event's turn, the turn's final reply, the next human message, and signals."""
-    request = event if event["kind"] == "user_message" else requests.get(event.get("turn"))
+    lane = event.get("lane")
+    branch_humans = [h for h in humans if h.get("lane") == lane] if lane is not None else humans
+    branch_orders = [h["order"] for h in branch_humans]
+    request_ref = event.get("request_ref")
+    request = (request_refs or {}).get(refkey(request_ref)) if isinstance(request_ref, dict) else None
+    if request is None:
+        request = event if event["kind"] == "user_message" else requests.get(event.get("turn"))
     response = (responses or {}).get(event.get("turn"))
-    after = bisect.bisect_right(orders, event["order"])
-    following = humans[after] if after < len(humans) else None
+    after = bisect.bisect_right(branch_orders, event["order"])
+    following = branch_humans[after] if after < len(branch_humans) else None
     signals = []
     if event.get("outcome") == "failed":
         signals.append("failed_edit" if event.get("operation") == "file_edit" else "failed_call")
@@ -296,10 +312,11 @@ def run(args, store, get_graph):
         if target["kind"] == "symbol" and symbol["qualname"] == target["qualname"]:
             by_event.setdefault((symbol["recording_id"], symbol["event_id"]), []).append(symbol)
     for recording in recordings:
-        requests, humans, responses = {}, [], {}
+        requests, humans, responses, request_refs = {}, [], {}, {}
         for event in recording["events"]:
             if event["kind"] == "user_message":
                 requests.setdefault(event.get("turn"), event)
+                request_refs[refkey(event["ref"])] = event
                 if human(event):
                     humans.append(event)
             elif event["kind"] == "assistant_message" and str(event.get("text") or "").strip():
@@ -342,7 +359,8 @@ def run(args, store, get_graph):
                 continue
             row = clean(event, SimpleNamespace(preview_chars=300))
             entry = {"category": "recorded_activity" if direct else "text_mention", "basis": basis,
-                     "evidence": row, "intent": intent(event, requests, humans, orders, responses), "symbols": match,
+                     "evidence": row, "intent": intent(event, requests, humans, orders, responses, request_refs),
+                     "symbols": match,
                      "hunks": hunks_here, "ref": event["ref"], "next": next_for(event)}
             if event["kind"] == "tool_call":
                 calls[refkey(event["ref"])] = entry
@@ -376,19 +394,24 @@ def compact(rows):
                     "text": row["subject"][:160], "activity": f"{len(row.get('changes') or [])} files"}
             if row.get("pickaxe"):
                 item["signals"] = ["pickaxe:" + row["pickaxe"]]
-            commits[row["ref"]] = item
+            commits[(row.get("repo_id") or row.get("repo"), row["ref"])] = item
             out.append(item)
             continue
         if row["category"] == "commit_witness":
             sha = row["evidence"].get("sha")
-            if sha in commits:
-                commits[sha].setdefault("recorded_in", cite.recording_id(row["ref"]["file"]))
+            commit_key = (row["evidence"].get("repo_id") or row["evidence"].get("repo"), sha)
+            if commit_key in commits:
+                recording_id = cite.recording_id(row["ref"]["file"])
+                seen = commits[commit_key].setdefault("recorded_in", [])
+                if recording_id not in seen:
+                    seen.append(recording_id)
             else:
                 out.append({"source": "witness", "id": sha, "text": "commit recorded in a session",
                             "ref": locator(row["ref"])})
             continue
         evidence, found = row["evidence"], row.get("intent", {})
-        key = (evidence.get("session"), evidence.get("turn") or refkey(row["ref"]))
+        key = (evidence.get("recording_id"), evidence.get("lane"),
+               evidence.get("turn") or refkey(row["ref"]))
         item = turns.get(key)
         if item is None:
             request = found.get("request")

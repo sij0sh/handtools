@@ -10,9 +10,11 @@ def new_scope():
             "oversized_records": 0, "malformed_records": 0, "unknown_records": 0,
             "ignored_items": 0, "duplicates_skipped": 0, "scan_complete": True,
             "unpaired_results": 0, "calls_without_result": 0, "ambiguous_call_ids": 0,
-            "ancestry_unknown": 0, "events_projected": 0, "text_bytes_stored": 0,
+            "ancestry_unknown": 0, "ancestry_cycles": 0, "events_projected": 0, "text_bytes_stored": 0,
             "text_truncated_events": 0, "text_bytes_omitted": 0, "text_complete": True,
-            "representation_variants": 0, "recordings_with_parent": 0}
+            "representation_variants": 0, "recordings_with_parent": 0,
+            "records_unrepresented": 0, "items_interpreted": 0, "interpretation_unsupported": 0,
+            "interpretation_gaps": 0, "tail_alignment_bytes": 0, "tail_alignment_skipped": 0}
 
 
 def records(path, scope, max_record, max_scan, ranges=None):
@@ -28,9 +30,28 @@ def records(path, scope, max_record, max_scan, ranges=None):
         for start, end in ranges:
             if start:
                 # Start at a complete line, never in the middle of a record.
+                # The skipped alignment bytes are charged to the scan budget too;
+                # a sampled tail must not bypass --max-scan-bytes through one huge line.
                 stream.seek(start - 1)
                 if stream.read(1) != b"\n":
-                    stream.readline()
+                    scope["tail_alignment_skipped"] += 1
+                    while True:
+                        remaining = max_scan - scope["bytes_scanned"]
+                        if remaining <= 0:
+                            scope["scan_complete"] = False
+                            scope["scan_limit_reached"] = True
+                            return
+                        chunk = stream.readline(min(65536, remaining))
+                        if not chunk:
+                            break
+                        scope["bytes_scanned"] += len(chunk)
+                        scope["tail_alignment_bytes"] += len(chunk)
+                        if chunk.endswith(b"\n"):
+                            break
+                        if len(chunk) >= remaining:
+                            scope["scan_complete"] = False
+                            scope["scan_limit_reached"] = True
+                            return
             line_no = 0
             while True:
                 check()

@@ -1,6 +1,6 @@
 """Declarative public table catalog. Dependencies drive execution and schema help."""
 from dataclasses import dataclass
-from . import commit_links, edit_hunks, git_file_history, repo_files
+from . import commit_links, edit_hunks, git_file_history, operation_facts, repo_files
 from .graph_queries import TABLES
 from .projection import FIELDS
 
@@ -15,7 +15,8 @@ class Table:
 
 
 EVENT_COLUMNS = {name: "TEXT" for name in (*FIELDS, "cite", "repo_path")}
-EVENT_COLUMNS.update({name: "INTEGER" for name in ("exit_code", "text_chars", "text_start", "text_omitted", "is_shell")})
+EVENT_COLUMNS.update({name: "INTEGER" for name in ("exit_code", "text_chars", "text_start", "text_omitted",
+                                                    "is_shell", "byte_offset", "item_index")})
 SESSION_COLUMNS = {name: "TEXT" for name in (
     "session", "parent_session", "independent_session", "harness", "harness_version", "recording_id", "root",
     "started_at", "ended_at", "first_request", "first_request_cite")}
@@ -38,11 +39,16 @@ CATALOG = {
     "edit_hunks": Table(edit_hunks.HUNK_COLUMNS, "edits", edit_hunks.HUNK_GRAIN, (), "transient"),
     "edit_symbols": Table(edit_hunks.SYMBOL_COLUMNS, "edits", edit_hunks.SYMBOL_GRAIN, (), "transient"),
     "file_status": Table(repo_files.FILE_COLUMNS, "status", "one live Git worktree path", ("path",)),
+    "operations": Table(operation_facts.OPERATION_COLUMNS, "operations", operation_facts.OPERATION_GRAIN,
+                        ("operation_id", "association_key"), "transient"),
+    "checkpoints": Table(operation_facts.CHECKPOINT_COLUMNS, "checkpoints", operation_facts.CHECKPOINT_GRAIN,
+                         ("checkpoint_id",), "transient"),
 }
 # Compatibility event alias. No positional t0/rows aliases for unrelated built-ins.
 CATALOG["rows"] = CATALOG["events"]
 DEPENDENCIES = {"graph": (), "recordings": (), "git": (), "links": ("recordings",),
-                "edits": ("recordings", "graph"), "status": ()}
+                "edits": ("recordings", "graph"), "operations": ("recordings",),
+                "checkpoints": ("recordings",), "status": ()}
 
 
 def providers_for(names):

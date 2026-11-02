@@ -1,11 +1,12 @@
 """Invocation-local provider registry; shared source, Git and recording datasets."""
 import os
-from . import catalog, cite, commit_links, edit_hunks, git_file_history, graph_cli, graph_queries, repo_files
+from . import (catalog, cite, commit_links, edit_hunks, git_file_history, graph_cli, graph_queries,
+                operation_facts, repo_files)
 from .engine import Input
 from .root_map import parse_root_map, remap
 from .git_resolve import GitResolver
 from .graph_store import digest
-from .projection import clean
+from .projection import clean, human
 from .recording_scan import DiscoveryUnavailable, scan_project
 from .records import RecordCache
 
@@ -13,7 +14,8 @@ from .records import RecordCache
 def session_row(recording, rows):
     """One recording summarized from its event rows: span, activity and the request that opened it."""
     stamps = sorted(r["timestamp"] for r in rows if r.get("timestamp"))
-    request = next((r for r in rows if r.get("kind") == "user_message" and (r.get("text") or "").strip()), None)
+    request = next((r for r in rows if r.get("kind") == "user_message" and human(r)
+                    and (r.get("text") or "").strip()), None)
     return {"session": recording["session"], "parent_session": recording.get("parent_session"),
             "independent_session": next((r.get("independent_session") for r in rows), None),
             "harness": recording.get("harness"), "harness_version": recording.get("harness_version"),
@@ -101,9 +103,19 @@ class Providers:
         if any(not g.get("scan_complete", True) for g in groups): reasons.append("scan_limit")
         if any(not g.get("text_complete", True) for g in groups): reasons.append("text_limit")
         if any(g.get("project_unknown") for g in groups): reasons.append("project_unknown")
+        keys = ("records_scanned", "items_interpreted", "records_unrepresented", "interpretation_unsupported",
+                "interpretation_gaps", "unknown_records", "ignored_items", "ancestry_unknown", "ancestry_cycles",
+                "unpaired_results", "calls_without_result", "ambiguous_call_ids", "tail_alignment_skipped",
+                "tail_alignment_bytes")
+        interpretation = {key: sum(g.get(key, 0) for g in groups) for key in keys}
+        interpretation["complete"] = not (interpretation["interpretation_unsupported"]
+                                          or interpretation["interpretation_gaps"]
+                                          or interpretation["ancestry_cycles"]
+                                          or interpretation["ambiguous_call_ids"])
         self.coverage["recordings"] = {"complete": not reasons, "incomplete_reasons": reasons,
                                        "files_scanned": sum(g.get("files_scanned", 0) for g in groups),
                                        "project": self.store.root, "current_session_exclusion": "configured" if excluded else "unknown",
+                                       "interpretation": interpretation,
                                        "signature": digest([g.get("snapshot", []) for g in groups])}
 
     def load_git(self):
@@ -120,8 +132,23 @@ class Providers:
     def load_links(self):
         rows = commit_links.witnesses(self.recordings, self.resolver, self.cache, self.resolver.repo(self.store.root))
         self.tables["commit_links"] = rows
-        missing = sum(row.get("confidence") == "unresolved" for row in rows)
+        missing = sum(row.get("confidence") == "unresolved" and not row.get("failed") for row in rows)
         self.coverage["links"] = {"complete": not missing and self.coverage["recordings"]["complete"], "unresolved": missing}
+
+    def load_operations(self):
+        rows, coverage = operation_facts.operations(self.recordings, self.cache)
+        self.tables["operations"] = rows
+        coverage["source"] = "recorded events; no fresh scan"
+        coverage["complete"] = coverage.get("complete", True) and self.coverage["recordings"]["complete"] \
+            and self.coverage["recordings"].get("interpretation", {}).get("complete", True)
+        self.coverage["operations"] = coverage
+
+    def load_checkpoints(self):
+        rows, coverage = operation_facts.checkpoints(self.recordings, self.cache)
+        self.tables["checkpoints"] = rows
+        coverage["source"] = "recorded checkpoints; boundaries resolved on recorded lanes"
+        coverage["complete"] = coverage.get("complete", True) and self.coverage["recordings"]["complete"]
+        self.coverage["checkpoints"] = coverage
 
     def load_edits(self):
         self.repo_id = self.resolver.identity(self.resolver.repo(self.store.root)) or self.store.root

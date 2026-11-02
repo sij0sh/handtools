@@ -48,7 +48,7 @@ python3 "$S/remember.py" inspect src/store.py
 python3 "$S/remember.py" query 'SELECT path, count(*) AS n FROM changes GROUP BY path ORDER BY n DESC LIMIT 10'
 ```
 
-The common interface is `recall`, `map`, `find`, `inspect`, `show` and `query`; `describe TABLE`
+The common interface is `recall`, `map`, `find`, `inspect`, `activity`, `show` and `query`; `describe TABLE`
 lists columns. Table dependencies load automatically, and SQL is dependency-free
 SQLite. Follow a result's `next[].ref` with `show`. See
 [runtime contracts](references/runtime.md).
@@ -91,6 +91,7 @@ A `possible_consumer` is a static candidate, not proof of runtime use; `reach` s
 | What could changing this affect, and why is it this way? | `inspect TARGET` |
 | Which files are imported most? | `query` over `edges` and `nodes` |
 | What was requested, discussed, or tried before? | `query` over `events`, then `show CITE` |
+| What did an agent read, edit or run for this path? | `activity TARGET` |
 | What evidence supports this result? | `show REF` |
 
 These tools help an agent test its assumptions: whether a fix reaches the right consumers, whether similar code has different responsibilities, or whether an earlier attempt already exposed a constraint. The graph supplies leads; source and recorded evidence give those leads meaning.
@@ -119,10 +120,11 @@ python3 "$S/remember.py" query --sql \
 
 ## Recover the history
 
-Source shows the current implementation. `recall` finds earlier similar commits; `inspect TARGET` adds the target's own history: prior requests, corrections, failed edits and commits (including `git log -S` for symbol names), one row per recorded turn or commit, each with a ref to expand with `show`. Transcript text is never retained in cached reports. Bare `map`'s recent-work primer reads a bounded sample of recent recordings and prints it transiently.
+Source shows the current implementation. `recall` finds earlier similar commits; `inspect TARGET` adds the target's own history: prior requests, corrections, failed edits and commits (including `git log -S` for symbol names), one row per recorded turn or commit, each with a ref to expand with `show`. `activity TARGET` shows the underlying recorded operations for one file or symbol in lane order, with unknown outcomes and commit witnesses kept separate. Transcript text is never retained in cached reports. Bare `map`'s recent-work primer reads a bounded sample of recent recordings and prints it transiently.
 
 ```bash
 python3 "$S/remember.py" recall retry backoff
+python3 "$S/remember.py" activity src/retry.py
 python3 "$S/remember.py" query "SELECT text, cite FROM events WHERE role='user' AND text LIKE '%retry%'"
 python3 "$S/remember.py" show '<returned cite>'
 ```

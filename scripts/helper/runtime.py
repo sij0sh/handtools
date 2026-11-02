@@ -55,14 +55,14 @@ def normalize_prefix(argv):
         index += 1
         if '=' not in token and option.nargs != 0:
             index += 1
-    if index and index < len(argv) and argv[index] in {*GRAPH, "inspect", "recall"}:
+    if index and index < len(argv) and argv[index] in {*GRAPH, "inspect", "recall", "activity"}:
         return [argv[index], *argv[:index], *argv[index + 1:]]
     return argv
 
 
 def normalize(args, argv):
     args = graph_cli.defaults(args)
-    if args.action in ("query", "inspect", "show", "recall"):
+    if args.action in ("query", "inspect", "show", "recall", "activity"):
         policy = POLICIES[args.budget]
         if args.action == "recall":
             # Old work is the point: always read the deep commit/recording window.
@@ -311,6 +311,96 @@ class Runtime:
                     "scope": {"intent": args.intent, "snapshot": graph.snapshot, "retention": "transient"},
                     "status": "partial" if any(c.get('complete') is False for c in coverage.values()) else "ok", "next": next_items}
         return Result(document, digest([graph.snapshot, history['results'], history['coverage']]), argv)
+
+    def activity(self, deadline):
+        args = self.args
+        target = args.target
+        path = qualname = snapshot = None
+        candidates = []
+        if "::" in target or target.startswith(("snapshot:", "node:")):
+            resolved, graph = target_history.resolve(
+                args, self.store, lambda store, options, pin=None: graph_cli.get_graph(store, options, pin))
+            if resolved.get("resolution") in ("ambiguous", "unresolved"):
+                candidates = resolved.get("candidates") or []
+                reason = resolved.get("resolution")
+                return Result({"operation": "activity", "status": "partial", "results": candidates,
+                               "coverage": {"target": {"complete": False, "reason": reason,
+                                                       "candidates": len(candidates)}},
+                               "next": [{"purpose": "Choose one candidate ref, then run activity on it"}] if candidates
+                               else [{"purpose": "Use map or find to locate the target"}]},
+                              digest(candidates), self.base_argv())
+            if resolved.get("kind") not in ("file", "symbol"):
+                raise ValueError("activity requires a file or symbol target")
+            path, qualname = resolved["path"], resolved.get("qualname")
+            snapshot = resolved.get("snapshot") or (graph.snapshot if graph else None)
+            if snapshot:
+                # Reuse the resolved snapshot for any symbol edit mapping provider.
+                args.snapshot = snapshot
+        else:
+            path = target_history.relative(target)
+        providers = Providers(args, self.store, deadline)
+        providers.load({"operations", "commit_links"})
+        operations = providers.tables.get("operations", [])
+        witnesses = providers.tables.get("commit_links", [])
+        symbol_events = None
+        if qualname:
+            providers.load({"edit_symbols"})
+            symbol_events = {(row.get("recording_id"), row.get("event_id"))
+                             for row in providers.tables.get("edit_symbols", [])
+                             if row.get("path") == path and row.get("qualname") == qualname}
+        by_operation, by_event = {}, {}
+        for witness in witnesses:
+            by_operation.setdefault(witness.get("operation_id"), []).append(witness)
+            by_event.setdefault((witness.get("recording_id"), witness.get("event_id")), []).append(witness)
+        selected = []
+        for row in operations:
+            if row.get("path") != path or row.get("path_location") != "repository":
+                continue
+            if providers.repo_path(row) != path:
+                continue
+            if symbol_events is not None:
+                touched = {(row.get("recording_id"), row.get("call_event_id")),
+                           (row.get("recording_id"), row.get("result_event_id"))}
+                if not any(event in symbol_events for event in touched if event[1]):
+                    continue
+            found = list(by_operation.get(row.get("operation_id"), []))
+            for name in ("call_event_id", "result_event_id"):
+                found += by_event.get((row.get("recording_id"), row.get(name)), [])
+            unique = {}
+            for witness in found:
+                unique[witness.get("witness_id")] = witness
+            selected.append({**row, "commit_witnesses": [
+                {name: w.get(name) for name in ("witness_id", "sha", "recorded_sha", "basis", "confidence",
+                                                "failed", "relation", "ref", "result_ref")}
+                for w in unique.values()]})
+        selected.sort(key=lambda r: (r.get("lane") or "", r.get("order") or 0, r.get("association") or 0,
+                                     r.get("association_key") or ""))
+        coverage = {name: {key: value for key, value in item.items() if key != "gaps"}
+                    for name, item in providers.coverage.items()}
+        operation_coverage = dict(providers.coverage.get("operations", {}))
+        coverage["activity"] = {
+            "matched_rows": len(selected),
+            "matched_operations": len({row.get("operation_id") for row in selected}),
+            "unresolved_paths": operation_coverage.get("locations", {}).get("unresolved", 0),
+            "external_paths": operation_coverage.get("locations", {}).get("external", 0),
+            "unsupported_tools": operation_coverage.get("unsupported_tools", {}),
+            "none_found_in_scanned_scope": not selected,
+            "symbol_resolution": ("symbol_event_mapping" if qualname and symbol_events else
+                                  "unmapped" if qualname else "path"),
+            "symbol_mapped_events": len(symbol_events) if symbol_events is not None else None,
+            "scope": "scanned recordings and exact repository paths only; no baseline matching",
+        }
+        partial = any(item.get("complete") is not True for name, item in coverage.items() if name != "activity")
+        argv = self.base_argv()
+        recover = self.recovery(argv, "Widen recording limits for activity") if partial else None
+        document = {"operation": "activity", "status": "partial" if partial else "ok",
+                    "target": {"path": path, "qualname": qualname, "snapshot": snapshot},
+                    "results": selected, "coverage": coverage,
+                    "scope": {"repo": self.store.root, "retention": "transient",
+                              "ordering": "lane, then recorded physical order",
+                              "meaning": "recorded operations; matching a path does not prove a commit contains the edit"},
+                    "next": [recover] if recover else []}
+        return Result(document, digest([selected, coverage]), argv)
 
     def recall(self, deadline):
         args = self.args

@@ -31,8 +31,15 @@ def expand(value):
         raise ValueError("Source changed at this ref; search again")
     keys = {(r["offset"], r["item"]) for r in (target["ref"], target.get("call_ref"), target.get("result_ref")) if r}
     # The human request that opened this turn: why the exchange happened.
-    request = next((e for e in events if target.get("turn") and e.get("turn") == target["turn"]
-                    and e["kind"] == "user_message"), None)
+    request_ref = target.get("request_ref")
+    request = None
+    if isinstance(request_ref, dict):
+        wanted = (request_ref.get("offset"), request_ref.get("item", 0))
+        request = next((e for e in events if (e["ref"]["offset"], e["ref"].get("item", 0)) == wanted
+                        and e["kind"] == "user_message"), None)
+    if request is None:
+        request = next((e for e in events if target.get("turn") and e.get("turn") == target["turn"]
+                        and e["kind"] == "user_message" and e.get("request_origin") == "human"), None)
     if request is not None:
         keys.add((request["ref"]["offset"], request["ref"]["item"]))
     rows = [{**clean(e, None), "selected": True, "cite": cite.token(e["ref"])} if e is target

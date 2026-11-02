@@ -397,6 +397,63 @@
         {
           "pointer": "/type",
           "equals": "custom"
+        },
+        {
+          "pointer": "/customType",
+          "in": [
+            "shadow-compact.checkpoint",
+            "shadow-compact.checkpoint.v1"
+          ]
+        },
+        {
+          "pointer": "/data/coverage",
+          "type": "object"
+        }
+      ],
+      "emit": "checkpoint",
+      "purpose": "checkpoint",
+      "text": "/data/structured",
+      "coverage_end": "/data/coverage/coverageEndEntryId",
+      "text_fallback": "/data/summary"
+    },
+    {
+      "when": [
+        {
+          "pointer": "/type",
+          "equals": "custom"
+        },
+        {
+          "pointer": "/customType",
+          "in": [
+            "shadow-compact.checkpoint",
+            "shadow-compact.checkpoint.v1"
+          ]
+        }
+      ],
+      "emit": "checkpoint",
+      "purpose": "checkpoint",
+      "text": "/data/structured",
+      "coverage_end": "/data/coverageEndEntryId",
+      "text_fallback": "/data/summary"
+    },
+    {
+      "when": [
+        {
+          "pointer": "/type",
+          "equals": "shadow-compact.checkpoint"
+        }
+      ],
+      "emit": "checkpoint",
+      "purpose": "checkpoint",
+      "text": "/structured",
+      "coverage_end": "/coverageEndEntryId",
+      "text_fallback": "/summary"
+    },
+    {
+      "when": [
+        {
+          "pointer": "/type",
+          "equals": "custom"
         }
       ],
       "emit": "config",
@@ -456,6 +513,15 @@
     "bash": {
       "operation": "command",
       "command": "/command"
+    },
+    "git_plan_context": {
+      "operation": "plan_snapshot"
+    },
+    "git_commit_plan": {
+      "operation": "commit_plan"
+    },
+    "git_record": {
+      "operation": "commit_record"
     }
   },
   "guarantees": {

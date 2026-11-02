@@ -39,25 +39,37 @@ def split_lines(text):
     return text.split("\n")[:-1] if text.endswith("\n") else text.split("\n") if text else []
 
 
-def parse_unified(diff):
-    """[(old_start, old_lines, new_start, new_lines, lines)] from unified diff text.
+def parse_unified_checked(diff):
+    """[(old_start, old_lines, new_start, new_lines, lines)], truncated hunk count.
 
     A hunk's stated line counts bound its body, so file headers and trailing text
     are never read as changes; a blank body line is context whose space was stripped.
+    A hunk that does not consume its declared counts is truncated and cannot support
+    replay or symbol reconstruction.
     """
-    hunks, old_left, new_left = [], 0, 0
+    hunks, truncated = [], 0
+    old_left = new_left = 0
+    current = None
+
+    def close():
+        nonlocal truncated
+        if current is not None and (old_left or new_left):
+            truncated += 1
+
     for line in (diff or "").split("\n"):
         found = HEADER.match(line)
         if found:
+            close()
             old, old_n, new, new_n = found.groups()
             old_left, new_left = int(old_n or 1), int(new_n or 1)
-            hunks.append((int(old), old_left, int(new), new_left, []))
+            current = [int(old), old_left, int(new), new_left, []]
+            hunks.append(current)
             continue
-        if not hunks:
+        if current is None:
             continue
         tag = line[:1] or " "
-        if tag == "\\" and hunks[-1][4]:
-            hunks[-1][4].append(line)
+        if tag == "\\" and current[4]:
+            current[4].append(line)
         elif old_left > 0 or new_left > 0:
             if tag == " " and old_left > 0 and new_left > 0:
                 old_left, new_left = old_left - 1, new_left - 1
@@ -66,10 +78,37 @@ def parse_unified(diff):
             elif tag == "+" and new_left > 0:
                 new_left -= 1
             else:
-                old_left = new_left = 0  # malformed: stop this hunk
+                old_left = new_left = 0  # malformed: this hunk cannot be replayed
+                current[4].append(line)
                 continue
-            hunks[-1][4].append(line if line else " ")
-    return hunks
+            current[4].append(line if line else " ")
+    close()
+    return hunks, truncated
+
+
+def parse_unified(diff):
+    return parse_unified_checked(diff)[0]
+
+
+def counts_valid(hunks):
+    """True when every hunk body consumes exactly its declared old/new line counts."""
+    for _, old_lines, _, new_lines, lines in hunks:
+        old_left, new_left = old_lines, new_lines
+        for line in lines:
+            tag = line[:1] or " "
+            if tag == "\\":
+                continue
+            if tag == " " and old_left > 0 and new_left > 0:
+                old_left, new_left = old_left - 1, new_left - 1
+            elif tag == "-" and old_left > 0:
+                old_left -= 1
+            elif tag == "+" and new_left > 0:
+                new_left -= 1
+            else:
+                return False
+        if old_left or new_left:
+            return False
+    return True
 
 
 def _whole(content, sign):
@@ -142,7 +181,7 @@ def _claude(event, record):
         return None, "no_structured_result"
     if result.get("type") == "create":
         return ("add", "claude_structured_patch", _whole(result.get("content"), "+"), None,
-                result.get("content")), None
+                result.get("content"), 0), None
     patch = result.get("structuredPatch")
     if not isinstance(patch, list):
         return None, "no_structured_result"
@@ -152,7 +191,8 @@ def _claude(event, record):
     after = result.get("content") if isinstance(result.get("content"), str) else None
     if after is None and isinstance(original, str):
         after = replay(original, hunks)
-    return ("update", "claude_structured_patch", hunks, original, after), None
+    return ("update", "claude_structured_patch", hunks, original, after,
+            0 if counts_valid(hunks) else 1), None
 
 
 def _codex(event, record):
@@ -161,12 +201,13 @@ def _codex(event, record):
         return None, "no_structured_result"
     kind = change.get("type")
     if kind == "update":
-        return ("update", "codex_unified_diff", parse_unified(change.get("unified_diff")), None, None), None
+        hunks, truncated = parse_unified_checked(change.get("unified_diff"))
+        return ("update", "codex_unified_diff", hunks, None, None, truncated), None
     if kind == "add":
-        return ("add", "codex_content", _whole(change.get("content"), "+"), None, change.get("content")), None
+        return ("add", "codex_content", _whole(change.get("content"), "+"), None, change.get("content"), 0), None
     if kind == "delete":
         return ("delete", "codex_content", _whole(change.get("content"), "-") if change.get("content") else [],
-                None, None), None
+                None, None, 0), None
     return None, "unrecognized_change"
 
 
@@ -176,12 +217,23 @@ def _pi(event, record):
         content = arguments.get("content") if isinstance(arguments, dict) else None
         if not isinstance(content, str):
             return None, "no_structured_result"
-        return ("write", "pi_write_content", _whole(content, "+"), None, content), None
+        return ("write", "pi_write_content", _whole(content, "+"), None, content, 0), None
     details = pointer(record, "/message/details")
     patch = details.get("patch") if isinstance(details, dict) else None
     if not isinstance(patch, str):
         return None, "no_structured_result"
-    return ("update", "pi_patch", parse_unified(patch), None, None), None
+    hunks, truncated = parse_unified_checked(patch)
+    return ("update", "pi_patch", hunks, None, None, truncated), None
+
+
+SUPPORTED_TOOLS = {"claude-code": {"Edit", "MultiEdit", "Write", "NotebookEdit"},
+                   "pi": {"edit", "write"}}
+
+
+def _supported(event):
+    if event.get("kind") == "file_edit":
+        return True
+    return event.get("tool") in SUPPORTED_TOOLS.get(event.get("harness"), set())
 
 
 def _extractor(event):
@@ -189,7 +241,7 @@ def _extractor(event):
     harness, kind, tool = event.get("harness"), event.get("kind"), event.get("tool")
     if event.get("operation") != "file_edit":
         return None
-    if harness == "claude-code" and kind == "tool_result" and tool in ("Edit", "MultiEdit", "Write"):
+    if harness == "claude-code" and kind == "tool_result" and tool in ("Edit", "MultiEdit", "Write", "NotebookEdit"):
         return _claude
     if harness == "codex" and kind == "file_edit":
         return _codex
@@ -216,16 +268,38 @@ def derive(recordings, cache, repository):
     """(hunks, symbols, coverage) for every scanned edit operation, before event filters."""
     hunks, symbols = [], []
     coverage = {"complete": True, "operations": 0, "operations_with_hunks": 0, "failed_skipped": 0,
-                "without_hunks": {}, "at_edit_unavailable": {}, "hunks": 0, "anchors": {}, "symbol_basis": {},
-                "locations": {}}
+                "unknown_skipped": 0, "unpaired_edit_calls": 0, "unsupported_tools": {},
+                "without_hunks": {}, "at_edit_unavailable": {}, "hunks": 0, "truncated_hunks": 0,
+                "anchors": {}, "symbol_basis": {}, "locations": {}}
+    seen_operations = set()
     for recording in recordings:
         for event in recording["events"]:
-            extract = _extractor(event)
+            if event.get("operation") != "file_edit":
+                continue
+            if event.get("kind") == "tool_result" and event.get("call_ref"):
+                # The call half owns operation identity; the result only supplies hunks.
+                extract = _extractor(event)
+            elif event.get("kind") in ("tool_call", "file_edit"):
+                op_key = (event.get("recording_id"), event.get("ref", {}).get("offset")
+                          if event.get("kind") == "file_edit" else event.get("event_id"))
+                if op_key not in seen_operations:
+                    seen_operations.add(op_key)
+                    coverage["operations"] += 1
+                    if not _supported(event):
+                        tool = event.get("tool") or event.get("kind")
+                        coverage["unsupported_tools"][tool] = coverage["unsupported_tools"].get(tool, 0) + 1
+                    if event.get("kind") == "tool_call" and not event.get("result_ref"):
+                        coverage["unpaired_edit_calls"] += 1
+                extract = _extractor(event)
+            else:
+                continue
             if extract is None:
                 continue
-            coverage["operations"] += 1
             if event.get("outcome") == "failed":
                 coverage["failed_skipped"] += 1
+                continue
+            if event.get("outcome") != "succeeded":
+                coverage["unknown_skipped"] += 1
                 continue
             try:
                 found, reason = extract(event, cache.get(event["ref"]))
@@ -235,15 +309,20 @@ def derive(recordings, cache, repository):
                 reason = reason or "no_hunks"
                 coverage["without_hunks"][reason] = coverage["without_hunks"].get(reason, 0) + 1
                 continue
-            change, source, recorded, original, after = found
+            change, source, recorded, original, after, truncated = found
             coverage["operations_with_hunks"] += 1
+            if truncated:
+                coverage["truncated_hunks"] += truncated
+                after, original = None, None
             path = repository.repo_path(event)
             recorded_path = event.get("path_raw") or event.get("path")
             # Rank churn on repository rows; scratch files elsewhere keep their recorded path.
             location = "repository" if path else "outside_repo" if recorded_path else "unknown"
             current, unavailable = repository.current_lines(path)
             at_edit, why = None, None
-            if after is None:
+            if truncated:
+                why = "truncated_patch"
+            elif after is None:
                 why = "replay_mismatch" if isinstance(original, str) else "post_edit_file_not_recorded"
             elif not path:
                 why = "outside_repo"
@@ -261,7 +340,9 @@ def derive(recordings, cache, repository):
                 recorded_changed = [new_start + i if block else max(new_start, 1) for i in (changed or [0])]
                 state, offset = anchor(block, new_start, current) if current is not None else (unavailable, None)
                 live = [offset + 1 + i for i in changed] if offset is not None else None
-                if at_edit and at_edit[1] in ("parsed", "parsed_with_errors"):
+                if truncated:
+                    basis, items, lines_at, parse_state = "none", [], [], None
+                elif at_edit and at_edit[1] in ("parsed", "parsed_with_errors"):
                     basis, items, lines_at, parse_state = "at_edit", at_edit[0], recorded_changed, at_edit[1]
                 elif live and repository.has_items(path):
                     basis, items, lines_at, parse_state = "current", repository.items_for(path), live, None
@@ -286,7 +367,7 @@ def derive(recordings, cache, repository):
                 for item, count, innermost in _overlaps(items, lines_at):
                     symbols.append({**keys, "repo_id": repository.repo_id, "path": path, "basis": basis,
                                     "kind": item["kind"], "name": item["name"], "qualname": item["qualname"],
-                                    "parent": item["parent"], "line": item["line"], "end_line": item["end_line"],
+                                    "parent": item.get("parent"), "line": item["line"], "end_line": item.get("end_line"),
                                     "changed_lines": count, "innermost": innermost, "parse_state": parse_state})
     coverage["hunks"] = len(hunks)
     return hunks, symbols, coverage

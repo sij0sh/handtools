@@ -26,6 +26,7 @@ or add `--repo DIR`. Use Python 3.11+ (`python` or `py -3` on Windows).
 | `map` | Orient in current source; small repositories print whole. |
 | `find TEXT` | Locate a concrete path, symbol, error or contract. |
 | `inspect TARGET` | Source, potential consumers, dependencies and history for one target. |
+| `activity TARGET` | Recorded operations for one file or symbol: action, path, outcome, basis, witnesses. |
 | `show REF` | Expand source, session or commit evidence; execute a returned continuation. |
 | `query 'SELECT ...'` | SQLite over built-in tables; `describe TABLE` gives columns. |
 

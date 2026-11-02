@@ -5,7 +5,7 @@ from .graph_store import digest
 
 PREFIX = "continue:"
 # history replays as an expansion: a fresh bounded scan, not a pinned page.
-ALLOWED = {"query", "inspect", "recall", "show"}
+ALLOWED = {"query", "inspect", "recall", "activity", "show"}
 
 
 def encode(argv, signature=None, purpose="Read the next page", effect="delivery"):

@@ -7,7 +7,9 @@ from .envelope import clip
 from .options import command_line
 
 # Every row has this schema, whatever the harness; fields a harness did not record are absent.
-FIELDS = ("session", "parent_session", "independent_session", "harness", "kind", "role", "turn", "turn_basis", "timestamp", "tool", "call_id",
+FIELDS = ("session", "parent_session", "independent_session", "harness", "kind", "role", "turn", "turn_basis",
+          "request_ref", "request_basis", "request_origin", "lane", "position", "byte_offset", "item_index",
+          "timestamp", "tool", "call_id",
           "operation", "path", "path_raw", "path_location", "command", "outcome", "exit_code",
           "representation", "reason", "text", "text_chars", "text_start", "text_omitted", "ref",
           "payload_pointer", "call_ref", "result_ref", "external_turn_id", "external_message_id",
@@ -17,7 +19,10 @@ FIELDS = ("session", "parent_session", "independent_session", "harness", "kind",
 
 
 def human(e):
-    """A person's request: original user text, not a subagent's or fork's prompt from its parent."""
+    """A person's request: original user text, not injected context or a delegated parent prompt."""
+    if e.get("request_origin") is not None:
+        return (e["kind"] == "user_message" and e["request_origin"] == "human"
+                and e.get("origin", "human") == "human")
     return e["kind"] == "user_message" and e.get("origin", "human") == "human" and not e.get("parent_session")
 
 

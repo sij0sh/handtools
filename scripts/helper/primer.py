@@ -18,6 +18,7 @@ from .discovery import candidate_files
 from .git_file_history import history
 from .git_resolve import GitResolver
 from .options import DiscoveryOptions, ScanOptions
+from .projection import human
 from .reader import scan_file
 from .records import new_scope
 
@@ -227,8 +228,7 @@ def _session_rows(recordings, depth, excluded):
     for key, group in groups.items():
         roots = [r for r in group if not r.get("parent_session")] or group
         events = _events(roots)
-        goal = next((e for e in events if e.get("kind") == "user_message"
-                     and e.get("origin") == "human" and not e.get("parent_session")
+        goal = next((e for e in events if e.get("kind") == "user_message" and human(e)
                      and _request(e.get("text"))), None)
         summaries = [e for e in events if e.get("kind") == "summary" and _message(e.get("text"), 40)]
         substantive = [e for e in events if e.get("kind") == "assistant_message"
@@ -238,7 +238,7 @@ def _session_rows(recordings, depth, excluded):
             assistants = [e for e in events if e.get("kind") == "assistant_message"
                           and e.get("origin") == "assistant" and _clean(e.get("text"))]
             last = assistants[-1] if assistants else None
-        goal_text = _clean(goal.get("text")) if goal else ""
+        goal_text = _visible(goal.get("text")) if goal else ""
         if not goal_text and summaries:
             goal_text = _summary_goal(summaries[-1].get("text"))
         last_text = _clean(last.get("text")) if last else ""

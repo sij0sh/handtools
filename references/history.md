@@ -80,9 +80,11 @@ later corrections before interpreting older requests as current constraints.
 
 ## Recordings
 
-Recordings are tables in `query` (`events`, `sessions`, `commit_links`); `describe
-events` lists columns. Expand a returned ref with `show`: the selected event whole
-(`selected: true`), its paired tool call/result, and its turn's human request.
+Recordings are tables in `query` (`events`, `sessions`, `commit_links`,
+`operations`, `checkpoints`); `describe events` lists columns. `activity TARGET`
+selects operation facts for one exact file or symbol, in lane order. Expand a
+returned ref with `show`: the selected event whole (`selected: true`), its paired
+tool call/result, and its turn's human request.
 
 ```bash
 python3 "$S/remember.py" query "SELECT text, cite FROM events WHERE role='user' AND text LIKE '%retry%' LIMIT 20"

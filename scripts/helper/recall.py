@@ -33,38 +33,54 @@ def current_paths(changes):
     # changes arrive newest commit first; walk oldest to newest so later renames win.
     fate = {}
     for row in reversed(changes):
+        repo = row.get("repo_id")
         if row.get("status") == "renamed" and row.get("old_path"):
-            fate[row["old_path"]] = row.get("new_path") or row["path"]
+            fate[(repo, row["old_path"])] = (repo, row.get("new_path") or row["path"])
         elif row.get("status") == "deleted":
-            fate[row["path"]] = None
-        elif row["path"] in fate and fate[row["path"]] is None:
-            fate[row["path"]] = row["path"]  # re-added later
-    def resolve(path):
+            fate[(repo, row["path"])] = None
+        elif (repo, row["path"]) in fate and fate[(repo, row["path"])] is None:
+            fate[(repo, row["path"])] = (repo, row["path"])  # re-added later
+    def resolve(path, repo=None):
         seen = set()
-        while path in fate and path not in seen:
-            seen.add(path)
-            path = fate[path]
-            if path is None:
+        key = (repo, path)
+        while key in fate and key not in seen:
+            seen.add(key)
+            key = fate[key]
+            if key is None:
                 return None
-        return path
+        return key[1]
     return resolve
 
 
 def requests(events, links):
-    """sha -> (request text, cite) from the last human message before each linked commit command."""
-    by_session = {}
+    """(repo_id, sha) -> the latest human request before each linked commit command.
+
+    A recording is the attribution boundary: a reused native session ID in another
+    file cannot lend its request to this commit.
+    """
+    by_recording = {}
     for e in events:
         if human(e) and e.get("text"):
-            by_session.setdefault(e.get("session"), []).append(e)
-    found = {}
+            key = (e.get("recording_id"), e.get("session"))
+            by_recording.setdefault(key, []).append(e)
+    found, stamps = {}, {}
     for link in links:
         sha = link.get("sha")
-        if not sha or sha in found:
+        if not sha:
             continue
-        prior = [e for e in by_session.get(link.get("session"), [])
+        key = (link.get("recording_id"), link.get("session"))
+        prior = [e for e in by_recording.get(key, [])
                  if (e.get("timestamp") or "") <= (link.get("timestamp") or "~")]
-        if prior:
-            found[sha] = (prior[-1]["text"], prior[-1].get("cite"))
+        if not prior:
+            continue
+        candidate = prior[-1]
+        commit_key = (link.get("repo_id"), sha)
+        stamp = candidate.get("timestamp") or ""
+        if commit_key not in stamps or stamp >= stamps[commit_key]:
+            found[commit_key] = (candidate["text"], candidate.get("cite"))
+            stamps[commit_key] = stamp
+            if link.get("repo_id") is None:
+                found[sha] = found[commit_key]
     return found
 
 
@@ -72,19 +88,22 @@ def rank(text, commits, changes, events, links, root):
     words = terms(text)
     if not words:
         raise ValueError("recall needs descriptive words (3+ letters, not only generic verbs like 'add')")
+    def ckey(row):
+        return (row.get("repo_id"), row["sha"])
     paths, newest = {}, current_paths(changes)
     for row in changes:
-        paths.setdefault(row["sha"], []).append(row.get("new_path") or row["path"])
+        paths.setdefault(ckey(row), []).append(row.get("new_path") or row["path"])
     asked = requests(events, links)
     commits = [c for c in commits if not c.get("is_merge")]
-    docs = {c["sha"]: "\n".join([c.get("subject") or "", c.get("body") or "", *paths.get(c["sha"], [])]).lower()
+    docs = {ckey(c): "\n".join([c.get("subject") or "", c.get("body") or "", *paths.get(ckey(c), [])]).lower()
             for c in commits}
     weight = {w: math.log(1 + len(docs) / max(1, sum(w in d for d in docs.values()))) for w in words}
     rows = []
     for commit in commits:
         sha = commit["sha"]
-        changed = paths.get(sha, [])
-        request, cite = asked.get(sha, (None, None))
+        key = ckey(commit)
+        changed = paths.get(key, [])
+        request, cite = asked.get(key) or asked.get(sha) or (None, None)
         score = (SUBJECT * hits(words, commit.get("subject"), weight) + BODY * hits(words, commit.get("body"), weight)
                  + PATH * max((hits(words, p, weight) for p in changed), default=0)
                  + REQUEST * hits(words, request, weight))
@@ -93,7 +112,7 @@ def rank(text, commits, changes, events, links, root):
         states = []
         # Paths naming the feature first: they are the reuse candidates.
         for path in sorted(changed, key=lambda p: -hits(words, p)):
-            now = newest(path)
+            now = newest(path, commit.get("repo_id"))
             exists = now is not None and (Path(root) / now).exists()
             states.append({"path": path, "now": now if exists else None,
                            "state": ("exists" if now == path else "moved") if exists else "gone"})

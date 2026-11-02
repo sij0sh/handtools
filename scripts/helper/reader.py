@@ -105,7 +105,7 @@ def scan_file(path, options, scope, ranges=None):
             role = fields.pop("role", None)
             if role is None:
                 role = "user" if kind == "user_message" else "assistant" if kind in (
-                    "assistant_message", "summary", "reasoning") else "system" if kind in (
+                    "assistant_message", "summary", "reasoning", "checkpoint") else "system" if kind in (
                     "instruction", "config", "lifecycle", "capability", "usage", "context_change") else "tool"
             if origin is None:
                 origin = "human" if kind == "user_message" else "assistant" if kind == "assistant_message" else (
@@ -140,13 +140,18 @@ def scan_file(path, options, scope, ranges=None):
                 if name not in ("session", "ref", "text") and isinstance(value, str) and len(value) > 2048:
                     e[name] = value[:2048]
                     e[name + "_omitted_chars"] = len(value) - 2048
+            if kind not in ("gap", "unknown"):
+                scope["items_interpreted"] += 1
             events.append(e)
             scope["events_projected"] += 1
         if error:
+            if error in ("malformed_record", "oversized_record"):
+                scope["interpretation_gaps"] += 1
             add("gap", reason=error)
             continue
         if profile is None:
             scope["unknown_records"] += 1
+            scope["interpretation_unsupported"] += 1
             add("unknown", reason="harness_not_recognized")
             continue
         session = profile["session"]
@@ -156,6 +161,7 @@ def scan_file(path, options, scope, ranges=None):
         if parent_session is None and session.get("parent") and matches(session.get("parent_when", []), record, record):
             # A recorded subagent or forked session: its requests may come from the parent, not a person.
             parent_session = first(session["parent"], record)
+        before_items = scope["events_projected"]
         for rule, item, key, ptr in interpret(profile["records"], record, record):
             kind = rule["emit"]
             if kind == "boundary":
@@ -166,6 +172,7 @@ def scan_file(path, options, scope, ranges=None):
                 continue
             if kind == "unknown":
                 scope["unknown_records"] += 1
+                scope["interpretation_unsupported"] += 1
                 add("unknown", reason="profile_does_not_interpret_item", pointer=ptr)
                 continue
             text = field(rule.get("text"), item, key)
@@ -181,12 +188,15 @@ def scan_file(path, options, scope, ranges=None):
                     data = pointer(item, spec)
                 text = json.dumps(data, ensure_ascii=True)
             kwargs = {"pointer": ptr}
-            for name in ("call_id", "tool", "exit_code", "command", "target_id", "replacement", "first_kept_id"):
+            for name in ("call_id", "tool", "exit_code", "command", "target_id", "replacement",
+                         "first_kept_id", "coverage_end_id"):
                 val = field(rule.get(name), item, key)
                 if val is not None:
                     kwargs[name] = val
             if rule.get("representation"):
                 kwargs["representation"] = rule["representation"]
+            if rule.get("coverage_end") is not None:
+                kwargs["coverage_end_id"] = field(rule["coverage_end"], item, key)
             for name in ("origin", "channel", "purpose", "state", "text_state", "role"):
                 if rule.get(name) is not None:
                     kwargs[name] = rule[name]
@@ -222,6 +232,8 @@ def scan_file(path, options, scope, ranges=None):
                 kwargs["path_raw"] = kwargs["path"]
                 kwargs["path"], kwargs["path_location"] = resolve_path(kwargs["path"], kwargs.get("cwd") or root, root)
             add(kind, text or "", payload_pointer=payload_ptr, **kwargs)
+        if scope["events_projected"] == before_items and not error and not scope.get("event_limit_reached"):
+            scope["records_unrepresented"] += 1
     # Merge only records that prove the same message. Distinct representations stay.
     def same(a, b):
         return a.get("text_hash") and a.get("text_hash") == b.get("text_hash")
@@ -278,24 +290,119 @@ def scan_file(path, options, scope, ranges=None):
             e["parent_session"] = parent_session
     if parent_session:
         scope["recordings_with_parent"] += 1
+    # Physical order is (byte offset, item index); `order` is a comparable sequence
+    # over the scanned range so head and tail rows share one unit.
+    for index, e in enumerate(events):
+        e["order"] = index
+        e["byte_offset"] = e["ref"]["offset"]
+        e["item_index"] = e["ref"].get("item", 0)
+        e["position"] = [e["byte_offset"], e["item_index"]]
     calls = {}
-    messages = {}
-    current_turn = None
+    by_mid = {}
     for e in events:
-        mid, parent = e.get("external_message_id"), e.get("external_parent_id")
-        if e["kind"] == "user_message":
-            current_turn = e.get("external_turn_id") or mid or f"{e['ref']['line']}:{e['ref']['item']}"
-        if parent:
-            turn = messages.get(parent)
-            e["turn_basis"] = "recorded_ancestry" if turn else "unresolved_ancestry"
-            e["turn"] = current_turn if e["kind"] == "user_message" else turn
-            if not turn and e["kind"] != "user_message":
-                scope["ancestry_unknown"] += 1
+        mid = e.get("external_message_id")
+        if mid:
+            by_mid.setdefault(mid, []).append(e)
+
+    def representative(group):
+        for kind in ("user_message", "assistant_message", "summary", "tool_result", "tool_call"):
+            found = next((x for x in group if x["kind"] == kind), None)
+            if found is not None:
+                return found
+        return group[0]
+
+    ancestry_cache = {}
+
+    def ancestry(e):
+        """Nearest-first recorded ancestors and whether the chain reached a root."""
+        start = e.get("external_parent_id")
+        if not start:
+            return [], "root"
+        if start in ancestry_cache:
+            return ancestry_cache[start]
+        chain, seen, parent = [], set(), start
+        while parent:
+            if parent in seen:
+                found = (chain, "cycle")
+                ancestry_cache[start] = found
+                return found
+            seen.add(parent)
+            group = by_mid.get(parent)
+            if not group:
+                found = (chain, "missing")
+                ancestry_cache[start] = found
+                return found
+            event = representative(group)
+            chain.append(event)
+            parent = event.get("external_parent_id")
+        found = (chain, "root")
+        ancestry_cache[start] = found
+        return found
+
+    def human_user(x):
+        # A parent-session prompt is delegated by metadata, not proven human input.
+        return (x.get("kind") == "user_message" and x.get("origin", "human") == "human"
+                and not x.get("parent_session"))
+
+    def turn_id(x):
+        return x.get("external_turn_id") or x.get("external_message_id") or \
+            f"{x['ref']['offset']}:{x['ref'].get('item', 0)}"
+
+    current_turn = None
+    current_lane = None
+    for e in events:
+        chain, status = ancestry(e)
+        if status in ("missing", "cycle"):
+            scope["ancestry_unknown"] += 1
+            if status == "cycle":
+                scope["ancestry_cycles"] += 1
+        own = e if e.get("kind") == "user_message" else None
+        candidates = ([own] if own is not None else []) + chain
+        request = next((x for x in candidates if x.get("kind") == "user_message"), None)
+        human_request = next((x for x in candidates if human_user(x)), None)
+        chosen = human_request or request
+        if human_request is not None:
+            e["request_origin"] = "human"
+        elif request is not None:
+            e["request_origin"] = "harness" if request.get("origin") == "harness" else "delegated"
         else:
-            e["turn"] = e.get("external_turn_id") or current_turn
-            e["turn_basis"] = "recorded_turn" if e.get("external_turn_id") else "record_order"
-        if mid and e.get("turn"):
-            messages[mid] = e["turn"]
+            e["request_origin"] = "unknown"
+        if chosen is not None:
+            e["request_ref"] = chosen["ref"]
+            e["request_basis"] = ("self" if chosen is e else "recorded_ancestry" if any(chosen is x for x in chain)
+                                  else "unresolved_ancestry" if status in ("missing", "cycle") else "recorded_ancestry")
+            e["turn"] = turn_id(chosen)
+            e["turn_basis"] = "self" if chosen is e else "recorded_ancestry"
+        elif e.get("external_turn_id"):
+            e["turn"] = e["external_turn_id"]
+            e["turn_basis"] = "recorded_turn"
+            e["request_basis"] = "recorded_turn" if status == "root" else status
+        elif status == "root" and current_turn is not None:
+            e["turn"] = current_turn
+            e["turn_basis"] = "record_order"
+            e["request_basis"] = "record_order"
+        else:
+            e["turn"] = None
+            e["turn_basis"] = "unresolved_ancestry" if status in ("missing", "cycle") else "record_order"
+            e["request_basis"] = status if status in ("missing", "cycle") else "unresolved"
+        outer = chain[-1] if chain else e
+        branch = human_request or request or outer
+        lane = branch.get("external_message_id") or branch.get("external_turn_id") or turn_id(branch)
+        parent_event = representative(by_mid[e["external_parent_id"]]) if e.get("external_parent_id") in by_mid else None
+        if human_user(e):
+            # A follow-up under an assistant/result continues that branch; a user message
+            # parented directly to another user starts a sibling lane.
+            if parent_event is None:
+                lane = current_lane or lane
+            elif parent_event.get("kind") == "user_message":
+                lane = e.get("external_message_id") or turn_id(e)
+            else:
+                lane = parent_event.get("lane") or lane
+        e["lane"] = lane
+        if own is not None and human_user(own):
+            current_turn = turn_id(own)
+            if not own.get("external_parent_id") and current_lane is None:
+                current_lane = e["lane"]
         if e["kind"] == "tool_call" and e.get("call_id"):
             calls.setdefault(e["call_id"], []).append(e)
     scope["ambiguous_call_ids"] += sum(len(v) > 1 for v in calls.values())
@@ -325,7 +432,8 @@ def scan_file(path, options, scope, ranges=None):
             if "exit_code" in e:
                 call["exit_code"] = e["exit_code"]
             e["call_ref"] = call["ref"]
-            for k in ("operation", "tool", "path", "path_raw", "path_location", "command"):
+            for k in ("operation", "tool", "path", "path_raw", "path_location", "command", "request_ref",
+                      "request_basis", "request_origin", "turn", "lane"):
                 if k in call:
                     e[k] = call[k]
         else:
