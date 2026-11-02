@@ -30,7 +30,7 @@ def _snapshot(path, scope, before):
         stat = Path(path).stat()
         scanned = scope.get("bytes_scanned", 0) - before
         scope.setdefault("snapshot", []).append({
-            "file": str(Path(path).absolute()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
+            "file": canonical_path(path), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
             "inode": stat.st_ino, "bytes_scanned": scanned, "scan_complete": scanned >= stat.st_size})
     except OSError:
         pass

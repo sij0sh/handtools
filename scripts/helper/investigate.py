@@ -61,7 +61,8 @@ def excerpt(text, match=None):
 
 
 def lead_id(ref):
-    raw = json.dumps([ref.get("file"), ref.get("offset"), ref.get("item", 0)], separators=(",", ":"))
+    raw = json.dumps([canonical_path(ref.get("file")), ref.get("offset"), ref.get("item", 0)],
+                     separators=(",", ":"))
     return "lead:" + hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
