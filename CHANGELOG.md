@@ -125,3 +125,10 @@ First release.
 ## 0.2.0 - 2026-11-02
 
 - Replace preflight/approval routing with one recursive design loop, on-demand standards disclosure, and `scripts/frontier.mjs`; rewrite evals around the loop.
+
+## 0.2.1 - 2026-11-02
+
+- Reduce the skill to `SKILL.md`, `references/`, and `languages/`; remove scripts, templates, evals, examples, workflows, and standards.
+- Move the contract to `references/contract.md` and fix the SKILL reference.
+- Trim language profiles to Structure, Preferred, and Disallowed.
+- Rewrite README for the decision-only scope, manual invocation, and no runtime dependencies.

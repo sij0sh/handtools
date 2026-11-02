@@ -1,6 +1,0 @@
-# SQLFluff starter. Copy to the repository root as .sqlfluff.
-# Set dialect to the repository's database: postgres, mysql, tsql, and so on.
-
-[sqlfluff]
-dialect = ansi
-templater = raw

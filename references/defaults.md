@@ -1,14 +1,15 @@
-# Defaults and tie-breakers
+# Defaults
 
-Hard requirements and approved decisions take precedence; these are defaults, not universal bans.
+Apply when requirements and adopted decisions leave room for choice. These are preferences, not rigid rules.
 
-- Prefer the smallest solution that meets today's actual requirements. Do not construct speculative frameworks, roles, or layers.
-- Assign one authoritative owner to each behavior, business rule, or mutable state. Make contracts, dependency direction, and side effects explicit.
-- Favor local reasoning: a maintainer should understand a change without reconstructing unrelated systems.
-- Prefer straightforward concrete functions, data, and composition; add interfaces only for real boundaries or substitutions.
-- Keep failures and resource lifecycles visible; validate at trust boundaries. Address safety and correctness, not just happy-path behavior.
-- Prefer focused verification of changed behavior over broad ceremonial checklists.
-- For brownfield work, preserve established compatible contracts and user-facing behavior. Baseline unrelated legacy problems; do not silently turn them into new standards or widen the task into a rewrite.
-- Prefer reversible, conventional, easy-to-change choices when options otherwise meet requirements equally well.
-- A choice deserves a new decision only if different answers could materially change required outcomes, contracts, ownership, compatibility, safety, performance, or user experience.
-- Escalate indispensable product intent, authorization, and high-impact irreversible tradeoffs; adopt routine, well-supported defaults without repeated approval.
+1. **Keep it simple.** Choose the smallest conventional solution that meets current needs. Avoid speculative abstractions, layers, and complexity.
+
+2. **Clear ownership.** Give behavior, rules, and mutable state one authoritative owner. Make important contracts, dependencies, and side effects explicit.
+
+3. **Favor local reasoning.** Prefer concrete functions, data, and composition. Introduce abstractions only when they simplify understanding or serve a real boundary.
+
+4. **Handle boundaries.** Make relevant failures, validation, and resource lifecycles explicit. Preserve correctness without unnecessary defensive machinery.
+
+5. **Respect existing design.** In brownfield work, preserve compatible conventions, contracts, and behavior.
+
+**Tie-breaker:** When choices otherwise meet requirements equally well, prefer the most conventional, reversible, and easy-to-change option.

@@ -1,172 +1,155 @@
 # Simple by Design
 
-A skill for coding agents: turn a goal into the smallest sufficient set of
-implementation decisions, then implement against them.
+**A coding-agent skill: turn a goal into the smallest comprehensive set of
+implementation decisions.**
+
+A feature brief can leave owners, contracts, and failure behavior open. Two
+competent implementers then follow the same brief and build materially different
+systems.
 
 ## Problem
 
-Each feature can add another layout, abstraction, or error convention. A small
-change then needs a reviewer to trace unrelated owners, and two implementers
-following the same brief can still build different things.
+Design gaps show up late as duplicate rules, unclear owners, or incompatible
+failure handling. More specification can add pages of detail without settling the
+few decisions that change the result.
 
 ## Proof
 
-The loop produces a decision record. A checker tracks what is open, stale, or
-structurally broken:
+A run ends with a decision record and a concise handoff:
 
 ```md
+# Goal
+Ship an inventory UI matching the existing app.
+
+## Constraints
+Preserve existing API and visual language.
+
 ## Decisions
-- [ ] D1: State authority? -> server
-- [x] D2 (after: D1): Update behavior? -> optimistic with rollback
-- [x] D3 (after: D2): Conflict edits? -> last write wins
+- [x] D1: State authority? Server.
+- [x] D2 (after: D1): Updates? Optimistic with rollback.
+- [ ] D3 (after: D2): Conflict behavior?
 ```
 
-```bash
-node <skill-dir>/scripts/frontier.mjs design/decisions.md
-```
+D3 stays open because the goal does not settle conflicts. The skill reports the
+gap and continues independent branches instead of inventing an answer.
 
-```text
-ready D1: State authority? -> server
-reopen D2: depends on open D1
-reopen D3: depends on open D2
-3 unresolved or stale; decide ready questions, then rerun
-```
-
-Once every decision is resolved:
-
-```text
-mechanically closed (3 decisions); perform semantic two-implementer challenge
-```
-
-Exit 0 means structurally closed, never semantically complete. Exit 1 lists the
-next ready questions or stale descendants. Exit 2 means malformed dependencies.
-
-## The loop
-
-```text
-Frame -> Ground -> Branch -> Resolve frontier -> Challenge
-                     ^                             |
-                     +----- material divergence ----+
-```
-
-Stop when the frontier is empty and the challenge finds no material divergence
-between two competent implementers. Then implement, verify, and reopen decisions
-that evidence contradicts.
+The record is not the finish line. The challenge step asks whether two competent
+implementers could still diverge materially. If they could, the missing decision
+is added and the loop repeats.
 
 ## What changes
 
-| Repeated question | Default answer |
+| Common shortcut | This skill |
 |---|---|
-| Where does behavior belong? | Its capability owner, with explicit state and contracts |
-| Should similar code become shared? | Only for a shared concept or useful boundary |
-| Which folder architecture is required? | None; structure follows actual needs |
-| Must legacy code be rewritten? | No; bounded improvements without new violations |
-| Does a small diff prove simplicity? | No; inspect owners, contracts, behavior |
-| Is an empty decision list done? | No; the two-implementer challenge decides |
+| Start implementation from a feature brief | Resolve material decisions first, then hand off |
+| Share similar code across capabilities | Keep small duplication when sharing would couple unrelated owners |
+| Rewrite legacy code to fit a preferred pattern | Preserve compatible existing design; treat patterns as evidence |
+| Judge simplicity by diff size | Judge unnecessary concepts and affected owners or contracts |
+| Treat an empty question list as done | Run the two-implementer challenge; it decides completion |
 
 ## Install
 
-Needs a coding agent that discovers directory-based skills, Node for the checker,
-and bash for `verify.sh`.
+No runtime dependencies; the skill is Markdown only.
 
-Add this checkout to the agent's skill search path, or copy the whole directory to
-its documented skill location. Keep `SKILL.md`, `references/`, `standards/`,
-`languages/`, `templates/`, and `scripts/` together; discovery steps depend on the
-host.
+Place the directory where your coding agent discovers skills. Pi scans
+`~/.agents/skills/` and project `.agents/skills/`:
 
-## Quick start
-
-```text
-Use simple-by-design. Design <goal>. Record material decisions in
-design/decisions.md, then stop for my review.
+```bash
+git clone https://github.com/sij0sh/simple-by-design.git ~/.agents/skills/simple-by-design
 ```
 
-The loop reads `references/defaults.md`, adopts routine defaults with a one-line
-reason, and asks only about indispensable intent or consequential tradeoffs. You
-get back the decision record and the frontier output shown above.
+Keep `SKILL.md`, `references/`, and `languages/` together. Other agents use their
+own documented skill directory.
+
+The skill sets `disable-model-invocation: true`, so it loads only when invoked
+explicitly. In Pi:
+
+```text
+/skill:simple-by-design Design an inventory UI matching the existing app. Record material decisions in .agents/design/decisions.md and stop for review.
+```
+
+Expected: a decision record with resolved and open rows, the reason for any
+blocked question, and a handoff. No implementation code.
 
 ## Use
 
-### Standards on demand
+### The loop
+
+```text
+Ground -> Branch -> Decide -> Challenge
+              ^                    |
+              +--- material gap ---+
+```
+
+1. **Ground:** establish the goal, constraints, success criteria, and relevant
+   existing decisions or implementations.
+2. **Branch:** identify unresolved material questions. Add a dependency only when
+   one answer depends on another.
+3. **Decide:** settle questions whose dependencies are resolved. Adopt the
+   simplest adequate choice and explain non-obvious tradeoffs. Add resulting
+   questions; discard irrelevant branches.
+4. **Challenge:** imagine two competent implementers following every decision. If
+   they could diverge materially, identify the missing decision and repeat from
+   step 2.
+
+Repeat until no material questions remain. A changed decision reopens its
+dependents. If intent or evidence is missing, leave the question open with the
+reason and continue independent branches.
+
+### References on demand
 
 `references/defaults.md` is always read. Deeper rules load only when a decision
 turns on them:
 
-- `standards/contract.md`: ownership, contracts, dependency direction, trust
-  boundaries, failures, resource lifecycle.
-- `standards/local-reasoning.md`: ambiguous ownership or a contested abstraction.
-- one `languages/<language>.md`: types, errors, resources, concurrency, validation.
+| Decision concerns | Read |
+|---|---|
+| Ownership, contracts, dependencies, boundaries, failures | [`references/contract.md`](references/contract.md) |
+| Language design, types, errors, concurrency | `languages/<language>.md` |
 
-Adopted profile rules become ordinary decision rows, e.g.
-`D4: Errors? -> specific exceptions; business outcomes as values (python profile)`.
+Profiles: TypeScript, JavaScript, Python, Go, Rust, Java, C#, C, C++, SQL.
 
-### Rules at three strengths
+Use project conventions first. References are inputs to a decision, not mandatory
+checklists, and should not add requirements unrelated to the goal.
 
-- **Requirements:** correctness, safety, ownership, explicit acyclic dependencies,
-  declared public contracts, trust-boundary validation, behavioral verification.
-- **Defaults:** concrete functions and data, capability-first organization, explicit
-  control flow, narrowly owned mutation, idiomatic language choices.
-- **Heuristics:** size, nesting, duplication, and change surface prompt review;
-  they are not numeric gates.
+### Rule strengths
 
-Architectural exceptions need approval, scope, and rationale; temporary ones need
-a revisit condition. Correctness and safety do not bend. Existing debt gets a
-bounded baseline, not permission to add violations.
+Profile rules carry a strength label:
 
-### Scripts
+- **Requirement:** satisfy it unless the goal or an adopted decision says
+  otherwise.
+- **Default:** adopt when requirements leave room; prefer the smallest
+  conventional, reversible choice.
+- **Heuristic:** review prompt, not a gate. No line, file, or diff-size limits.
 
-| Script | Phase | Checks |
-|---|---|---|
-| `scripts/frontier.mjs` | design | record structure: ready, waiting, reopen, cycles, unknown dependencies |
-| `scripts/verify.sh` | implement | code: repository entrypoint or profile commands |
+### Decision records
 
-Run verification from the target repository, using the actual path to this checkout:
+For a small task, record decisions in the response. For persistent work, use
+`.agents/design/decisions.md`.
 
-```bash
-/path/to/simple-by-design/scripts/verify.sh --strict
-```
+- `[x]` resolved; `[ ]` open.
+- `D#` stable decision ID.
+- `(after: D1)` optional dependency edge.
 
-Resolution: `SBD_VERIFY_CMD`, `make verify`, `npm run verify`, `just verify`, then
-detected profile commands. `--strict` fails on missing tools or undetected checks;
-`--only=python` selects fallback profiles without a stack marker. Non-strict mode
-can skip checks, so exit zero alone is not proof.
+### Scope
 
-### Languages and boundary checks
-
-Profiles: TypeScript, JavaScript, Python, Go, Rust, Java, C#, C, C++, SQL. A missing
-profile means universal rules plus a reported coverage gap.
-
-[Boundary templates](templates/boundaries/) cover import-linter, dependency-cruiser,
-ArchUnit (.NET and JVM), golangci, deny.toml, clang-tidy, CMake layering, sqlfluff.
-
-### Examples and evals
-
-[reference-feature](examples/reference-feature/) has TypeScript and Python
-implementations with consumer tests and `architecture.json` declaring coverage and
-limits. Layouts are illustrative.
-
-[Eval tasks](evals/tasks.md) cover a legacy fix, greenfield feature, second
-variation, boundary change, owner extension, and a design-only probe. Historical
-`evals/results/` runs predate this policy; rerun before comparing.
+The skill stops at decisions and a concise handoff. It does not write
+implementation code. Implementation, review, and verification stay with the
+calling workflow.
 
 ## Removal
 
-Remove the skill search-path entry or copied directory. Repository decision
-records, tool configuration, and code stay; revise their links or decisions
-separately.
-
-## Maintenance
+Remove the skill directory or its search-path entry:
 
 ```bash
-bash scripts/check-profiles.sh
-python3 -m unittest discover -s scripts -p 'test_*.py'
+rm -rf ~/.agents/skills/simple-by-design
 ```
+
+Decision records (`.agents/design/decisions.md`) and project code remain.
 
 ## Reference
 
-- [Agent entrypoint](SKILL.md)
-- [Loop defaults](references/defaults.md)
-- [Contract](standards/contract.md) and [rationale](standards/local-reasoning.md)
+- [Skill entrypoint](SKILL.md)
+- [Defaults](references/defaults.md)
+- [Contract](references/contract.md)
 - [Language profiles](languages/)
-- [Review findings and evidence](workflows/review.md)
-- [Boundary templates](templates/boundaries/)
+- [Changelog](CHANGELOG.md)
