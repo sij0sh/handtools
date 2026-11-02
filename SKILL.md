@@ -31,23 +31,23 @@ Read a reference when a decision turns on its topic:
 | Language-specific design, types, errors, or concurrency | `languages/<language>.md` |
 | Skills, `AGENTS.md`, `CLAUDE.md`, or other agent instructions | `languages/agent-instructions.md` |
 
-Language rule labels:
-- **Requirement:** follow unless a requirement or adopted decision overrides it.
-- **Default:** use when higher sources leave the choice open.
-- **Heuristic:** a prompt to consider; use judgment.
-
 ## Loop
 
-1. **Ground:** Establish the goal, constraints, success criteria, and relevant existing decisions or code.
-2. **Branch:** List open material questions. Link a dependency when one answer requires another.
-3. **Decide:** Resolve questions whose dependencies are settled, using Precedence. State the reason for each non-obvious choice. Add questions the answers raise; drop questions that became irrelevant.
-4. **Challenge:** Imagine two competent implementers following every decision. If they could make materially different choices, add the missing question and return to step 2. Stop when they could not.
+**prerequisite** Rewrite `.agents/design/decisions.md` to briefly summarize its current state so prior work is condensed into a small historic record. 
 
-When a decision changes, revisit its dependents. When intent or evidence is missing, leave the question open with the reason and continue independent branches.
+1. **Ground:** Establish the goal, constraints, success criteria, and relevant existing decisions or code. Record to `.agents/design/decisions.md`.
+2. **Branch:** List open material questions. Link a dependency when one answer requires another. Update `.agents/design/decisions.md`.
+3. **Decide:** Resolve questions whose dependencies are settled, using Precedence. State the reason for each non-obvious choice. Add questions the answers raise; drop questions that became irrelevant. Update `.agents/design/decisions.md`.
+4. **Challenge:** Imagine two competent implementers following every decision. If they could make materially different choices, add the missing questions. Update `.agents/design/decisions.md`. 
 
-## Record
+**loop** Repeat steps 2 through 4 until enough decisions are made that no two SWEs could implement a materially different solution following the decisions.
 
-Record decisions in the response for small tasks. Use `.agents/design/decisions.md` for persistent work. Example:
+## Format 
+
+- `[x]` resolved; `[ ]` open.
+- `D#` stable ID.
+- `(after: D#)` dependency.
+- `- reason` after the answer for non-obvious choices; required on open rows.
 
 ```md
 # Goal
@@ -62,12 +62,6 @@ Preserve existing API and visual language.
 - [ ] D3 (after: D2): Conflict behavior? Open - goal sets no merge policy.
 ```
 
-**Format:**
-- `[x]` resolved; `[ ]` open.
-- `D#` stable ID.
-- `(after: D#)` dependency.
-- `- reason` after the answer for non-obvious choices; required on open rows.
-
 ## Handoff
 
-End with the record and a short handoff: open questions needing the user, and the next step. Implementation starts after the user reviews the record.
+Do one edit pass over the final `.agents/design/decisions.md` so it is understandable to someone new and unfamiliar with code.
