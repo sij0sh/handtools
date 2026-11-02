@@ -45,8 +45,8 @@ OPERATIONS = {op.name: op for op in (
               "runtime", "common", "See what was read, written, run and committed for a target."),
     Operation("trace", "runtime", "Reconstruct the branch-aware episode around a request, failure, checkpoint or commit.",
               "runtime", "common", "Reconstruct an episode: chronology, coverage gaps, task observations."),
-    Operation("recall", "runtime", "Rank past commits like a planned feature, with linked requests and current path state.",
-              "runtime", "common", "Before building: find prior similar work to extend."),
+    Operation("signals", "runtime", "Recorded signals for one file or symbol: failed exchanges, corrections, checkpoint gaps, repeated reads.",
+              "runtime", "common", "Target-scoped leads: failed exchanges, corrections, checkpoint gaps, repeated reads."),
     Operation("investigate", "runtime", "Four evidence views for a goal: pitfalls, invariants, task state, decisions.",
               "runtime", "common", "Before building or resuming: pitfalls, invariants, task state, decisions."),
     Operation("inspect", "runtime", "Collect source, consumers, dependencies and relevant history.",
@@ -94,7 +94,7 @@ def defaults(ops, **values):
     return arg(ops=ops, _defaults=values)
 
 
-def every(*excluded, family=GRAPH + ("inspect", "recall")):
+def every(*excluded, family=GRAPH + ("inspect",)):
     return tuple(n for n in family if n not in excluded)
 
 
@@ -117,9 +117,9 @@ GRAPH_SHARED = (
 )
 
 TARGET_HISTORY = ("inspect",)
-ACTIVITY = ("activity",)
+ACTIVITY = ("activity", "signals")
+SIGNALS = ("signals",)
 TRACE = ("trace",)
-RECALL = ("recall",)
 INVESTIGATE = ("investigate",)
 GRAPH_ARGS = (
     arg("--kind", ops=("map", "find"), action="append", choices=("file", "directory", "symbol", "external", "occurrence")),
@@ -130,12 +130,11 @@ GRAPH_ARGS = (
         help="Bare map prints every source file as text at or under this many lines; 0 disables"),
     arg("--whole", ops="map", action="store_true", help="Bare map: print whole source up to {MAX_BYTES} bytes (default cap {TEXT_BYTES})"),
     arg("--primer", ops="map", dest="primer", action="store_true", default=None,
-        help="Include the recent-work primer in JSON map output; bare map text includes it by default"),
-    arg("--no-primer", ops="map", dest="primer", action="store_false", help="Disable the recent-work primer on bare map text"),
-    arg("--primer-depth", ops="map", type=nonnegative, default=3, help="Recent sessions and non-merge commits to show (3); 0 disables"),
-    arg("--primer-bytes", ops="map", type=positive, default=2048, help="Text primer byte budget (2048)"),
-    arg("--primer-root", ops="map", action="append", default=[], help="Recording project root for the primer; repeatable"),
-    arg("--primer-merges", ops="map", action="store_true", default=False, help="Include merge commits in the primer"),
+        help="Include the orientation packet in JSON map output; bare map text includes it by default"),
+    arg("--no-primer", ops="map", dest="primer", action="store_false", help="Disable the orientation packet on bare map text"),
+    arg("--primer-bytes", ops="map", type=positive, default=2048, help="Text orientation byte budget (2048)"),
+    arg("--recordings", ops="map", action="append", default=[], help="Recording file or directory for orientation; repeatable"),
+    arg("--project-root", ops="map", action="append", default=[], help="Additional recording project root; repeatable"),
     arg("--exclude-session", ops="map", action="append", default=[], help="Exclude session ID or recording path, including its lineage"),
     arg("text", ops="find", nargs="?"),
     arg("--word", ops="find", action="store_true", help="Match whole words only"),
@@ -181,12 +180,6 @@ GRAPH_ARGS = (
     arg("--plan", ops="inspect", action="store_true", help="Describe retrieval stages without reading source/history"),
     arg("--depth", ops="inspect", type=positive, default=2),
     arg("--max-nodes", ops="inspect", type=positive, default=1000),
-    arg("text", ops=RECALL, nargs="+", help="Feature words, e.g. 'export csv button'"),
-    *(arg("--" + name, ops=RECALL, action="append", default=[])
-      for name in ("recordings", "project-root", "root-map", "exclude-session")),
-    *(arg("--" + name, ops=RECALL, type=positive)
-      for name in ("max-recordings", "max-candidates", "max-scan-bytes", "max-events", "max-commits")),
-    arg("--no-sessions", ops=RECALL, action="store_true", help="Git only; skip recordings"),
     arg("goal", ops=INVESTIGATE, nargs="*", help="Goal words; omit for repository orientation"),
     arg("--path", ops=INVESTIGATE, action="append", default=[], help="Exact repository-relative path (may be historical); repeatable"),
     arg("--error", ops=INVESTIGATE, action="append", default=[], help="Literal error text; repeatable"),
@@ -198,7 +191,9 @@ GRAPH_ARGS = (
       for name in ("recordings", "project-root", "root-map", "exclude-session")),
     *(arg("--" + name, ops=INVESTIGATE, type=positive)
       for name in ("max-recordings", "max-candidates", "max-scan-bytes", "max-events", "max-commits")),
-    arg("--budget", ops=("query", "inspect", "show", "recall", "activity", "trace", "investigate"), choices="POLICIES", default="standard"),
+    arg("--plan", ops=SIGNALS, action="store_true", help="Describe signal steps without loading providers"),
+    arg("--no-sessions", ops=SIGNALS, action="store_true", help="Views report not_searched"),
+    arg("--budget", ops=("query", "inspect", "show", "activity", "signals", "trace", "investigate"), choices="POLICIES", default="standard"),
 )
 
 def constants():
@@ -242,11 +237,11 @@ class GraphParser(argparse.ArgumentParser):
 def graph_parser():
     """remember.py: every operation, one parser."""
     shared = add(argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS), GRAPH_SHARED)
-    p = GraphParser(description="Remember: investigate, recall, map, find, inspect, trace, activity, show, query.", parents=[shared])
+    p = GraphParser(description="Remember: investigate, map, find, inspect, trace, activity, signals, show, query.", parents=[shared])
     sub = p.add_subparsers(dest="action")
-    for name in GRAPH + ("investigate", "inspect", "recall", "activity", "trace"):
+    for name in GRAPH + ("investigate", "inspect", "activity", "signals", "trace"):
         op = OPERATIONS[name]
-        text = op.summary if name in ("investigate", "inspect", "recall", "activity", "trace") else op.help
+        text = op.summary if name in ("investigate", "inspect", "activity", "signals", "trace") else op.help
         q = sub.add_parser(name, help=text, description=text, parents=[shared])
         add(q, GRAPH_ARGS, name)
     sub.choices["query"].description = COMMON["query"] + " SQL dialect: SQLite."

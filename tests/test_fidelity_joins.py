@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from helper import recall, target_history
+from helper import commit_rank, target_history
 
 
 def event(recording, request, stamp):
@@ -22,7 +22,7 @@ class FidelityJoinTests(unittest.TestCase):
                   "timestamp": "2026-01-01T10:01:00Z"},
                  {"recording_id": "rec-b", "session": "same", "repo_id": "repo", "sha": "b" * 40,
                   "timestamp": "2026-01-01T11:01:00Z"}]
-        found = recall.requests(events, links)
+        found = commit_rank.requests(events, links)
         self.assertEqual(found[("repo", "a" * 40)][0], "Request A")
         self.assertEqual(found[("repo", "b" * 40)][0], "Request B")
 

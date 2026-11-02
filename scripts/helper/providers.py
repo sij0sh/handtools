@@ -154,10 +154,10 @@ class Providers:
                     for event in recording["events"]:
                         event["independent_session"] = keys[recording["file"]]
             elif self.scheduled:
-                self.recordings, groups, _, excluded, _, self.allocation = scan_scheduled(
+                self.recordings, groups, _, excluded, self.scan_count, self.allocation = scan_scheduled(
                     self.args, self.store.root, scope, self.exclude_files)
             else:
-                self.recordings, groups, _, excluded, _ = scan_project(self.args, self.store.root, scope)
+                self.recordings, groups, _, excluded, self.scan_count = scan_project(self.args, self.store.root, scope)
         except DiscoveryUnavailable as error:
             if getattr(self.args, "recordings", []):
                 raise
@@ -213,6 +213,7 @@ class Providers:
         return {**{k: v for k, v in scope.items() if k != "snapshot"}, "groups": groups,
                 "state": "partial" if partial else "searched", "excluded_sessions": sorted(self.scan_excluded),
                 "current_session_exclusion": "configured" if self.scan_excluded else "unknown; pass --exclude-session",
+                "recordings_excluded": max(0, getattr(self, "scan_count", len(self.recordings)) - len(self.recordings)),
                 "independent_sessions": len({e.get("independent_session") for r in self.recordings
                                              for e in r["events"][:1]}),
                 **({"allocation": self.allocation} if self.allocation else {})}

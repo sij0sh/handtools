@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import catalog, continuations, delivery, graph_cli, investigate, recall, session_show, target_history, trace
+from . import catalog, continuations, delivery, commit_rank, graph_cli, investigate, session_show, signals, target_history, trace
 from .bindings import parse_params, parse_types, types_for
 from .budget import Deadline, POLICIES
 from .engine import Input, SQLiteQuery, IDENTIFIER, infer_type
@@ -56,18 +56,18 @@ def normalize_prefix(argv):
         index += 1
         if '=' not in token and option.nargs != 0:
             index += 1
-    if index and index < len(argv) and argv[index] in {*GRAPH, "inspect", "recall", "activity", "trace", "investigate"}:
+    if index and index < len(argv) and argv[index] in {*GRAPH, "inspect", "activity", "signals", "trace", "investigate"}:
         return [argv[index], *argv[:index], *argv[index + 1:]]
     return argv
 
 
 def normalize(args, argv):
     args = graph_cli.defaults(args)
-    if args.action in ("query", "inspect", "show", "recall", "activity", "trace", "investigate"):
+    if args.action in ("query", "inspect", "show", "activity", "signals", "trace", "investigate"):
         policy = POLICIES[args.budget]
-        if args.action == "recall":
-            # Old work is the point: always read the deep commit/recording window.
-            policy = {**policy, **{k: POLICIES["deep"][k] for k in ("max_commits", "max_recordings")}}
+        if args.action == "investigate":
+            # Old work is the point of prior_work: always read the deep commit window (cheap).
+            policy = {**policy, "max_commits": POLICIES["deep"]["max_commits"]}
         for key, value in policy.items():
             flag = '--' + key.replace('_', '-')
             if not any(token == flag or token.startswith(flag + '=') for token in argv):
@@ -278,10 +278,8 @@ class Runtime:
         views = investigate.views(leads, providers, not args.no_sessions)
         # Packet before relationships, which can fill the first delivery page.
         after_source = next((i for i, r in enumerate(rows) if r["section"] != "source"), len(rows))
-        # Session history carrying a decision leads too: it is the task memory relationships would bury.
-        led = [{"section": "history", **r} for r in compact if r.get('decision')]
-        rows[after_source:after_source] = leads + led
-        rows += [{"section": "history", **r} for r in compact if not r.get('decision')]
+        rows[after_source:after_source] = leads
+        rows += [{"section": "history", **r} for r in compact]
         coverage['selection'] = {"eligible": len(leads), "suppressed": packet.suppressed}
         steps.append({"stage": "packet", "state": "not_searched" if args.no_sessions else "completed"})
         history_partial = any(c.get('state') in ('partial', 'unavailable') for c in history['coverage'].get('git', []))
@@ -319,6 +317,8 @@ class Runtime:
                 ['show', source_ref, '--start-line', str(start+PREVIEW_LINES), '--lines', str(end-start-PREVIEW_LINES+1),
                  '--repo', self.store.root, '--cache', str(self.store.path.parent)], None,
                 "Read the rest of the target source", "expansion"))
+        if node.get('path'):
+            next_items.append(self.signals_ref(node['path']))
         document = {"operation": "inspect", "target": node, "views": views, "results": rows, "steps": steps,
                     "coverage": coverage,
                     "scope": {"intent": args.intent, "snapshot": graph.snapshot, "retention": "transient",
@@ -328,7 +328,16 @@ class Runtime:
                                         providers.coverage.get('recordings', {}).get('signature'),
                                         active_state.get('end'), active_state.get('sha256')]), argv)
 
-    def activity(self, deadline):
+    def signals_ref(self, path):
+        """Executable `signals PATH` expansion carrying this request's recording scope (D72)."""
+        argv = ['signals', path, '--repo', self.store.root, '--cache', str(self.store.path.parent)]
+        for name in ('recordings', 'project_root', 'exclude_session'):
+            for value in getattr(self.args, name, None) or ():
+                argv += ['--' + name.replace('_', '-'), value]
+        return continuations.encode(argv, None, f"Recorded signals for {path}", "expansion")
+
+    def target_operations(self, deadline, operation, scheduled=False):
+        """Shared activity/signals target selection: (candidates Result, None) or (None, context)."""
         args = self.args
         target = args.target
         path = qualname = snapshot = None
@@ -339,14 +348,14 @@ class Runtime:
             if resolved.get("resolution") in ("ambiguous", "unresolved"):
                 candidates = resolved.get("candidates") or []
                 reason = resolved.get("resolution")
-                return Result({"operation": "activity", "status": "partial", "results": candidates,
+                return Result({"operation": operation, "status": "partial", "results": candidates,
                                "coverage": {"target": {"complete": False, "reason": reason,
                                                        "candidates": len(candidates)}},
-                               "next": [{"purpose": "Choose one candidate ref, then run activity on it"}] if candidates
+                               "next": [{"purpose": f"Choose one candidate ref, then run {operation} on it"}] if candidates
                                else [{"purpose": "Use map or find to locate the target"}]},
-                              digest(candidates), self.base_argv())
+                              digest(candidates), self.base_argv()), None
             if resolved.get("kind") not in ("file", "symbol"):
-                raise ValueError("activity requires a file or symbol target")
+                raise ValueError(f"{operation} requires a file or symbol target")
             path, qualname = resolved["path"], resolved.get("qualname")
             snapshot = resolved.get("snapshot") or (graph.snapshot if graph else None)
             if snapshot:
@@ -355,6 +364,7 @@ class Runtime:
         else:
             path = target_history.relative(target)
         providers = Providers(args, self.store, deadline)
+        providers.scheduled = scheduled
         providers.load({"operations", "commit_links"})
         operations = providers.tables.get("operations", [])
         witnesses = providers.tables.get("commit_links", [])
@@ -391,6 +401,16 @@ class Runtime:
                 for w in unique.values()]})
         selected.sort(key=lambda r: (r.get("lane") or "", r.get("order") or 0, r.get("association") or 0,
                                      r.get("association_key") or ""))
+        return None, {"path": path, "qualname": qualname, "snapshot": snapshot, "providers": providers,
+                      "selected": selected, "symbol_events": symbol_events}
+
+    def activity(self, deadline):
+        args = self.args
+        early, found = self.target_operations(deadline, "activity")
+        if early:
+            return early
+        path, qualname, snapshot = found["path"], found["qualname"], found["snapshot"]
+        providers, selected, symbol_events = found["providers"], found["selected"], found["symbol_events"]
         coverage = {name: {key: value for key, value in item.items() if key != "gaps"}
                     for name, item in providers.coverage.items()}
         operation_coverage = dict(providers.coverage.get("operations", {}))
@@ -423,28 +443,44 @@ class Runtime:
         document, signature = trace.build(self.args, self.store, providers, deadline, self.base_argv())
         return Result(document, signature, self.base_argv())
 
-    def recall(self, deadline):
+    def signals(self, deadline):
         args = self.args
-        text = ' '.join(args.text)
-        providers = Providers(args, self.store, deadline)
-        providers.load({"commits", "changes"} if args.no_sessions else {"commits", "changes", "commit_links"})
-        tables = providers.tables
-        words, rows = recall.rank(text, tables["commits"], tables["changes"], tables.get("events", []),
-                                  tables.get("commit_links", []), self.store.root)
-        window = recall.horizon(tables["commits"], tables.get("sessions", []))
-        coverage = {name: {"complete": c.get("complete")} for name, c in providers.coverage.items()}
-        partial = any(c["complete"] is not True for c in coverage.values())
+        if args.plan:
+            return Result({"operation": "signals", "results": signals.plan(),
+                           "plan": {"budget": args.budget, "sessions": not args.no_sessions, "kinds": list(signals.KINDS),
+                                    "limits": {k: getattr(args, k) for k in POLICIES[args.budget]}}})
         argv = self.base_argv()
-        recover = self.recovery(argv, "Recall over a wider commit and recording window") if partial else None
-        return Result({"operation": "recall", "status": "partial" if partial else "ok", "results": rows,
-                       "scope": {"terms": words, "window": window, "retention": "transient",
-                                 "meaning": "lexical candidates; read the paths before reusing"},
-                       "coverage": coverage, "next": [recover] if recover else []},
-                      digest([rows, window]), argv)
+        if args.no_sessions:
+            providers = Providers(args, self.store, deadline)
+            views = signals.views({}, providers, False)
+            return Result({"operation": "signals", "status": "ok", "views": views, "results": [],
+                           "coverage": {"recordings": {"state": "not_searched"}}, "next": []}, digest(views), argv)
+        early, found = self.target_operations(deadline, "signals", scheduled=True)
+        if early:
+            return early
+        providers = found["providers"]
+        rows, by_kind, selection = signals.collect(providers, found["selected"])
+        views = signals.views(by_kind, providers, True)
+        coverage = {name: {k: v for k, v in item.items() if k not in ("gaps", "signature")}
+                    for name, item in providers.coverage.items()}
+        coverage["signals"] = selection
+        partial = any(item.get("complete") is False for item in providers.coverage.values())
+        recover = self.recovery(argv, "Widen recording limits for signals") if partial else None
+        document = {"operation": "signals", "status": "partial" if partial else "ok", "views": views,
+                    "target": {"path": found["path"], "qualname": found["qualname"], "snapshot": found["snapshot"]},
+                    "results": rows, "coverage": coverage,
+                    "scope": {"repo": self.store.root, "retention": "transient",
+                              "ordering": "round-robin across kinds, newest first within a kind",
+                              "meaning": "leads with refs; repeated reads do not prove waste, errors do not prove pitfalls"},
+                    "next": [recover] if recover else []}
+        return Result(document, digest([rows, views, providers.coverage.get("recordings", {}).get("signature")]), argv)
 
     def investigate(self, deadline):
         args = self.args
         goal = ' '.join(args.goal)
+        if goal and not commit_rank.terms(goal):
+            raise ValueError("investigate GOAL needs descriptive words (3+ letters, not only generic verbs like 'add');"
+                             " omit GOAL for repository orientation")
         paths = investigate.validate_paths(args.path)
         if args.plan:
             return Result({"operation": "investigate", "results": investigate.plan(),
@@ -469,7 +505,7 @@ class Runtime:
         active_scope = {k: v for k, v in active_state.items() if k not in ("sha256",)}
         scope = {"repo": self.store.root, "git": investigate.git_scope(providers), "paths": paths,
                  "goal_terms": packet.words, "errors": args.error, "active": active_scope,
-                 "archive_horizon": recall.horizon(providers.tables.get("commits", []), providers.tables.get("sessions", [])),
+                 "archive_horizon": commit_rank.horizon(providers.tables.get("commits", []), providers.tables.get("sessions", [])),
                  "retention": "transient",
                  "meaning": "leads with evidence refs, not accepted rules or task verdicts; read source before acting"}
         partial = any(c.get("complete") is False for c in providers.coverage.values())
@@ -479,8 +515,10 @@ class Runtime:
             argv = continuations.replace_option(argv, '--frontier', pinned)
             argv = continuations.replace_option(argv, '--session', None)
         recover = self.recovery(argv, "Rescan with the deep recording and commit allowance") if partial else None
+        expansions = [self.signals_ref(path) for path in paths[:3]]
         document = {"operation": "investigate", "status": "partial" if partial else "ok", "views": views,
-                    "results": rows, "coverage": coverage, "scope": scope, "next": [recover] if recover else []}
+                    "results": rows, "coverage": coverage, "scope": scope,
+                    "next": ([recover] if recover else []) + expansions}
         signature = digest([goal, paths, args.error, rows, views, recordings.get("signature"),
                             active_state.get("end"), active_state.get("sha256"), scope["git"]])
         return Result(document, signature, argv)
@@ -587,7 +625,7 @@ def run_graph(args, argv, expected):
     if 'primer' in doc:
         primer = doc['primer']
         if args.format == 'table' and isinstance(primer, dict):
-            from .primer import render as render_primer
+            from .orientation import render as render_primer
             primer = render_primer(primer, args.primer_bytes)
         out['primer'] = primer
         # A requested primer that would crowd out every row says so instead of vanishing.

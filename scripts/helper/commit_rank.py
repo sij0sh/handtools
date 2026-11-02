@@ -1,4 +1,4 @@
-"""Prior-work recall: rank past commits against feature words, with linked requests and current path state.
+"""Prior-work ranking for investigate: rank past commits against feature words, with linked requests and current path state.
 
 Git commits are the durable unit; recordings only add the human request behind a linked commit.
 Ranking is lexical and deterministic: each matched term weighs log(1 + commits / commits containing it),
@@ -87,7 +87,7 @@ def requests(events, links):
 def rank(text, commits, changes, events, links, root):
     words = terms(text)
     if not words:
-        raise ValueError("recall needs descriptive words (3+ letters, not only generic verbs like 'add')")
+        raise ValueError("GOAL needs descriptive words (3+ letters, not only generic verbs like 'add')")
     def ckey(row):
         return (row.get("repo_id"), row["sha"])
     paths, newest = {}, current_paths(changes)

@@ -11,7 +11,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from . import cite, commit_links, edit_hunks, git_file_history
-from .recording_scan import scan_project
 from .discovery import normalized_root
 from .root_map import parse_root_map, remap
 from .git_resolve import GitResolver
@@ -59,8 +58,8 @@ def note(event):
             "origin": origin, "ref": event["ref"]}
 
 
-def intent(event, requests, humans, orders, responses=None, request_refs=None):
-    """The request that opened the event's turn, the turn's final reply, the next human message, and signals."""
+def intent(event, requests, humans, orders, request_refs=None):
+    """The request that opened the event's turn, the next human message, and signals."""
     lane = event.get("lane")
     branch_humans = [h for h in humans if h.get("lane") == lane] if lane is not None else humans
     branch_orders = [h["order"] for h in branch_humans]
@@ -68,7 +67,6 @@ def intent(event, requests, humans, orders, responses=None, request_refs=None):
     request = (request_refs or {}).get(refkey(request_ref)) if isinstance(request_ref, dict) else None
     if request is None:
         request = event if event["kind"] == "user_message" else requests.get(event.get("turn"))
-    response = (responses or {}).get(event.get("turn"))
     after = bisect.bisect_right(branch_orders, event["order"])
     following = branch_humans[after] if after < len(branch_humans) else None
     signals = []
@@ -79,9 +77,6 @@ def intent(event, requests, humans, orders, responses=None, request_refs=None):
     out = {"signals": signals}
     if request:
         out["request"] = note(request)
-    if response and response is not event:
-        # The turn's last assistant message: what was decided or reported, a lead rather than a verdict.
-        out["response"] = note(response)
     if following:
         out["followup"] = note(following)
     return out
@@ -209,22 +204,12 @@ class TargetRepository:
         return self.items if path else []
 
 
-def scan(args, root):
-    scope = {"duplicates_skipped": 0}
-    kept, coverage, keys, excluded, scanned = scan_project(args, root, scope)
-    partial = not scope["discovery_complete"] or any(not g["scan_complete"] or not g["text_complete"] for g in coverage)
-    return kept, {**scope, "groups": coverage, "state": "partial" if partial else "searched",
-                  "excluded_sessions": sorted(excluded), "recordings_excluded": scanned-len(kept),
-                  "current_session_exclusion": "configured" if excluded else "unknown; pass --exclude-session",
-                  "independent_sessions": len({keys[r["file"]] for r in kept})}
-
-
 def literal(text, value):
     return bool(value and re.search(r"(?<![\w./\\])" + re.escape(value) + r"(?![\w./\\])", text))
 
 
 def run(args, store, get_graph, scanned=None):
-    """scanned: (recordings, coverage) already loaded by the caller's shared provider scan."""
+    """scanned: (recordings, coverage) from the caller's shared provider scan; required unless --no-sessions."""
     for value in args.root_map:
         old, sep, new = value.partition("=")
         if not sep or not old or not new:
@@ -294,13 +279,9 @@ def run(args, store, get_graph, scanned=None):
     if args.no_sessions:
         result["coverage"]["sessions"] = {"state": "not_searched"}
         return rank(result)
-    try:
-        recordings, coverage = scanned if scanned is not None else scan(args, store.root)
-        if coverage.get("state") == "unavailable":
-            result["coverage"]["sessions"] = coverage
-            return rank(result)
-    except (ValueError, OSError) as error:
-        result["coverage"]["sessions"] = {"state": "unavailable", "reason": str(error)}
+    recordings, coverage = scanned
+    if coverage.get("state") == "unavailable":
+        result["coverage"]["sessions"] = coverage
         return rank(result)
     result["coverage"]["sessions"] = coverage
     roots = {r["file"]: r.get("root") for r in recordings}
@@ -318,15 +299,13 @@ def run(args, store, get_graph, scanned=None):
         if target["kind"] == "symbol" and symbol["qualname"] == target["qualname"]:
             by_event.setdefault((symbol["recording_id"], symbol["event_id"]), []).append(symbol)
     for recording in recordings:
-        requests, humans, responses, request_refs = {}, [], {}, {}
+        requests, humans, request_refs = {}, [], {}
         for event in recording["events"]:
             if event["kind"] == "user_message":
                 requests.setdefault(event.get("turn"), event)
                 request_refs[refkey(event["ref"])] = event
                 if human(event):
                     humans.append(event)
-            elif event["kind"] == "assistant_message" and str(event.get("text") or "").strip():
-                responses[event.get("turn")] = event
         orders = [e["order"] for e in humans]
         calls = {}
         mention_paths = []
@@ -365,7 +344,7 @@ def run(args, store, get_graph, scanned=None):
                 continue
             row = clean(event, SimpleNamespace(preview_chars=300))
             entry = {"category": "recorded_activity" if direct else "text_mention", "basis": basis,
-                     "evidence": row, "intent": intent(event, requests, humans, orders, responses, request_refs),
+                     "evidence": row, "intent": intent(event, requests, humans, orders, request_refs),
                      "symbols": match,
                      "hunks": hunks_here, "ref": event["ref"], "next": next_for(event)}
             if event["kind"] == "tool_call":
@@ -432,9 +411,6 @@ def compact(rows):
             out.append(item)
         operation = (evidence.get("operation") or evidence.get("kind")) if row["category"] == "recorded_activity" else "mention"
         item["counts"][operation] = item["counts"].get(operation, 0) + 1
-        if found.get("response") and "decision" not in item:
-            item["decision"] = found["response"]["text"][:240]
-            item["decision_ref"] = locator(found["response"]["ref"])
         item["signals"] += [s for s in found.get("signals", []) if s not in item["signals"]]
         if "possible_correction" in found.get("signals", []) and "followup" not in item:
             item["followup"] = found["followup"]["text"][:120]

@@ -15,6 +15,9 @@ sys.path.insert(0, str(ROOT / "tests"))
 from helper import graph_cli, runtime, target_history
 from helper.edit_hunks import anchor
 from helper.graph_store import Store
+from helper.budget import Deadline
+from helper.providers import Providers
+from support import invoke
 
 
 
@@ -86,7 +89,11 @@ class TargetHistoryTests(unittest.TestCase):
 
     def history(self, target="a.py::target", *argv):
         args = self.args("inspect", target, "--recordings", str(self.archive), *argv)
-        return target_history.run(args, Store(args.repo, args.cache), lambda *a: graph_cli.get_graph(*a))
+        store = Store(args.repo, args.cache)
+        providers = Providers(args, store, Deadline(30))
+        providers.load({"events"})
+        return target_history.run(args, store, lambda *a: graph_cli.get_graph(*a),
+                                  scanned=(providers.recordings, providers.session_coverage()))
 
     def compact(self, *argv):
         return target_history.compact(self.history(*argv)["results"])
@@ -95,11 +102,9 @@ class TargetHistoryTests(unittest.TestCase):
         return self.run_command("inspect", "a.py::target", "--no-sessions")["target"]["ref"]
 
     def cli(self, *argv):
-        result = subprocess.run([sys.executable, str(ROOT / "scripts/remember.py"), *argv,
-                                 "--repo", str(self.repo), "--cache", str(self.cache)],
-                                capture_output=True, text=True)
+        result = invoke([*argv, "--repo", str(self.repo), "--cache", str(self.cache)])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        return json.loads(result.stdout)
+        return result.json()
 
     def test_edit_reaches_original_request_and_paired_result(self):
         self.recording()
@@ -139,8 +144,9 @@ class TargetHistoryTests(unittest.TestCase):
 
     def test_ambiguity_does_not_scan_and_refs_preserve_snapshot(self):
         self.write("other.py", "def target():\n    return 3\n")
-        with patch("helper.target_history.scan_project", side_effect=AssertionError("scan")):
-            self.assertEqual(self.history("target")["status"], "ambiguous")
+        with patch("helper.providers.scan_scheduled", side_effect=AssertionError("scan")):
+            out = self.run_command("inspect", "target", "--recordings", str(self.archive))
+            self.assertEqual(out["coverage"]["target"]["reason"], "ambiguous")
         ref = self.pinned_ref()
         out = self.history(ref)
         self.assertEqual(out["target"]["qualname"], "target")
@@ -211,7 +217,7 @@ class TargetHistoryTests(unittest.TestCase):
     def test_inspect_never_saves_transcript(self):
         self.recording(request="UNIQUE_PRIVATE_REQUEST")
         out = self.cli("inspect", "a.py::target", "--recordings", str(self.archive))
-        self.assertTrue(any(r["section"] in ("decision", "history") for r in out["results"]))
+        self.assertTrue(any(r["section"] == "history" for r in out["results"]))
         retained = list(self.cache.rglob("report-*.json"))
         self.assertEqual(retained, [])
         self.assertFalse(any("UNIQUE_PRIVATE_REQUEST" in p.read_text() for p in self.cache.rglob("*.json")))
@@ -286,15 +292,14 @@ class TargetHistoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["intent"]["request"]["text"], "Reject the eager approach")
         self.assertEqual(rows[0]["intent"]["request"]["origin"], "human")
 
-    def test_turn_reply_is_the_decision_lead(self):
+    def test_history_rows_leave_decisions_to_the_packet(self):
         reply = {"type": "message", "id": "d", "parentId": "r", "message": {"role": "assistant", "content": [
             {"type": "text", "text": "Kept target lazy; eager loading broke the importer."}]}}
         self.recording(extra=[reply])
         row = next(r for r in self.history()["results"] if r["category"] == "recorded_activity")
-        self.assertEqual(row["intent"]["response"]["text"], "Kept target lazy; eager loading broke the importer.")
+        self.assertNotIn("response", row["intent"])
         lead = next(r for r in self.compact() if r["source"] == "session")
-        self.assertEqual(lead["decision"], "Kept target lazy; eager loading broke the importer.")
-        self.assertRegex(lead["decision_ref"], r"^past@\d+#[0-9a-f]{12}$")
+        self.assertNotIn("decision", lead)
 
     def test_corrected_and_failed_work_rank_before_plain_requests(self):
         self.recording(sid="plain", request="Add the target helper")

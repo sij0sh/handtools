@@ -51,6 +51,9 @@ def render_table(output, fields=None):
     present = list(dict.fromkeys(k for row in rows for k in row))
     if output.get('operation') == 'query':
         columns = fields or present
+    elif output.get('operation') == 'signals':
+        wanted = ('section', 'categories', 'excerpt', 'count', 'tools', 'ref')
+        columns = fields or [k for k in wanted if k in present] or present
     elif output.get('operation') == 'investigate':
         wanted = ('section', 'categories', 'excerpt', 'subject', 'paths', 'relevance', 'ref')
         columns = fields or [k for k in wanted if k in present]

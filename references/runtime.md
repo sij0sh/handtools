@@ -2,27 +2,34 @@
 
 ## Operations
 
-`remember.py` is the common entrypoint. `investigate`, `recall`, `map`, `find`,
-`inspect`, `activity`, `trace`, `show`, and `query` cover ordinary work.
+`remember.py` is the common entrypoint. `investigate`, `map`, `find`,
+`inspect`, `activity`, `signals`, `trace`, `show`, and `query` cover ordinary work.
 
 `investigate` returns the four-view evidence packet (pitfall, invariant, task,
 decision) plus prior-work commits; see [history](history.md#investigate).
 `--plan` describes it without reading. `--no-sessions` marks every view
 `not_searched`.
 
-`recall WORDS` ranks non-merge commits against feature words: each term weighs
+`prior_work` ranks non-merge commits against goal words: each term weighs
 log(1 + commits / commits containing it); subject x3, body x1, best path x2,
 linked human request x2, +1 if a changed path still exists; ties go newest.
 Generic verbs (`add`, `new`, `ui`, `fix`, ...) and words under 3 letters are
-dropped; none left is an input error. Rows show up to 5 paths with current
-state (`exists`, `old -> new`, `-> gone`) and the request + cite when a session
-recorded the commit. Uses deep budgets (2000 commits, 100 recordings);
-`scope.window` gives the oldest commit/session scanned, so a miss only covers it. `describe TABLE` gives focused schemas without
-capturing source. Leading shared options work before the verb.
+dropped; a goal with none left is an input error. Rows show up to 5 paths with
+current state (`exists`, `old -> new`, `-> gone`) and the request + cite when a
+session recorded the commit. Always reads the deep commit window (2000);
+`scope.archive_horizon` gives the oldest commit/session scanned and the commit
+count, so a miss only covers it. `--path` adds one `signals PATH` expansion per
+path (max 3). `describe TABLE` gives focused schemas without capturing source.
+Leading shared options work before the verb.
+
+`signals TARGET` groups recorded operations on one file or symbol (same target
+resolution as `activity`, scheduled scan as `investigate`) into four kinds:
+`failed_exchange`, `correction_candidate`, `checkpoint_gap`, `repeated_read`.
+See [history](history.md#signals).
 
 `inspect TARGET` performs a bounded recipe: resolve one target, read its source,
 select packet leads (shared with `investigate`), collect relationships, retrieve
-target history (rows with a `decision` lead before relationships), expand one session lead. It
+target history after relationships, expand one session lead, offer one `signals` expansion. It
 never edits project code. The default `change` intent uses the existing impact
 algorithm, including separately labeled direct/file-only/indirect consumers.
 `bug` and `review` trace both directions at the resolved target's grain. They

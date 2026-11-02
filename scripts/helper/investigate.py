@@ -9,7 +9,7 @@ import os
 import re
 from pathlib import Path
 
-from . import cite, commit_links, operation_facts, reconciliation, recall
+from . import cite, commit_links, commit_rank, operation_facts, reconciliation
 from .budget import check
 from .graph_store import digest
 from .options import ScanOptions
@@ -32,7 +32,7 @@ ACK = re.compile(r"^\W*(ok(ay)?|yes|yep|yeah|y|no|nope|thanks?( you)?|ty|go( ahe
                  r"lgtm|great|nice|done|perfect|cool|good)\W*$", re.I)
 WRAPPER = re.compile(r"<(system-reminder|command-[a-z-]+|local-command-[a-z-]+|user-prompt-submit-hook|"
                      r"task-notification|bash-[a-z-]+)\b[^>]*>.*?</\1>", re.S | re.I)
-COPIED = re.compile(r'"schema_version"\s*:|"operation"\s*:\s*"(investigate|inspect|recall|trace)"')
+COPIED = re.compile(r'"schema_version"\s*:|"operation"\s*:\s*"(investigate|inspect|recall|signals|trace)"')
 
 
 def strip(text):
@@ -206,7 +206,7 @@ class Packet:
     def __init__(self, providers, goal, paths, errors, active=None):
         self.providers = providers
         self.goal, self.paths, self.errors = goal, paths, [e.lower() for e in errors]
-        self.words = recall.terms(goal) if goal else []
+        self.words = commit_rank.terms(goal) if goal else []
         self.active = active
         self.suppressed = {}
         self.leads = {}
@@ -458,7 +458,7 @@ def prior_work(goal, providers):
     """Ranked commits with every recorded request associated by witness ancestry (not newest timestamp)."""
     tables = providers.tables
     try:
-        _, rows = recall.rank(goal, tables.get("commits", []), tables.get("changes", []), [], [], providers.store.root)
+        _, rows = commit_rank.rank(goal, tables.get("commits", []), tables.get("changes", []), [], [], providers.store.root)
     except ValueError:
         return []
     events = {_key(e.get("ref")): e for e in tables.get("events", []) if isinstance(e.get("ref"), dict)}

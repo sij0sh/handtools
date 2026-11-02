@@ -1,6 +1,6 @@
 ---
 name: remember
-description: Recall prior work, code relationships and past sessions. Use before building a feature or fix, and whenever a task depends on understanding the codebase.
+description: Memory for coding agents - known pitfalls, invariants, task state and decisions from past sessions and commits, plus code relationships. Use before building a feature or fix, on resume, and whenever a task depends on understanding the codebase.
 ---
 
 # Remember
@@ -29,8 +29,8 @@ or add `--repo DIR`. Use Python 3.11+ (`python` or `py -3` on Windows).
 | `map` | Orient in current source; small repositories print whole. |
 | `find TEXT` | Locate a concrete path, symbol, error or contract. |
 | `inspect TARGET` | Source, evidence leads, potential consumers, dependencies and history for one target. |
-| `recall WORDS` | Past commits ranked by words, with requests and current path state. |
 | `activity TARGET` | Recorded operations for one file or symbol: action, path, outcome, basis, witnesses. |
+| `signals TARGET` | Failed exchanges, correction candidates, checkpoint gaps, repeated reads for one file or symbol; leads, not verdicts. |
 | `trace REF` | Branch-aware episode around a request, failure, checkpoint or commit: chronology, coverage gaps, per-dimension observations, deepen/widen refs. |
 | `show REF` | Expand source, session or commit evidence; execute a returned continuation. |
 | `query 'SELECT ...'` | SQLite over built-in tables; `describe TABLE` gives columns. |

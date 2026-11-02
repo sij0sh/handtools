@@ -2,7 +2,7 @@
 
 **Memory for coding agents, built from evidence on demand. The agent queries source, Git and its own past sessions with SQL, then the database is thrown away.**
 
-Agents forget between sessions. They retry approaches that already failed, reverse decisions without knowing why they were made, and rebuild features that already exist. Memory files help until the code moves and the notes do not.
+You probably already know why a memory system is essential to a harness. There are many solutions out there as is, but most come with their own can of worms. A second system requires maintaince and can do more harm than good when it gets one detail wrong or if they attempt to hold the harness's hand too much.
 
 remember skips the notes. Each call rebuilds a SQLite database from what already exists: current source, Git history, and the session recordings your harness writes (pi, Codex, Claude Code). The agent asks its own questions. Nothing is stored to keep in sync.
 
@@ -35,10 +35,10 @@ flowchart LR
 
 | Signal | Where it comes from |
 |---|---|
-| Known pitfalls | `investigate` `pitfall` view: failed operations, human corrections; `activity TARGET` |
+| Known pitfalls | `investigate` `pitfall` view: failed operations, human corrections; `signals TARGET` per file |
 | Critical invariants | `invariant` view: human "must/never" constraints, found without goal keywords |
 | Current task state | `task` view: unverified requests, checkpoint claims; `trace REF` splits requested, edited, verified, committed, pushed |
-| Architectural decisions | `decision` view: human choices, assistant proposals (attributed, with later rejections); `prior_work` commits via `recall` ranking |
+| Architectural decisions | `decision` view: human choices, assistant proposals (attributed, with later rejections); `prior_work` commits ranked against goal words |
 
 Each view reports `leads_found`, `none_found_in_scanned_scope`, `not_searched` or `unavailable`, so an empty view is never silent. Recordings are scheduled across harnesses and ages: half the budget goes to the newest matches, half to older context.
 
@@ -79,7 +79,7 @@ prior_work
 
 Each round takes one lead per view, then one `prior_work` commit (subject, SHA, paths, linked request). `partial` means the scan was bounded; `next` offers a deeper rescan. Add `--path PATH` or `--error TEXT` to anchor on files or a failure. `transient` means nothing was retained.
 
-`recall WORDS` ranks past commits alone, with changed paths and their current state.
+`signals TARGET` lists, for one file or symbol: failed exchanges, correction candidates, checkpoint coverage gaps and repeated reads. Leads, not verdicts: a reread is not waste, an error is not a reusable pitfall.
 
 ## Use
 
@@ -99,7 +99,7 @@ Tables: `nodes`, `edges`, `files`, `code_items`, `gaps`, `commits`, `changes`, `
 | Question | Start with |
 |---|---|
 | What pitfalls, constraints, task state and decisions apply? | `investigate GOAL --path PATH --error TEXT` |
-| Has similar work been done before? | `recall WORDS` |
+| What went wrong around this file before? | `signals TARGET` |
 | What is in this repository? | `map` |
 | Where does this name appear? | `find TEXT --path GLOB --not-path GLOB` |
 | What could changing this affect, and why is it this way? | `inspect TARGET` |
@@ -137,7 +137,7 @@ python3 "$S/remember.py" show '<returned cite>'
 
 ### Orient in a new session
 
-Bare `map` prints whole source for small repositories, a directory summary for larger ones, plus a ~2 KB recent-work primer: last 3 sessions (first request, last agent claim, edited files), last 3 commits, and working-tree state. Never retained. `--no-primer` omits it; `--primer-depth N` changes the window.
+Bare `map` prints whole source for small repositories, a directory summary for larger ones, plus a ~2 KB orientation packet: view states and the top lead per view (same leads as `investigate` with no goal, current session excluded), last 3 non-merge commits, and working-tree state. Never retained. `--no-primer` omits it; `--primer-bytes N` sizes it.
 
 Recordings default to the current project. For historical roots, repository splits and coverage, see [history tools](references/history.md).
 

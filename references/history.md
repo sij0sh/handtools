@@ -7,7 +7,7 @@ returns leads in four views: `pitfall` (failed operations, human corrections),
 `invariant` (human requirement language), `task` (unverified requests,
 checkpoint claims, active request) and `decision` (human choices; assistant
 proposals as `assistant_claim`, with `relations.later_rejection`). `prior_work`
-rows (recall ranking plus each commit's linked requests) follow each round.
+rows (goal-word commit ranking plus each commit's linked requests) follow each round.
 No goal means repository orientation. No graph capture.
 
 Scheduling: one discovery; `--max-recordings`, `--max-scan-bytes`, `--max-events`
@@ -28,6 +28,23 @@ messages, copied remember packets, acknowledgements, command echoes, empty
 non-zero exits. Leads from other repositories never match. Each `views` entry
 gives `state`, `eligible`, `delivered`, `omitted`.
 
+## signals
+
+`signals TARGET [--plan] [--no-sessions]` takes a path, `path::qualname` or
+node ref (ambiguity returns candidates). One row per group, `categories: [kind]`:
+
+| Kind | Grain | Notes |
+| --- | --- | --- |
+| `failed_exchange` | failed target ops per (recording, lane, request) | `count`, `tools`, first error, `last_outcome` (observation only); empty non-zero exits skipped |
+| `correction_candidate` | next human message after an exchange on the target | `CORRECTION` phrasing, noise filtered; `corrects` = prior assistant ref |
+| `checkpoint_gap` | target ops between a checkpoint's boundary and its publication, publication branch only | `ops_after`, up to 5 `refs`; `unavailable` without a checkpoint-capable adapter (pi) |
+| `repeated_read` | reads of the target beyond the first, per session | `reads`, `extra_reads`, `turns`; the file may have changed between reads |
+
+`views` per kind use the `investigate` states. Order: round-robin across kinds,
+newest first. Leads, not verdicts: a reread is not waste, an error is not a
+reusable pitfall. Not built (no evidence yet): failure-after-fix causality,
+unchanged-content rereads.
+
 ## inspect history lane
 
 `inspect TARGET` resolves a file/symbol target or node ref, then reads its
@@ -36,17 +53,16 @@ graph capture; `path::symbol` parses only that file. Node refs reuse their pinne
 snapshot. Unresolved relative file paths are read as historical paths.
 `map` and `find` never scan recordings.
 
-Bare `map` is the documented exception. It reads a bounded recent-work primer:
-3 independent sessions and 3 non-merge commits, about 2 KB, printed only and
-never saved. For sessions it shows the first substantive request,
-the last substantive agent claim (or compaction summary), and recorded file
-edits. For commits it shows SHA, age, subject, file/line totals and up to two
-paths. The working tree is included when Git is present. The current session is
-excluded using `PI_SESSION_FILE`, `PI_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`,
-`CODEX_THREAD_ID`, or `--exclude-session`. Long recordings are sampled from the
-head and tail. Controls: `--no-primer`, `--primer-depth N` (0 disables),
-`--primer-bytes N`, `--primer-root DIR`, `--primer-merges`; JSON opt-in with
-`map --format json --primer`. `--snapshot` skips the primer.
+Bare `map` is the documented exception: an orientation packet, about 2 KB,
+printed only and never saved. It runs the `investigate` selector with no goal
+(same scan, same lead IDs) and shows the view states, the top lead per view
+(excerpt + ref), 3 non-merge commits (SHA, age, subject, file/line totals) and
+working-tree state. The current session's leads are excluded (`PI_SESSION_FILE`,
+`PI_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, or
+`--exclude-session`). Over `--primer-bytes N`, commits then leads drop and the
+drop is named. Controls: `--no-primer`, `--primer-bytes N`, `--recordings`,
+`--project-root`; JSON opt-in with `map --format json --primer`. `--snapshot`
+skips it.
 
 ```bash
 python3 "$S/remember.py" inspect 'src/store.py::Store.save'

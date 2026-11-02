@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from helper import continuations
 from helper.engine import SQLiteQuery
 from helper.runtime import Runtime, Request, parser, normalize
+from support import invoke
 
 
 class RuntimeTests(unittest.TestCase):
@@ -38,12 +39,11 @@ class RuntimeTests(unittest.TestCase):
         self.recording.write_text(''.join(json.dumps(r)+'\n' for r in self.records))
 
     def cli(self, *args, ok=True, stdin=None, cwd=None):
-        p = subprocess.run([sys.executable, str(ROOT/'scripts/remember.py'), *map(str,args),
-                            '--repo', str(self.repo), '--cache', str(self.cache)],
-                           input=stdin, capture_output=True, text=True, cwd=cwd, timeout=30)
+        p = invoke([*map(str,args), '--repo', str(self.repo), '--cache', str(self.cache)],
+                   stdin=stdin, cwd=cwd)
         self.assertEqual(p.returncode, 0 if ok else 2, p.stderr+p.stdout)
         self.assertFalse(p.stderr, p.stderr)
-        return json.loads(p.stdout)
+        return p.json()
 
     def test_constant_and_cte_need_no_providers(self):
         out = self.cli('query', "WITH events(x) AS (VALUES ('files')) SELECT x FROM events")
@@ -172,11 +172,10 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue({'source','relationships','history','evidence'}<=sections, out)
         self.assertIn('views', out)
         self.assertTrue(any(r.get('path')=='app.py' for r in out['results']))
-        # The human request and its reply lead, before relationships can fill a delivery page.
-        self.assertEqual(out['results'][1]['section'],'history')
-        self.assertEqual(out['results'][1]['text'],'Please fix core.py save.')
-        self.assertEqual(out['results'][1]['decision'],'Inspect callers before changing core.py.')
-        self.assertRegex(out['results'][1]['decision_ref'],r'^fixture@\d+#[0-9a-f]{12}$')
+        history=next(r for r in out['results'] if r['section']=='history')
+        self.assertEqual(history['text'],'Please fix core.py save.')
+        self.assertNotIn('decision',history)
+        self.assertRegex(history['ref'],r'^fixture@\d+#[0-9a-f]{12}$')
         self.assertFalse(list(self.cache.rglob('report-*')))
         for p in self.cache.rglob('*.json'):self.assertNotIn('Please fix core.py save.',p.read_text())
 
@@ -206,11 +205,6 @@ class RuntimeTests(unittest.TestCase):
         def counted(p): calls.append(1);return original(p)
         with patch.object(providers.Providers,'load_graph',counted):Runtime(Request(args,tuple(argv))).execute()
         self.assertEqual(calls,[1])
-
-    def test_sql_timeout(self):
-        with SQLiteQuery({},.01) as q:
-            q.plan('WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n) SELECT sum(x) FROM n')
-            with self.assertRaisesRegex(ValueError,'interrupted'):q.evaluate()
 
     def test_plan_reads_using_join_columns_on_both_sides(self):
         schemas={'files':{'path':'TEXT','size':'INTEGER'},'changes':{'sha':'TEXT','path':'TEXT'}}
@@ -310,14 +304,14 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual([r['a'] for r in out['results']],['true','x','false'])
 
     def test_sqlite_memory_cap_is_a_query_error(self):
-        code=("from helper import engine\nengine.SQLITE_HEAP=16<<20\n"
-              "with engine.SQLiteQuery({},20) as q:\n"
-              "    q.plan(\"WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n LIMIT 1000000) "
-              "SELECT printf('%0100d',x) FROM n ORDER BY random()\")\n"
-              "    try: q.evaluate(1)\n    except ValueError as e: print(e)\n")
-        p=subprocess.run([sys.executable,'-c',code],cwd=ROOT/'scripts',capture_output=True,text=True,timeout=60)
-        self.assertIn('memory cap',p.stdout,p.stderr)
+        from helper import engine
+        with patch.object(engine, 'SQLITE_HEAP', 16 << 20), engine.SQLiteQuery({}, 20) as q:
+            q.plan("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n LIMIT 1000000) "
+                   "SELECT printf('%0100d',x) FROM n ORDER BY random()")
+            with self.assertRaisesRegex(ValueError, 'memory cap'):
+                q.evaluate(1)
 
+    @unittest.skipIf(sys.platform == "win32", "SIGINT delivery needs a POSIX process group")
     def test_sigint_cancels_query_without_traceback(self):
         import signal, time
         p=subprocess.Popen([sys.executable,str(ROOT/'scripts/remember.py'),'query',

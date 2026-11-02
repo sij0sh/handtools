@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from helper.recording_scan import schedule
+from support import invoke
 
 ENV_DROP = ("PI_SESSION_FILE", "PI_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID")
 
@@ -74,17 +75,12 @@ class InvestigateTests(unittest.TestCase):
             os.utime(path, ns=(mtime, mtime))
         return path
 
-    def env(self):
-        env = {k: v for k, v in os.environ.items() if k not in ENV_DROP}
-        return env
-
     def run_cli(self, *args, ok=True, env=None):
-        p = subprocess.run([sys.executable, str(ROOT / "scripts/remember.py"), *args,
-                            "--repo", str(self.repo), "--cache", str(self.cache)],
-                           capture_output=True, text=True, env=env or self.env())
+        p = invoke([*args, "--repo", str(self.repo), "--cache", str(self.cache)],
+                   env=env or {name: None for name in ENV_DROP})
         if ok:
             self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
-        return json.loads(p.stdout)
+        return p.json()
 
     def investigate(self, *args, **kw):
         return self.run_cli("investigate", *args, "--recordings", str(self.archive), "--max-bytes", "60000", **kw)

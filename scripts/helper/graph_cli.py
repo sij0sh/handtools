@@ -34,16 +34,14 @@ def defaults(args):
             raise ValueError("--fields requires at least one column")
     if args.action == "map":
         # A bare invocation has no map subparser, so its options are absent.
-        for key, value in {"primer": None, "primer_depth": 3, "primer_bytes": 2048,
-                           "primer_root": [], "primer_merges": False, "exclude_session": []}.items():
+        for key, value in {"primer": None, "primer_bytes": 2048, "recordings": [], "project_root": [],
+                           "exclude_session": []}.items():
             if not hasattr(args, key):
                 setattr(args, key, value)
         text_mode = not (args.path or args.kind or args.format or args.fields)
         explicit = getattr(args, "primer", None)
         args.primer_explicit = explicit is not None
         args.primer = text_mode if explicit is None else explicit
-        if args.primer_depth > 10:
-            raise ValueError("--primer-depth must be at most 10")
         if args.primer_bytes < 512:
             raise ValueError("--primer-bytes must be at least 512")
     else:
@@ -106,10 +104,10 @@ def run(args, store):
             recent = None
             if args.primer and args.snapshot:
                 recent = ["primer omitted: --snapshot pins source; the primer reads live history"]
-            elif args.primer and args.primer_depth:
+            elif args.primer:
                 try:
-                    from .primer import build as build_primer, render as render_primer
-                    recent = render_primer(build_primer(graph, args), args.primer_bytes)
+                    from . import orientation
+                    recent = orientation.render(orientation.build(graph, args, store), args.primer_bytes)
                 except Exception as error:
                     # Orientation must not fail because a recording or Git lookup is unavailable.
                     recent = [f"primer omitted: {type(error).__name__}: {str(error)[:120]}"]
@@ -124,9 +122,9 @@ def run(args, store):
                 if n["kind"] in kinds and (paths is None or n.get("path") in paths)]
         rows.sort(key=lambda n: (n.get("path") or "", n.get("line") or 0, n["kind"]))
         doc = graph.document(args.action, rows, kinds=kinds, path=args.path)
-        if args.primer and args.primer_explicit and args.primer_depth and not args.snapshot:
-            from .primer import build as build_primer
-            doc["primer"] = build_primer(graph, args)
+        if args.primer and args.primer_explicit and not args.snapshot:
+            from . import orientation
+            doc["primer"] = orientation.build(graph, args, store)
         elif args.primer and args.snapshot:
             doc["primer"] = "omitted: --snapshot pins source; the primer reads live history"
         elif not args.primer_explicit and not args.offset:

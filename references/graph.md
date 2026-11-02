@@ -7,9 +7,9 @@ otherwise a directory summary. `--whole-repo-lines 0`, explicit
 `--format json|table`, or `--fields` selects rows. No command executes project
 code, installs dependencies or runs tests.
 
-Bare `map` text adds a bounded recent-work primer: 3 sessions, 3 non-merge
-commits, current session excluded, about 2 KB. Use `--no-primer`,
-`--primer-depth N`, `--primer-bytes N`, `--primer-root DIR`, `--primer-merges`,
+Bare `map` text adds an orientation packet: view states, top lead per view
+(shared with `investigate`), 3 non-merge commits, tree state, current session
+excluded, about 2 KB. Use `--no-primer`, `--primer-bytes N`, `--project-root DIR`
 or `--exclude-session ID`. Other `map` forms include it only with `--primer`;
 otherwise, and under `--snapshot` or a byte cap, `primer` names the omission.
 `describe` lists commands and tables.
