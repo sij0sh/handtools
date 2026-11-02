@@ -1,19 +1,17 @@
 # Coding Contracts
 
-Apply when decisions involve ownership, boundaries, dependencies, state, or failure handling. These are design principles, not a checklist.
+Detail for decisions on ownership, boundaries, dependencies, state, or failures. Extends `defaults.md`.
 
-1. **Clear ownership.** Give each behavior, business rule, and mutable state one authoritative owner. Access or change them through that owner's contract.
+1. **Access through the owner.** Read and change owned state or rules only through the owner's public contract.
 
-2. **Explicit boundaries.** Keep dependencies directed and acyclic. Consumers use public contracts, not another owner's internals. A boundary represents a cohesive responsibility, not necessarily a folder or package.
+2. **Directed dependencies.** Keep dependencies acyclic. Draw a boundary around a cohesive responsibility; it may span folders or share one.
 
-3. **Visible behavior.** Make important inputs, outputs, side effects, and failures explicit. Validate untrusted data at trust boundaries without redundant internal checks.
+3. **Owned resources.** Name who cleans up each resource, completes or cancels each concurrent task, and observes its failures.
 
-4. **Owned resources.** Make resource lifetimes and concurrent work understandable, including responsibility for cleanup, completion, and failures.
-
-5. **Local reasoning.** A maintainer should understand a behavior, its owner, dependencies, and affected consumers without reconstructing unrelated systems. If not, reconsider the ownership or abstraction.
+4. **Ownership check.** When understanding a behavior requires reconstructing unrelated systems, move the owner or remove the abstraction.
 
 ## Tradeoffs
 
-- **Duplication vs. coupling:** Prefer small independent duplication over coupling unrelated capabilities. Keep authoritative business rules in one place.
-- **Structure vs. indirection:** Isolate I/O or introduce abstractions when they clarify real boundaries, not to satisfy an architectural pattern.
-- **Size vs. clarity:** Judge complexity by unnecessary concepts and affected owners or contracts, not lines, files, or diff size.
+- **Duplication vs. coupling:** Duplicate small code between unrelated capabilities. Keep each authoritative business rule in one place.
+- **Structure vs. indirection:** Add I/O isolation or an abstraction when it marks a real boundary.
+- **Size vs. clarity:** Measure complexity by concept count and the owners or contracts touched.

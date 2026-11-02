@@ -1,15 +1,13 @@
 # Defaults
 
-Apply when requirements and adopted decisions leave room for choice. These are preferences, not rigid rules.
+Use when requirements, adopted decisions, and project conventions leave a choice open.
 
-1. **Keep it simple.** Choose the smallest conventional solution that meets current needs. Avoid speculative abstractions, layers, and complexity.
+1. **Keep it simple.** Choose the smallest conventional solution that meets current needs. Add an abstraction or layer when a present need requires it.
 
-2. **Clear ownership.** Give behavior, rules, and mutable state one authoritative owner. Make important contracts, dependencies, and side effects explicit.
+2. **One owner.** Give each behavior, rule, and piece of mutable state one authoritative owner.
 
-3. **Favor local reasoning.** Prefer concrete functions, data, and composition. Introduce abstractions only when they simplify understanding or serve a real boundary.
+3. **Local reasoning.** Prefer concrete functions, data, and composition. A reader should understand a behavior from its owner, inputs, and dependencies.
 
-4. **Handle boundaries.** Make relevant failures, validation, and resource lifecycles explicit. Preserve correctness without unnecessary defensive machinery.
+4. **Explicit boundaries.** State contracts, dependencies, side effects, failures, and resource lifetimes. Validate untrusted data at trust boundaries; trust internal callers.
 
-5. **Respect existing design.** In brownfield work, preserve compatible conventions, contracts, and behavior.
-
-**Tie-breaker:** When choices otherwise meet requirements equally well, prefer the most conventional, reversible, and easy-to-change option.
+**Tie-breaker:** Among options that meet requirements equally, pick the most conventional and reversible.

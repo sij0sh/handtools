@@ -132,3 +132,9 @@ First release.
 - Move the contract to `references/contract.md` and fix the SKILL reference.
 - Trim language profiles to Structure, Preferred, and Disallowed.
 - Rewrite README for the decision-only scope, manual invocation, and no runtime dependencies.
+
+## 0.2.2 - 2026-11-02
+
+- Rewrite `SKILL.md` around an explicit precedence chain, reference-loading triggers, and a handoff step; enable model invocation.
+- Tighten `references/defaults.md` and `references/contract.md` to one line per rule.
+- Rewrite README for users: problem, proof, why decide first, and before/after.
