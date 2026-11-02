@@ -113,16 +113,17 @@ left open, and a short handoff. No implementation code.
 | `SKILL.md` | Decision loop, source precedence, list format | Gets choices written down before code |
 | `references/defaults.md` | Keep it simple, one owner per thing, local reasoning, clear boundaries | One starting point for every session |
 | `references/contract.md` | Ownership, dependencies, state, resources, failures, tradeoffs | Keeps a growing system easy to follow |
-| `languages/*.md` | Rules for 10 languages | Consistent choices per language |
+| `languages/*.md` | Rules for 10 languages plus agent instructions | Consistent choices per language |
 
 The agent always reads the defaults. It opens the contract or a language file
 only when a decision needs it.
 
 ### Language profiles
 
-TypeScript, JavaScript, Python, Go, Rust, Java, C#, C, C++, and SQL. Each starts
-with one top rule, then lists structure, preferred patterns, and patterns to
-avoid. Rules are tagged by strength:
+TypeScript, JavaScript, Python, Go, Rust, Java, C#, C, C++, SQL, and agent
+instructions (skills, `AGENTS.md`, `CLAUDE.md`). Each starts with one top rule,
+then lists structure, preferred patterns, and patterns to avoid. Rules are
+tagged by strength:
 
 - **Requirement:** follow it unless the goal says otherwise.
 - **Default:** use it when nothing else decides.

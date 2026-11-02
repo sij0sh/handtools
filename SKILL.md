@@ -29,6 +29,7 @@ Read a reference when a decision turns on its topic:
 |---|---|
 | Ownership, contracts, dependencies, boundaries, or failures | `references/contract.md` |
 | Language-specific design, types, errors, or concurrency | `languages/<language>.md` |
+| Skills, `AGENTS.md`, `CLAUDE.md`, or other agent instructions | `languages/agent-instructions.md` |
 
 Language rule labels:
 - **Requirement:** follow unless a requirement or adopted decision overrides it.

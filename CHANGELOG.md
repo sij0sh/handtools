@@ -138,3 +138,8 @@ First release.
 - Rewrite `SKILL.md` around an explicit precedence chain, reference-loading triggers, and a handoff step; enable model invocation.
 - Tighten `references/defaults.md` and `references/contract.md` to one line per rule.
 - Rewrite README for users: problem, proof, why decide first, and before/after.
+
+## 0.2.3 - 2026-11-02
+
+- Add `languages/agent-instructions.md` profile for skills, `AGENTS.md`, and `CLAUDE.md`.
+- Route SKILL reference loading and README language coverage to the new profile.
