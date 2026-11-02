@@ -3,7 +3,7 @@
 Optimize for local reasoning: predictable change scope, explicit behavior, clear
 ownership, and focused verification. Small diffs and fewer lines are signals,
 not the objective. This file owns universal rules; language profiles specialize
-them. Preflight owns adoption and approval; review owns completion.
+them. `SKILL.md` owns the design loop.
 
 ## Requirements
 

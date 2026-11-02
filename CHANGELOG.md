@@ -121,3 +121,7 @@ First release.
 ## 0.1.9 - 2026-10-28
 
 - Adopt upfront coding standards and bounded legacy rules; align language profiles, examples, boundary templates, evaluations, and verifier regression checks.
+
+## 0.2.0 - 2026-11-02
+
+- Replace preflight/approval routing with one recursive design loop, on-demand standards disclosure, and `scripts/frontier.mjs`; rewrite evals around the loop.

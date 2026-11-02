@@ -1,8 +1,8 @@
 # Local reasoning
 
 `standards/contract.md` owns code rules. This file explains tradeoffs, not an
-additional checklist. `workflows/preflight.md` owns adoption and approval;
-`workflows/review.md` owns completion. Profiles only specialize universal rules.
+additional checklist. `SKILL.md` owns the design loop. Profiles only specialize
+universal rules.
 
 ## The change test
 
