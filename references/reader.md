@@ -5,22 +5,12 @@ Python AST extraction is built in. Optional tree-sitter packages add syntax/impo
 extraction for Rust, Go, TypeScript/JavaScript and shell; missing grammars are
 reported, not installed automatically.
 
-`sessions.py` scanning/search uses Python 3.9+. Legacy SQL, `duplicates` and
-`rows.py` require Python 3.11+, DuckDB and PyArrow. Install `requirements.txt` in
-a virtual environment when those optional capabilities are needed:
-
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt          # Linux/macOS
-py -3 -m venv .venv; .venv\Scripts\python -m pip install -r requirements.txt   # Windows
-```
+All SQL runs on stdlib SQLite.
+`requirements.txt` holds only the optional tree-sitter grammars.
 
 macOS: the Xcode `/usr/bin/python3` is 3.9; use Homebrew or python.org 3.11+.
-Windows: `rows.py` process substitution (`<(...)`) is unavailable; use `--view`.
 
-All commands expose `--help`. Graph schemas come from `remember.py describe`;
-historical event/view schemas from `sessions.py describe`. SQL dialects differ:
-graph queries use SQLite; legacy history/composition queries use DuckDB.
+All commands expose `--help`. Schemas come from `remember.py describe [TABLE]`.
 
 Graph source, cache, parser and traversal limits: [graph.md](graph.md).
 Historical source profiles live in `scripts/profiles`; recording roots in

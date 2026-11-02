@@ -5,7 +5,7 @@ from pathlib import PurePosixPath
 # A capture at or under both limits is cheaper to read than to query.
 MAX_LINES = 3000
 MAX_BYTES = 200_000
-# Bare map prints whole text only up to an analyze page; `map --whole` raises the cap to MAX_BYTES.
+# Bare map prints whole text only up to one page; `map --whole` raises the cap to MAX_BYTES.
 TEXT_BYTES = 24_000
 # Generated dependency pins: large, rarely informative, omitted and named.
 LOCKFILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "Cargo.lock", "poetry.lock", "uv.lock",
@@ -51,12 +51,11 @@ def header(graph, warnings, skipped, primer=None):
             refs = ", ".join(f"{r['path']}:{r['line']}" for r in w["examples"])
             out.append(f"referenced but missing: {w['path']} (named at {refs})")
         elif w["kind"] == "dominant_file" and w.get("generated"):
-            out.append(f"dominant file: {w['path']} holds {w['share']:.0%} of nodes; generated ({w['generated']}), "
-                       "left out of analyze rankings")
+            out.append(f"dominant file: {w['path']} holds {w['share']:.0%} of nodes; generated ({w['generated']})")
         elif w["kind"] == "dominant_file":
             out.append(f"dominant file: {w['path']} holds {w['share']:.0%} of nodes; rankings skew toward it")
         elif w["kind"] == "generated_files":
-            out.append(f"generated/vendored, left out of analyze rankings: {w['count']} files ("
+            out.append(f"generated/vendored: {w['count']} files ("
                        + ", ".join(w["examples"]) + (", ..." if w["count"] > len(w["examples"]) else "") + ")")
     if primer:
         out += ["", *primer]
@@ -136,6 +135,5 @@ def summary(graph, warnings, max_lines=MAX_LINES, primer=None):
         out.append(f"  {folder.ljust(width)}  {count:>5}  {total:>7}  {big} ({sizes[big]})")
     out += ["", "LARGEST FILES (lines)"]
     out += [f"  {sizes[p]:>7}  {p}" for p in sorted(sizes, key=lambda p: (-sizes[p], p))[:SUMMARY_FILES]]
-    out += ["", "NEXT: `map DIR --kind file`; `analyze largest|fanin|orphans|cycles|untested`; "
-            "`find TEXT --path GLOB`; `status` for coverage."]
+    out += ["", "NEXT: `map DIR --kind file`; `find TEXT --path GLOB`; `inspect PATH`."]
     return "\n".join(out) + "\n"

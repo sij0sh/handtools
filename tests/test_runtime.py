@@ -111,6 +111,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsInstance(out['results'][0]['ref'],dict)
         self.assertFalse(self.cache.exists())
 
+    def test_sessions_table_summarizes_each_recording(self):
+        out=self.cli('query','SELECT s.session, s.events, s.user_messages, s.first_request, s.first_request_cite, '
+                     'count(e.event_id) AS joined FROM sessions s JOIN events e USING(recording_id) GROUP BY s.recording_id',
+                     '--recordings',self.recording)
+        self.assertEqual(out['scope']['providers'],['recordings'])
+        row,=out['results']
+        self.assertEqual((row['session'],row['user_messages'],row['first_request']),('fixture',1,'Please fix core.py save.'))
+        self.assertEqual(row['events'],row['joined'])
+        self.assertRegex(row['first_request_cite'],r'^fixture@\d+#[0-9a-f]{12}$')
+
     def test_mixed_query_transient(self):
         out=self.cli('query',"SELECT e.text, f.path FROM events e JOIN files f ON instr(e.text, f.path)>0",'--recordings',self.recording)
         self.assertEqual(len(out['results']),2)
@@ -159,8 +169,13 @@ class RuntimeTests(unittest.TestCase):
     def test_inspect_collects_source_consumers_history_and_evidence(self):
         out=self.cli('inspect','core.py','--recordings',self.recording,'--max-bytes','50000')
         sections={r['section'] for r in out['results']}
-        self.assertTrue({'source','relationships','history','evidence'}<=sections, out)
+        self.assertTrue({'source','relationships','decision','evidence'}<=sections, out)
         self.assertTrue(any(r.get('path')=='app.py' for r in out['results']))
+        # The human request and its reply lead, before relationships can fill a delivery page.
+        self.assertEqual(out['results'][1]['section'],'decision')
+        self.assertEqual(out['results'][1]['text'],'Please fix core.py save.')
+        self.assertEqual(out['results'][1]['decision'],'Inspect callers before changing core.py.')
+        self.assertRegex(out['results'][1]['decision_ref'],r'^fixture@\d+#[0-9a-f]{12}$')
         self.assertFalse(list(self.cache.rglob('report-*')))
         for p in self.cache.rglob('*.json'):self.assertNotIn('Please fix core.py save.',p.read_text())
 
@@ -175,12 +190,6 @@ class RuntimeTests(unittest.TestCase):
         expanded=self.cli('show',json.dumps(out['results'][0]['ref']))
         self.assertTrue(expanded['results'][0]['selected'])
         self.assertEqual(expanded['results'][0]['text'],'Please fix core.py save.')
-
-    def test_global_options_before_session_verb(self):
-        p=subprocess.run([sys.executable,str(ROOT/'scripts/remember.py'),'--repo',str(self.repo),
-                          'search',str(self.recording),'--text','core.py'],capture_output=True,text=True)
-        self.assertEqual(p.returncode,0,p.stderr+p.stdout)
-        self.assertTrue(json.loads(p.stdout)['results'])
 
     def test_focused_schema_needs_no_source(self):
         out=self.cli('describe','events')
@@ -337,41 +346,25 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(wide['coverage']['recordings']['complete'])
         self.assertFalse(any(n['effect']=='coverage' for n in wide['next']))
 
-    def test_inspect_history_follow_up_keeps_recording_scope(self):
-        folder=self.root/'many';folder.mkdir()
-        for i in range(10):
-            (folder/f's{i}.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in [
-                {'type':'session','id':f's{i}','cwd':str(self.repo)},
-                {'type':'message','id':'u1','message':{'role':'user','content':f'Change core.py save, take {i}.'}}]))
-        out=self.cli('inspect','core.py','--recordings',folder,'--max-commits','7','--max-bytes','50000')
-        follow=next(n for n in out['next'] if n['effect']=='expansion')
-        argv=self.decoded(follow)
-        self.assertEqual(argv[0],'history')
-        self.assertEqual(argv[argv.index('--recordings')+1],str(folder.resolve()))
-        self.assertEqual(argv[argv.index('--max-commits')+1],'7')
-        self.assertEqual(argv[argv.index('--snapshot')+1],out['scope']['snapshot'])
-        history=self.cli('show',follow['ref'],'--max-bytes','50000')
-        self.assertGreater(len(history['results']),8)
 
 
 class RegistryTests(unittest.TestCase):
     def test_every_parser_command_has_one_registered_route(self):
-        from helper.operations import OPERATIONS, graph_parser, session_parser
+        from helper.operations import OPERATIONS, graph_parser
         from helper.runtime import ROUTES
         import argparse
         def commands(p):
             return {n for a in p._actions if isinstance(a, argparse._SubParsersAction) for n in a.choices}
-        common, legacy, sessions = commands(graph_parser('common')), commands(graph_parser('legacy')), commands(session_parser())
-        self.assertLessEqual(common | legacy, set(OPERATIONS))
+        common = commands(graph_parser())
+        self.assertLessEqual(common, set(OPERATIONS))
         self.assertIn('inspect', common)
-        for name in common | legacy:
+        for name in common:
             self.assertIn(OPERATIONS[name].route, ROUTES)
-        self.assertTrue(sessions)
 
     def test_retained_delivery_refuses_transient_results(self):
         from helper import delivery
         args = parser().parse_args(['map'])
-        for doc in ({'operation': 'history', 'scope': {}}, {'operation': 'inspect', 'scope': {}},
+        for doc in ({'operation': 'inspect', 'scope': {}},
                     {'operation': 'query', 'scope': {'retention': 'transient'}}):
             with self.assertRaises(ValueError):
                 delivery.retained(None, doc, args)

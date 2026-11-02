@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .actions import lineages
+from .recording_scan import lineages
 from .discovery import candidate_files
 from .git_file_history import history
 from .git_resolve import GitResolver

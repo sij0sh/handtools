@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
-"""Map repository evidence and retrieve target-scoped Git and session history."""
-import argparse
+"""Graph commands: map, find and show over a captured source snapshot."""
 import collections
 
-from .graph_build import DEPENDENCIES, PREDICATES
-from .graph_queries import Graph, TABLES, evidence, impact, query, warnings, path_matches, unresolved_mentions
-
-from .graph_reports import analyze, generated_files
+from .graph_queries import Graph, evidence, warnings, path_matches
 from .whole_repo import MAX_BYTES, MAX_LINES, TEXT_BYTES, render, summary
 
-from .operations import GRAPH, OPERATIONS, graph_parser
-
-COMMANDS = {name: OPERATIONS[name].help for name in GRAPH}
+from .operations import graph_parser
 
 
 def parser():
-    return graph_parser("legacy")
+    return graph_parser()
 
 
 def defaults(args):
@@ -24,11 +18,9 @@ def defaults(args):
     if args.action == "query":
         args.limit = explicit_limit or args.max_query_rows or 200
         args.max_query_rows = max(args.max_query_rows or 1000, args.limit + getattr(args, "offset", 0))
-    # Ranked reports are read top-down; a larger first page saves a paging round trip.
-    first_page = (60, 24000) if args.action == "analyze" else (30, 12000)
     for key, value in {"repo": ".", "cache": None, "snapshot": None, "exclude": [], "max_files": 20000,
                        "max_file_bytes": 1024*1024, "max_total_bytes": 32*1024*1024,
-                       "limit": first_page[0], "offset": 0, "max_bytes": first_page[1], "verbose": False,
+                       "limit": 30, "offset": 0, "max_bytes": 12000, "verbose": False,
                        "format": None, "fields": None, "path": None, "kind": None, "whole_repo_lines": MAX_LINES,
                        "whole": False}.items():
         if not hasattr(args, key):
@@ -111,39 +103,13 @@ def show(store, args):
     return graph.document("show", [evidence(graph, item)])
 
 
-def describe(p):
-    sub = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction))
-    return {"operation": "describe", "schema": 1, "commands": [
-        {"name": name, "description": COMMANDS[name], "arguments": [
-            {"name": a.dest, "flags": a.option_strings, "required": a.required,
-             "choices": list(a.choices) if a.choices else None, "help": a.help}
-            for a in command._actions if a.dest != "help"]}
-        for name, command in sub.choices.items()], "predicates": PREDICATES, "tables": TABLES,
-        "history": "history TARGET retrieves live Git/session leads explicitly; only bare map reads a bounded recent-work primer."}
-
 
 def run(args, store):
-    from .target_history import attach
-    if args.action == "history":
-        from .target_history import run as history
-        return history(args, store, get_graph)
     if args.action == "show":
         return show(store, args)
-    if args.action == "impact":
-        if bool(args.base) != bool(args.head):
-            raise ValueError("Comparison requires both --base and --head")
-        if args.base and (args.targets or args.target or args.snapshot):
-            raise ValueError("Comparison evaluates the full delta; do not supply targets or --snapshot")
-        current = get_graph(store, args, args.head)
-        base = get_graph(store, args, args.base) if args.base else None
-        doc = impact(current, args.targets + args.target, base, args.depth, args.max_nodes, args.seconds)
-        doc["scope"]["freshness"] = store.freshness(current.body) if args.head or args.snapshot else {"state": "captured_now"}
-        if not base:
-            attach(doc, current, args.targets + args.target, store)
-        return doc
     graph = get_graph(store, args)
-    if args.action in ("map", "snapshot", "status"):
-        if args.action == "map" and not args.path and not args.kind and not args.format and not args.fields:
+    if args.action == "map":
+        if not args.path and not args.kind and not args.format and not args.fields:
             found = warnings(graph, store.root)
             recent = None
             if args.primer and args.snapshot:
@@ -160,29 +126,19 @@ def run(args, store):
                 text = summary(graph, found, args.whole_repo_lines, recent)
             if text is not None:
                 return {"text": text}
-        if args.action == "map":
-            kinds = getattr(args, "kind", None) or ["file", "directory"]
-            paths = graph.within(args.path) if args.path else None
-            rows = [graph.public(n) for n in graph.nodes.values()
-                    if n["kind"] in kinds and (paths is None or n.get("path") in paths)]
-            rows.sort(key=lambda n: (n.get("path") or "", n.get("line") or 0, n["kind"]))
-            doc = graph.document(args.action, rows, kinds=kinds, path=args.path)
-            if args.primer and args.primer_explicit and args.primer_depth and not args.snapshot:
-                from .primer import build as build_primer
-                doc["primer"] = build_primer(graph, args)
-            elif args.primer and args.snapshot:
-                doc["primer"] = "omitted: --snapshot pins source; the primer reads live history"
-            elif not args.primer_explicit and not args.offset:
-                doc["primer"] = "omitted: --path/--kind/--format/--fields given; add --primer"
-        else:
-            rows = [{"snapshot": graph.snapshot, "root": store.root, "git": graph.body["source"]["git"],
-                     "inventory": graph.body["source"]["inventory"], "producer": graph.body["producer"]}]
-            if args.action == "status":
-                rows[0]["warnings"] = warnings(graph, store.root)
-            doc = graph.document(args.action, rows)
-    elif args.action == "analyze":
-        doc = analyze(graph, args.report, args.grain, args.include_tests,
-                      args.exclude_entrypoints, args.exclude_public, args.include_generated, args.include_type_only)
+        kinds = getattr(args, "kind", None) or ["file", "directory"]
+        paths = graph.within(args.path) if args.path else None
+        rows = [graph.public(n) for n in graph.nodes.values()
+                if n["kind"] in kinds and (paths is None or n.get("path") in paths)]
+        rows.sort(key=lambda n: (n.get("path") or "", n.get("line") or 0, n["kind"]))
+        doc = graph.document(args.action, rows, kinds=kinds, path=args.path)
+        if args.primer and args.primer_explicit and args.primer_depth and not args.snapshot:
+            from .primer import build as build_primer
+            doc["primer"] = build_primer(graph, args)
+        elif args.primer and args.snapshot:
+            doc["primer"] = "omitted: --snapshot pins source; the primer reads live history"
+        elif not args.primer_explicit and not args.offset:
+            doc["primer"] = "omitted: --path/--kind/--format/--fields given; add --primer"
     elif args.action == "find":
         if isinstance(args.regex, str):
             if args.text is not None:
@@ -205,51 +161,9 @@ def run(args, store):
             rows.sort(key=lambda r: (-r["count"], r["path"] or ""))
         doc = graph.document("find", rows, path=args.path, not_path=args.not_path, count_by=args.count_by, text=args.text, kinds=args.kind,
                              match={"word": args.word, "case_sensitive": args.case_sensitive, "regex": args.regex})
-    elif args.action in ("neighbors", "paths"):
-        source = args.source if args.action == "paths" else args.target
-        direction = "out" if args.action == "paths" else args.direction
-        seeds = graph.seeds(source, args.grain)
-        rows, limits = graph.walk(seeds, direction, args.predicate or DEPENDENCIES, args.grain,
-                                  args.depth, args.max_nodes, seconds=args.seconds)
-        if args.action == "paths":
-            dest = graph.seeds(args.target, args.grain)
-            rows = [r for r in rows if r["id"] in dest]
-            rows += [{**graph.public(graph.nodes[n]), "distance": 0, "witness": []} for n in sorted(dest & seeds)]
-        targets = {"source": args.source, "target": args.target} if args.action == "paths" else {"target": args.target}
-        doc = graph.document(args.action, rows, **targets, traversal=limits, grain=args.grain,
-                              predicates=args.predicate or list(DEPENDENCIES), direction=direction,
-                              path_result=("supported_path" if rows else "no_supported_path_within_scope") if args.action == "paths" else None)
-        if args.action == "paths" or direction in ("in", "both"):
-            excluded = {r.get("path") for r in rows} if args.grain == "file" else set()
-            gap = unresolved_mentions(graph, args.target, excluded)
-            if gap:
-                doc["gaps"] = [*doc["gaps"], gap]
-                doc["scope"]["unresolved_mentions"] = gap
-                if not rows:
-                    doc["scope"]["assessment"] = "unknown"
-            if args.action == "paths" and not rows and any(
-                    g.get("area") in ("calls", "imports", "mentions") for g in doc["gaps"]):
-                doc["scope"]["path_result"] = "no_path_gaps_present"
-                doc["scope"]["assessment"] = "unknown"
-        if limits["bounds"]:
-            doc["gaps"] = [*doc["gaps"], {"area": "traversal", "reason": "bounded", **limits}]
-    elif args.action == "query":
-        params = {}
-        for item in args.param:
-            name, sep, value = item.partition("=")
-            if not sep or not name.isidentifier():
-                raise ValueError("--param requires NAME=VALUE")
-            params[name] = value
-        doc = query(graph, args.sql, params, args.max_query_rows, args.seconds)
     else:
         raise ValueError("Unknown operation")
-    if args.action in ("map", "neighbors") and (args.path if args.action == "map" else args.target):
-        attach(doc, graph, [args.path if args.action == "map" else args.target], store)
-    elif args.action == "find":
-        candidates = [r for r in doc["results"] if r.get("kind") in ("file", "symbol")]
-        if len(candidates) == 1:
-            attach(doc, graph, [candidates[0]["ref"]], store)
-    doc["scope"]["freshness"] = store.freshness(graph.body) if args.snapshot or args.action == "status" else {"state": "captured_now"}
+    doc["scope"]["freshness"] = store.freshness(graph.body) if args.snapshot else {"state": "captured_now"}
     doc["incomplete"] = incomplete(doc, graph)
     return doc
 
@@ -258,7 +172,7 @@ def run(args, store):
 # Import, call and target gaps describe relationships the graph lacks and never limit by themselves.
 WHOLE = {"inventory", "capture", "traversal", "mentions"}
 UNREAD = {"file_limit", "byte_limit", "unread", "changed_during_capture", "missing"}
-SCANNING = {"find", "query", "analyze"}
+SCANNING = {"find", "query"}
 
 
 def incomplete(document, graph=None):
@@ -266,10 +180,8 @@ def incomplete(document, graph=None):
     paths = {r.get("path") for r in document["results"]}
     paths |= {p for r in document["results"] for p in r.get("files") or ()}
     scope = document["scope"]
-    tests = scope.get("include_tests", document["operation"] != "analyze")
+    tests = scope.get("include_tests", True)
     files = graph.files if graph else {}
-    generated = ({r["path"] for r in generated_files(graph)}
-                 if graph and document["operation"] == "analyze" and not scope.get("include_generated") else set())
     found = []
     for gap in document["gaps"]:
         area, path = gap.get("area"), gap.get("path")
@@ -278,7 +190,7 @@ def incomplete(document, graph=None):
         elif area in ("source", "parser"):
             # A file the scan could not read or parse may hold a match or rank; elsewhere only its own rows suffer.
             node = files.get(path) or {}
-            skipped = path in generated or (node.get("is_test") and not tests)
+            skipped = node.get("is_test") and not tests
             scanned = document["operation"] in SCANNING and (area == "parser" or gap.get("reason") in UNREAD)
             if not path or path in paths or (scanned and not skipped):
                 found.append(gap)

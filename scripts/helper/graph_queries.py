@@ -240,12 +240,12 @@ def warnings(graph, root):
         reason = graph.files.get(path, {}).get("generated")
         out.append({"kind": "dominant_file", "path": path, "nodes": count, "share": round(count / total, 3),
                     **({"generated": reason} if reason else {}),
-                    "meaning": "Generated or vendored; analyze leaves it out of rankings." if reason else
+                    "meaning": "Generated or vendored." if reason else
                     "Counts and rankings skew toward this file; exclude it if vendored or generated."})
     generated = sorted((p for p, n in graph.files.items() if n.get("generated")), key=lambda p: (-counts[p], p))
     if generated:
         out.append({"kind": "generated_files", "count": len(generated), "examples": generated[:5],
-                    "meaning": "Generated or vendored code; analyze rankings exclude it unless --include-generated."})
+                    "meaning": "Generated or vendored code."})
     # Manifests name paths the capture lacks: ignored on disk, or missing outright.
     missing = collections.defaultdict(list)
     for gap in graph.body["gaps"]:
@@ -292,31 +292,6 @@ def evidence(graph, item):
     return result
 
 
-def changes(before, after):
-    old = {f["path"]: f for f in before.body["source"]["files"]}
-    new = {f["path"]: f for f in after.body["source"]["files"]}
-    rows = []
-    for path in sorted(old.keys() | new.keys()):
-        a, b = old.get(path), new.get(path)
-        exists = lambda r: r is not None and r["state"] != "missing"
-        if a and b and (a["digest"], a["state"]) == (b["digest"], b["state"]) and a["digest"]:
-            continue
-        if not exists(a) and not exists(b):
-            continue
-        complete = lambda g: g.body["coverage"]["inventory_complete"] and g.body["coverage"]["capture_stable"]
-        if not exists(a):
-            state = "added" if complete(before) and b["digest"] else "unknown"
-        elif not exists(b):
-            state = "deleted" if complete(after) and a["digest"] else "unknown"
-        elif a["digest"] and b["digest"]:
-            state = "modified"
-        else:
-            state = "unknown"
-        rows.append({"kind": "change", "path": path, "state": state,
-                     "before_digest": a["digest"] if a else None, "after_digest": b["digest"] if b else None,
-                     "before_ref": reference(before.snapshot, "source", path) if a else None,
-                     "after_ref": reference(after.snapshot, "source", path) if b else None})
-    return rows
 
 
 def symbol_users(graph, symbols):
@@ -349,106 +324,67 @@ def reach(row, users):
     return "direct" if users is None or row.get("path") in users else "file_only"
 
 
-def impact(graph, targets, base=None, depth=2, max_nodes=1000, seconds=5.0):
-    symbols = []
-    if base:
-        if base.snapshot == graph.snapshot:
-            raise ValueError("Impact comparison requires distinct captured snapshots")
-        delta = changes(base, graph)
-        roots = {r["path"] for r in delta}
-    else:
-        roots, widened = set(), []
-        for target in targets:
-            node = graph.nodes[graph.unique(target)]
-            if node["kind"] == "symbol":
-                symbols.append(node)
-                # Impact runs at file grain: every symbol in the file seeds the traversal.
-                widened.append({"target": target, "resolved": graph.public(node), "projected_to": node["path"]})
-            for ident in graph.seeds(target, "file"):
-                path = graph.nodes[ident].get("path")
-                if path not in graph.files:
-                    raise ValueError(f"Impact target has no captured source file: {target}")
-                roots.add(path)
-        if not roots:
-            raise ValueError("Supply a source target, or --base and --head snapshots")
-        delta = [{"kind": "change", "state": "planned", "path": p,
-                  "ref": reference(graph.snapshot, "source", p)} for p in sorted(roots)]
-    gaps = [] if base else [{"area": "target", "reason": "widened_to_file", "grain": "file", **w} for w in widened]
-    results, traversals, sides = list(delta), {}, [("candidate", graph)]
-    if base:
-        sides.insert(0, ("base", base))
-    for side, current in sides:
-        seeds = {current.files[p]["id"] for p in roots if p in current.files}
-        reached = set(seeds)
-        consumers = []
-        traversals[side] = {}
-        for direction, role in (("in", "possible_consumer"), ("out", "dependency_context")):
-            rows, limits = current.walk(seeds, direction=direction, depth=depth, max_nodes=max_nodes,
-                                        impact=True, seconds=seconds)
-            traversals[side][direction] = limits
-            if direction == "in":
-                users = symbol_users(current, symbols) if symbols and current is graph else None
-                rows = [{**r, "reach": reach(r, users)} for r in rows]
-                order = {"direct": 0, "file_only": 1, "indirect": 2}
-                rows.sort(key=lambda r: order[r["reach"]])
-            results.extend({**r, "role": role, "side": side} for r in rows)
-            reached.update(r["id"] for r in rows)
-            if direction == "in":
-                consumers = rows
-            if limits["bounds"]:
-                gaps.append({"area": "traversal", "reason": "bounded", "side": side, "direction": direction,
-                             "bounds": limits["bounds"], "frontier": limits["frontier"]})
-        paths = {current.nodes[n].get("path") for n in reached}
-        if not base:
-            for target in targets:
-                gap = unresolved_mentions(current, target, paths)
-                if gap:
-                    gaps.append(gap)
-        tests = collections.defaultdict(list)
-        for edge in current.body["edges"]:
-            if edge["predicate"] == "TESTS" and edge["target"] in reached:
-                tests[edge["source"]].append(reference(current.snapshot, "edges", edge["id"]))
-        for test, refs in sorted(tests.items()):
-            results.append({"kind": "verification", "side": side, "test": current.public(current.nodes[test]),
-                            "evidence_refs": refs, "basis": "static_import_association", "execution": "not_run"})
-        public = [current.public(n) for n in current.nodes.values() if n.get("public_candidate") and n.get("path") in paths]
-        tally = collections.Counter(r["reach"] for r in consumers)
-        results.append({"kind": "risk_profile", "side": side, "possible_consumers": len(consumers),
-                        "direct_consumers": tally["direct"], "file_only_consumers": tally["file_only"],
-                        "indirect_consumers": tally["indirect"],
-                        "test_candidates": len(tests), "public_symbol_candidates": public,
-                        "unknowns_in_reached_files": sum(g.get("path") in paths for g in current.body["gaps"]),
-                        "external_consumers": "unknown", "behavioral_effect": "not_verified",
-                        "design_fit": "requires requirements, ownership and lifecycle interpretation"})
-        gaps.extend({**g, "side": side} for g in current.body["gaps"])
-    if base:
-        def keyed(current):
-            def node_key(ident):
-                n = current.nodes[ident]
-                return (n["kind"], n.get("path"), n.get("qualname") or n.get("name"), n.get("symbol_kind"))
-            return {(node_key(e["source"]), e["predicate"], node_key(e["target"])): e
-                    for e in current.body["edges"] if e["predicate"] in DEPENDENCIES}
-        old, new = keyed(base), keyed(graph)
-        for label, current, left, right in (("observed_only_in_base", base, old, new), ("observed_only_in_candidate", graph, new, old)):
-            for key in sorted(left.keys() - right.keys(), key=str):
-                results.append({"kind": "relationship_change", "state": label,
-                                "edge": reference(current.snapshot, "edges", left[key]["id"])})
-        deleted = collections.defaultdict(list)
-        added = collections.defaultdict(list)
-        for row in delta:
-            if row["state"] == "deleted":
-                deleted[row["before_digest"]].append(row["path"])
-            if row["state"] == "added":
-                added[row["after_digest"]].append(row["path"])
-        for sha in sorted(deleted.keys() & added.keys()):
-            results.append({"kind": "correspondence", "basis": "equal_file_content", "before": deleted[sha],
-                            "after": added[sha], "state": "unique_content_match" if len(deleted[sha]) == len(added[sha]) == 1 else "ambiguous",
-                            "limitation": "Matching bytes do not establish enduring identity or intent; no graph remapping."})
-    return {"operation": "impact", "snapshots": [g.snapshot for _, g in sides], "results": results, "gaps": gaps,
-            "scope": {"mode": "comparison" if base else "planned", "grain": "file", "traversal": traversals,
-                      "targets": [] if base else list(targets), "widened_targets": [] if base else widened,
-                      "assessment": "potential impact, not verified breakage", "full_inventory_delta": bool(base)},
-            "coverage": {side: current.body["coverage"] for side, current in sides}}
+def impact(graph, targets, depth=2, max_nodes=1000, seconds=5.0):
+    """Potential impact of planned edits to targets: consumers, dependencies, test candidates, risk profile."""
+    symbols, roots, widened = [], set(), []
+    for target in targets:
+        node = graph.nodes[graph.unique(target)]
+        if node["kind"] == "symbol":
+            symbols.append(node)
+            # Impact runs at file grain: every symbol in the file seeds the traversal.
+            widened.append({"target": target, "resolved": graph.public(node), "projected_to": node["path"]})
+        for ident in graph.seeds(target, "file"):
+            path = graph.nodes[ident].get("path")
+            if path not in graph.files:
+                raise ValueError(f"Impact target has no captured source file: {target}")
+            roots.add(path)
+    if not roots:
+        raise ValueError("Supply a source target")
+    results = [{"kind": "change", "state": "planned", "path": p,
+                "ref": reference(graph.snapshot, "source", p)} for p in sorted(roots)]
+    gaps = [{"area": "target", "reason": "widened_to_file", "grain": "file", **w} for w in widened]
+    seeds = {graph.files[p]["id"] for p in roots if p in graph.files}
+    reached, consumers, traversal = set(seeds), [], {}
+    for direction, role in (("in", "possible_consumer"), ("out", "dependency_context")):
+        rows, limits = graph.walk(seeds, direction=direction, depth=depth, max_nodes=max_nodes,
+                                  impact=True, seconds=seconds)
+        traversal[direction] = limits
+        if direction == "in":
+            users = symbol_users(graph, symbols) if symbols else None
+            order = {"direct": 0, "file_only": 1, "indirect": 2}
+            rows = sorted(({**r, "reach": reach(r, users)} for r in rows), key=lambda r: order[r["reach"]])
+            consumers = rows
+        results.extend({**r, "role": role} for r in rows)
+        reached.update(r["id"] for r in rows)
+        if limits["bounds"]:
+            gaps.append({"area": "traversal", "reason": "bounded", "direction": direction,
+                         "bounds": limits["bounds"], "frontier": limits["frontier"]})
+    paths = {graph.nodes[n].get("path") for n in reached}
+    for target in targets:
+        gap = unresolved_mentions(graph, target, paths)
+        if gap:
+            gaps.append(gap)
+    tests = collections.defaultdict(list)
+    for edge in graph.body["edges"]:
+        if edge["predicate"] == "TESTS" and edge["target"] in reached:
+            tests[edge["source"]].append(reference(graph.snapshot, "edges", edge["id"]))
+    for test, refs in sorted(tests.items()):
+        results.append({"kind": "verification", "test": graph.public(graph.nodes[test]),
+                        "evidence_refs": refs, "basis": "static_import_association", "execution": "not_run"})
+    public = [graph.public(n) for n in graph.nodes.values() if n.get("public_candidate") and n.get("path") in paths]
+    tally = collections.Counter(r["reach"] for r in consumers)
+    results.append({"kind": "risk_profile", "possible_consumers": len(consumers),
+                    "direct_consumers": tally["direct"], "file_only_consumers": tally["file_only"],
+                    "indirect_consumers": tally["indirect"],
+                    "test_candidates": len(tests), "public_symbol_candidates": public,
+                    "unknowns_in_reached_files": sum(g.get("path") in paths for g in graph.body["gaps"]),
+                    "external_consumers": "unknown", "behavioral_effect": "not_verified",
+                    "design_fit": "requires requirements, ownership and lifecycle interpretation"})
+    gaps.extend(graph.body["gaps"])
+    return {"operation": "impact", "snapshots": [graph.snapshot], "results": results, "gaps": gaps,
+            "scope": {"mode": "planned", "grain": "file", "traversal": traversal, "targets": list(targets),
+                      "widened_targets": widened, "assessment": "potential impact, not verified breakage"},
+            "coverage": graph.body["coverage"]}
 
 
 TABLES = {
@@ -476,17 +412,3 @@ def inputs(graph):
     return [Input(name, rows, {}, list(TABLES[name]), TABLES[name], "one " + name.rstrip("s"))
             for name, rows in sources.items()]
 
-
-def query(graph, sql, params=None, limit=1000, seconds=5.0):
-    from .engine import SQLiteQuery
-    with SQLiteQuery(TABLES, seconds) as engine:
-        requested = engine.plan(sql, params)
-        for item in inputs(graph):
-            if item.name in requested:
-                engine.load(item)
-        output = engine.evaluate(limit)
-    result = graph.document("query", output["results"], engine="sqlite", query=sql,
-                            query_complete=output["query_complete"], max_query_rows=limit)
-    if not output["query_complete"]:
-        result["gaps"] = [*result["gaps"], {"area": "query", "reason": "row_limit", "limit": limit}]
-    return result

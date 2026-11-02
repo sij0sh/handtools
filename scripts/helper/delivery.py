@@ -2,9 +2,7 @@
 
 Adapter    Retention  Contract
 retained   source     v1 graph report: saved once, paged by report ref without recomputation
-history    transient  v1 target history: compact leads, never saved
 common     transient  v2 runtime result: coverage separate from paging, typed continuations
-envelope   transient  v1 sessions.py/rows.py envelope: fitted by envelope.LEVELS
 
 Evidence coverage and output paging are independent in every adapter: paging and byte
 budgets truncate delivery, only coverage gaps make a result partial.
@@ -14,9 +12,8 @@ import sys
 from .graph_store import canonical
 from .graph_output import check_fields, compact_row, project_rows, render_table
 
-RETENTION = {"retained": "source", "history": "transient", "common": "transient", "envelope": "transient"}
 # Operations whose results may carry transcript-derived text; they never reach the report store.
-TRANSIENT_OPERATIONS = {"history", "inspect"}
+TRANSIENT_OPERATIONS = {"inspect"}
 # Room for the continuation token itself when sizing a budget for an oversized row.
 NEXT_MARGIN = 2048
 
@@ -67,8 +64,6 @@ def retained(store, document, args):
               "delivery": {"offset": args.offset, "total": len(all_rows)}}
     if document["scope"].get("assessment") == "unknown":
         output["status"] = "unknown"
-    if "history" in document:
-        output["history"] = document["history"]
     if primer is not None:
         if args.format == "table" and isinstance(primer, dict):
             from .primer import render as render_primer
@@ -111,47 +106,6 @@ def retained(store, document, args):
     return render(output, args, args.fields)
 
 
-def history(document, args):
-    """Target history: compact leads by default; transcript text is never persisted."""
-    from .options import command_line
-    from .target_history import COMPACT_FIELDS, SESSIONS, compact, summary
-    verbose = getattr(args, "verbose", False)
-    coverage = document.get("coverage", {})
-    partial = any(c.get("state") in ("partial", "unavailable") for c in coverage.get("git", []))
-    partial |= coverage.get("sessions", {}).get("state") in ("partial", "unavailable")
-    rows = document["results"] if verbose else compact(document["results"])
-    if not verbose:
-        document["coverage"] = summary(coverage)
-        scope = document.get("scope", {})
-        if "aliases" in scope:
-            scope["aliases"] = len(scope["aliases"])
-        document["expand"] = {"session": command_line([sys.executable, str(SESSIONS), "context", "--ref", "REF",
-                                                       "--mode", "exchange"]),
-                              "git": command_line(["git", "-C", document["scope"]["repo"], "show", "ID"])}
-    if getattr(args, "fields", None):
-        # sessions.py calls the same column timestamp.
-        args.fields = ["date" if f == "timestamp" else f for f in args.fields]
-    fields = getattr(args, "fields", None)
-    shown = fields or (COMPACT_FIELDS if not verbose and getattr(args, "format", None) == "table" else None)
-    total = len(rows)
-    document["results"] = select(rows, args, fields)
-
-    def finish():
-        following = args.offset + len(document["results"])
-        document["delivery"] = {"total": total, "returned": len(document["results"]), "offset": args.offset,
-                                "complete": following >= total}
-        document["next"] = {"action": "history", "target": args.target, "offset": following,
-                            "hint": "Repeat the same options; history is live. Increase --max-bytes if no row fits."} if following < total else None
-        if following < total:
-            document["results_truncated"] = f"{len(document['results'])} of {total} rows shown; --offset {following} or raise --limit / --max-bytes"
-        # Paging truncates; only a git or session coverage gap makes the history incomplete.
-        if partial:
-            document["status"] = "partial"
-    finish()
-    if not fit(document, finish, lambda: json_size(document), args.max_bytes):
-        document = {"operation": "history", "status": "partial", "results": [], "delivery": {"complete": False},
-                    "next": {"action": "history", "target": args.target, "hint": "Increase --max-bytes; metadata exceeds budget."}}
-    return render(document, args, shown)
 
 
 def page(document, args, continuation=None):
@@ -198,28 +152,18 @@ def page(document, args, continuation=None):
     return output, render(output, args, fields)
 
 
-def envelope(result, max_bytes, view=None):
-    """sessions.py/rows.py envelope at the most detailed level that fits."""
-    from .envelope import fitted
-    return fitted(result, max_bytes, view)
-
-
 def write(raw):
     sys.stdout.flush()
     sys.stdout.buffer.write(raw)
     sys.stdout.buffer.flush()
 
 
-def deliver(kind, document, args=None, store=None, continuation=None, max_bytes=None, view=None):
+def deliver(kind, document, args=None, store=None, continuation=None):
     """Render and write one result through its adapter."""
     if kind == "retained":
         raw = retained(store, document, args)
-    elif kind == "history":
-        raw = history(document, args)
     elif kind == "common":
         raw = page(document, args, continuation)[1]
-    elif kind == "envelope":
-        raw = envelope(document, max_bytes, view)
     else:
         raise ValueError(f"Unknown delivery adapter {kind!r}")
     write(raw)

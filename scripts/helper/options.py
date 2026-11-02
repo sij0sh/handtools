@@ -8,8 +8,6 @@ from dataclasses import dataclass
 # discovery reaches the whole archive and a typical project's recordings are all scanned; text grows to the selected recordings' size up to a cap.
 CANDIDATES_DEFAULT = 1000
 FILES_DEFAULT = 8
-FILES_PROJECT = 25
-CANDIDATES_PROJECT = 20000
 TEXT_BYTES_DEFAULT = 8 * 1024 * 1024
 TEXT_BYTES_AUTO_CAP = 32 * 1024 * 1024
 

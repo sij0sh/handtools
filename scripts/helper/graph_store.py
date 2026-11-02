@@ -9,6 +9,7 @@ import re
 import stat
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from .budget import check, timeout
 
@@ -209,6 +210,51 @@ def cache_home():
     return Path(base) if base else Path.home()/".cache"
 
 
+# Evict retained evidence nobody read or wrote for this long; sweep at most once per interval.
+CACHE_TTL_SECONDS, SWEEP_INTERVAL_SECONDS = 14 * 86400, 86400
+
+
+def prune(base, now=None):
+    """Delete cache entries idle past the TTL across all workspaces; drop empty workspace folders."""
+    now = time.time() if now is None else now
+    marker = base / ".last-prune"
+    try:
+        if now - marker.stat().st_mtime < SWEEP_INTERVAL_SECONDS:
+            return 0
+    except OSError:
+        pass
+    removed = 0
+    try:
+        base.mkdir(parents=True, exist_ok=True, mode=0o700)
+        marker.touch()
+        os.utime(marker, (now, now))
+        for workspace in base.iterdir():
+            if not workspace.is_dir() or workspace.is_symlink():
+                continue
+            for entry in workspace.iterdir():
+                try:
+                    if entry.is_file() and now - entry.stat().st_mtime > CACHE_TTL_SECONDS:
+                        entry.unlink()
+                        removed += 1
+                except OSError:
+                    pass  # A concurrent reader or writer owns it; the next sweep retries.
+            try:
+                workspace.rmdir()  # Only succeeds when empty.
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return removed
+
+
+def touch(path):
+    """Reads count as use, so eviction follows last access rather than creation."""
+    try:
+        os.utime(path)
+    except OSError:
+        pass
+
+
 class Store:
     def __init__(self, root, cache=None):
         self.root = str(Path(root).expanduser().resolve())
@@ -221,6 +267,7 @@ class Store:
 
     def save(self, kind, body):
         key = f"{kind}:{digest(body)}"
+        prune(self.path.parent)
         self.path.mkdir(parents=True, exist_ok=True, mode=0o700)
         dest = self.path / (key.replace(":", "-") + ".json")
         if dest.exists():
@@ -248,6 +295,7 @@ class Store:
             raise ValueError(f"Corrupt retained reference: {key}") from None
         if digest(body) != key.split(":", 1)[1]:
             raise ValueError(f"Retained reference failed integrity check: {key}")
+        touch(path)
         return body
 
     def snapshot(self, **options):
@@ -258,6 +306,7 @@ class Store:
         lookup = self.path / ("source-" + digest({"source": source, "producer": identity}) + ".json")
         if lookup.is_file():
             try:
+                touch(lookup)
                 key = json.loads(lookup.read_bytes())["snapshot"]
                 body = self.load(key)
                 if body["source"] == source and body["producer"] == identity:

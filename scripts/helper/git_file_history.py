@@ -129,17 +129,3 @@ def history(resolver, repo, max_commits, follow=None, no_merges=False, pickaxe=N
         changes = [c for c in changes if c["sha"] not in gone]
     return commits, changes, {"complete": complete, "commits_limit": max_commits, "no_merges": no_merges}
 
-
-def commits_by_sha(resolver, repo, shas):
-    """Specific linked commits, verified first so one missing SHA cannot fail the batch."""
-    shas = sorted(set(shas))
-    if not shas:
-        return [], [], []
-    out = resolver.run(repo, "cat-file", "--batch-check=%(objectname) %(objecttype)", stdin="\n".join(shas) + "\n")
-    present = [line.split()[0] for line in (out or "").splitlines() if line.endswith(" commit")]
-    missing = sorted(set(shas) - set(present))
-    if not present:
-        return [], [], missing
-    raw = _log(resolver, repo, "--no-walk=unsorted", *present)
-    commits, changes = _parse(raw or "", resolver.identity(repo), repo, "linked")
-    return commits, changes, missing

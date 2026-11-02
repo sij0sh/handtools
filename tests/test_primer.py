@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from helper.options import ScanOptions  # noqa: E402
-from helper.primer import _request, _ranges, build, render  # noqa: E402
+from helper.primer import _request, _ranges, render  # noqa: E402
 from helper.reader import scan_file  # noqa: E402
 from helper.records import new_scope  # noqa: E402
 
@@ -172,7 +172,7 @@ class PrimerTests(unittest.TestCase):
     def test_snapshot_map_skips_the_primer(self):
         self.init()
         self.recording()
-        snapshot = json.loads(self.cli("snapshot"))["results"][0]["snapshot"]
+        snapshot = json.loads(self.cli("map", "--format", "json"))["snapshots"][0]
         out = json.loads(self.cli("map", "--format", "json", "--primer", "--snapshot", snapshot))
         self.assertIn("--snapshot", out["primer"])
         self.assertNotIn("sessions", out)

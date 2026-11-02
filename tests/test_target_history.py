@@ -1,6 +1,7 @@
-"""Target bridge fixtures: known histories, independent lanes, no transcript retention."""
+"""Inspect history lane: known histories, independent lanes, no transcript retention."""
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -11,10 +12,26 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests"))
-import remember
+from helper import graph_cli, runtime, target_history
 from helper.edit_hunks import anchor
 from helper.graph_store import Store
-from test_sessions import split_line
+
+
+
+def split_line(line):
+    """Inverse of command_line: POSIX shell words, or the Windows argv parse."""
+    if os.name != "nt":
+        return shlex.split(line)
+    import ctypes
+    from ctypes import wintypes
+    parse = ctypes.windll.shell32.CommandLineToArgvW
+    parse.restype = ctypes.POINTER(wintypes.LPWSTR)
+    count = ctypes.c_int()
+    argv = parse(line, ctypes.byref(count))
+    try:
+        return [argv[i] for i in range(count.value)]
+    finally:
+        ctypes.windll.kernel32.LocalFree(argv)
 
 
 class TargetHistoryTests(unittest.TestCase):
@@ -61,14 +78,21 @@ class TargetHistoryTests(unittest.TestCase):
         return dest
 
     def args(self, *argv):
-        return remember.defaults(remember.parser().parse_args([*argv, "--repo", str(self.repo), "--cache", str(self.cache)]))
+        return graph_cli.defaults(runtime.parser().parse_args([*argv, "--repo", str(self.repo), "--cache", str(self.cache)]))
 
     def run_command(self, *argv):
         args = self.args(*argv)
-        return remember.run(args, Store(args.repo, args.cache))
+        return runtime.Runtime(runtime.Request(args, tuple(argv), None)).execute().document
 
     def history(self, target="a.py::target", *argv):
-        return self.run_command("history", target, "--recordings", str(self.archive), *argv)
+        args = self.args("inspect", target, "--recordings", str(self.archive), *argv)
+        return target_history.run(args, Store(args.repo, args.cache), lambda *a: graph_cli.get_graph(*a))
+
+    def compact(self, *argv):
+        return target_history.compact(self.history(*argv)["results"])
+
+    def pinned_ref(self):
+        return self.run_command("inspect", "a.py::target", "--no-sessions")["target"]["ref"]
 
     def cli(self, *argv):
         result = subprocess.run([sys.executable, str(ROOT / "scripts/remember.py"), *argv,
@@ -86,28 +110,16 @@ class TargetHistoryTests(unittest.TestCase):
         # Windows argv quoting differs from shlex; reuse the portable inverse of command_line.
         expanded = subprocess.check_output(split_line(command), text=True)
         self.assertIn("Reject the eager approach", expanded)
-        self.assertTrue(any("exchange" in n["argv"] for n in lead["next"]))
+        self.assertIn("show", lead["next"][0]["argv"])
         self.assertEqual(out["coverage"]["git"][0]["state"], "unavailable")
-
-    def test_unknown_fields_fail_instead_of_blank_columns(self):
-        self.recording()
-        result = subprocess.run([sys.executable, str(ROOT / "scripts/remember.py"), "history", "a.py::target",
-                                 "--recordings", str(self.archive), "--fields", "date,summary",
-                                 "--repo", str(self.repo), "--cache", str(self.cache)], capture_output=True, text=True)
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertIn("no column summary", json.loads(result.stdout)["error"])
-        self.assertIn("date", self.cli("history", "a.py::target", "--recordings", str(self.archive),
-                                       "--fields", "date,text")["results"][0])
 
     def test_compact_rows_drop_trivial_mentions_and_accept_timestamp(self):
         mention = {"type": "message", "id": "m", "parentId": "u", "message": {"role": "assistant",
                    "content": "a.py target looks fine"}}
         self.recording(sid="ack", path="unrelated.py", content="x=1\n", request="yes", extra=[mention])
         self.recording(sid="real", path="unrelated.py", content="x=1\n", request="Keep a.py target eager", extra=[mention])
-        argv = ("history", "a.py::target", "--recordings", str(self.archive), "--fields", "timestamp,text")
-        rows = self.cli(*argv)["results"]
+        rows = self.compact("a.py::target")
         self.assertEqual([r["text"] for r in rows], ["Keep a.py target eager"])
-        self.assertIn("date", rows[0])
         self.assertIn("ack", {r["evidence"]["session"] for r in self.history("a.py::target")["results"]})
 
     def test_renames_exact_paths_and_independent_git_lane(self):
@@ -129,8 +141,7 @@ class TargetHistoryTests(unittest.TestCase):
         self.write("other.py", "def target():\n    return 3\n")
         with patch("helper.target_history.scan_project", side_effect=AssertionError("scan")):
             self.assertEqual(self.history("target")["status"], "ambiguous")
-        mapped = self.run_command("map", "a.py::target")
-        ref = mapped["history"]["next"]["target"]
+        ref = self.pinned_ref()
         self.write("a.py", "def replacement():\n    return 4\n")
         out = self.history(ref)
         self.assertEqual(out["target"]["qualname"], "target")
@@ -195,30 +206,16 @@ class TargetHistoryTests(unittest.TestCase):
         self.assertEqual({r["evidence"]["session"] for r in out["results"]}, {"first", "later"})
         self.assertEqual(out["coverage"]["sessions"]["independent_sessions"], 2)
 
-    def test_no_graph_scans_or_broad_find_continuations(self):
-        self.write("b.py", "def target():\n    return 3\n")
-        with patch("helper.target_history.scan_project", side_effect=AssertionError("scan")):
-            for args in [("map", "a.py"), ("neighbors", "a.py"), ("impact", "a.py")]:
-                self.assertIn("history", self.run_command(*args))
-            broad = self.run_command("find", "target")
-            self.assertNotIn("history", broad)
-            self.assertFalse(any("history" in r for r in broad["results"]))
-            single = self.run_command("find", "a.py", "--kind", "file")
-            self.assertIn("history", single)
-
-    def test_history_delivery_never_saves_transcript(self):
+    def test_inspect_never_saves_transcript(self):
         self.recording(request="UNIQUE_PRIVATE_REQUEST")
-        out = self.cli("history", "a.py::target", "--recordings", str(self.archive), "--max-bytes", "40000")
-        self.assertTrue(out["results"])
-        self.assertNotIn("report", out)
+        out = self.cli("inspect", "a.py::target", "--recordings", str(self.archive))
+        self.assertTrue(any(r["section"] in ("decision", "history") for r in out["results"]))
         retained = list(self.cache.rglob("report-*.json"))
         self.assertEqual(retained, [])
         self.assertFalse(any("UNIQUE_PRIVATE_REQUEST" in p.read_text() for p in self.cache.rglob("*.json")))
-        small = self.cli("history", "a.py", "--recordings", str(self.archive), "--max-bytes", "2048")
-        self.assertEqual(small["status"], "partial")
 
     def test_exact_file_avoids_full_graph_capture(self):
-        with patch("remember.get_graph", side_effect=AssertionError("full graph")):
+        with patch("helper.graph_cli.get_graph", side_effect=AssertionError("full graph")):
             self.assertEqual(self.history("a.py")["target"]["path"], "a.py")
             self.assertEqual(self.history("a.py::target")["target"]["qualname"], "target")
 
@@ -245,8 +242,7 @@ class TargetHistoryTests(unittest.TestCase):
         self.assertTrue(witnesses[0]["next"])
 
     def test_hunk_matches_pinned_text_not_changed_live_lines(self):
-        mapped = self.run_command("map", "a.py::target")
-        ref = mapped["history"]["next"]["target"]
+        ref = self.pinned_ref()
         self.write("a.py", "def unrelated():\n    return 9\n")
         edit_call = {"type": "message", "id": "a", "message": {"role": "assistant", "content": [
             {"type": "toolCall", "id": "c", "name": "edit", "arguments": {"path": "a.py", "edits": []}}]}}
@@ -288,6 +284,16 @@ class TargetHistoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["intent"]["request"]["text"], "Reject the eager approach")
         self.assertEqual(rows[0]["intent"]["request"]["origin"], "human")
 
+    def test_turn_reply_is_the_decision_lead(self):
+        reply = {"type": "message", "id": "d", "parentId": "r", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "Kept target lazy; eager loading broke the importer."}]}}
+        self.recording(extra=[reply])
+        row = next(r for r in self.history()["results"] if r["category"] == "recorded_activity")
+        self.assertEqual(row["intent"]["response"]["text"], "Kept target lazy; eager loading broke the importer.")
+        lead = next(r for r in self.compact() if r["source"] == "session")
+        self.assertEqual(lead["decision"], "Kept target lazy; eager loading broke the importer.")
+        self.assertRegex(lead["decision_ref"], r"^past@\d+#[0-9a-f]{12}$")
+
     def test_corrected_and_failed_work_rank_before_plain_requests(self):
         self.recording(sid="plain", request="Add the target helper")
         self.recording(sid="corrected", request="Make target eager",
@@ -311,10 +317,9 @@ class TargetHistoryTests(unittest.TestCase):
         row = self.history("a.py")["results"][0]
         self.assertIn("failed_edit", row["intent"]["signals"])
 
-    def test_default_delivery_is_compact_and_verbose_keeps_evidence(self):
+    def test_compact_rows_are_small_and_full_rows_keep_evidence(self):
         self.recording(extra=[self.followup("That's not what I asked; undo it")])
-        out = self.cli("history", "a.py::target", "--recordings", str(self.archive))
-        row = out["results"][0]
+        row = self.compact()[0]
         self.assertEqual(row["source"], "session")
         self.assertEqual(row["text"], "Reject the eager approach")
         self.assertEqual(row["signals"], ["possible_correction"])
@@ -322,11 +327,7 @@ class TargetHistoryTests(unittest.TestCase):
         self.assertRegex(row["ref"], r"^past@\d+#[0-9a-f]{12}$")
         self.assertLess(len(json.dumps(row)), 400)
         self.assertNotIn("evidence", row)
-        self.assertNotIn("groups", json.dumps(out["coverage"]))
-        self.assertIn("context", out["expand"]["session"])
-        verbose = self.cli("history", "a.py::target", "--recordings", str(self.archive), "--verbose", "--max-bytes", "40000")
-        self.assertIn("evidence", verbose["results"][0])
-        self.assertIn("groups", verbose["coverage"]["sessions"])
+        self.assertIn("evidence", self.history()["results"][0])
 
     def test_symbol_pickaxe_finds_removed_callers_outside_the_file(self):
         self.init()
@@ -343,7 +344,7 @@ class TargetHistoryTests(unittest.TestCase):
         self.assertIn("symbol_name_pickaxe", {g.get("basis") for g in out["coverage"]["git"]})
         self.write("a.py", "def target():\n    return 3\n")
         self.commit("unrelated body change")
-        compact = self.cli("history", "a.py::target", "--no-sessions")["results"]
+        compact = self.compact("a.py::target", "--no-sessions")
         self.assertEqual(compact[0]["signals"], ["pickaxe:target"])
         self.assertEqual(compact[-1]["text"], "unrelated body change")
         self.assertNotIn("signals", compact[-1])

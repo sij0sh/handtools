@@ -16,6 +16,11 @@ class Table:
 
 EVENT_COLUMNS = {name: "TEXT" for name in (*FIELDS, "cite", "repo_path")}
 EVENT_COLUMNS.update({name: "INTEGER" for name in ("exit_code", "text_chars", "text_start", "text_omitted", "is_shell")})
+SESSION_COLUMNS = {name: "TEXT" for name in (
+    "session", "parent_session", "independent_session", "harness", "harness_version", "recording_id", "root",
+    "started_at", "ended_at", "first_request", "first_request_cite")}
+SESSION_COLUMNS.update({name: "INTEGER" for name in ("events", "user_messages", "tool_calls", "failed_calls",
+                                                       "repo_paths")})
 CATALOG = {
     "nodes": Table(TABLES["nodes"], "graph", "one source node", ("id",)),
     "edges": Table(TABLES["edges"], "graph", "one typed relationship", ("id",)),
@@ -25,6 +30,8 @@ CATALOG = {
     "code_items": Table({**repo_files.ITEM_COLUMNS, "id": "TEXT", "ref": "TEXT"}, "graph",
                         "one captured symbol (legacy imports remain available through sessions.py)", ("id",)),
     "events": Table(EVENT_COLUMNS, "recordings", "one recorded event", ("recording_id", "event_id"), "transient"),
+    "sessions": Table(SESSION_COLUMNS, "recordings", "one recorded session file; join events USING(recording_id)",
+                      ("recording_id",), "transient"),
     "commits": Table({**git_file_history.COMMIT_COLUMNS, "ref": "TEXT"}, "git", git_file_history.COMMIT_GRAIN, ("repo_id", "sha")),
     "changes": Table(git_file_history.CHANGE_COLUMNS, "git", git_file_history.CHANGE_GRAIN, ("repo_id", "sha", "path")),
     "commit_links": Table(commit_links.COLUMNS, "links", commit_links.GRAIN, (), "transient"),

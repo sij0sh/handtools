@@ -23,7 +23,6 @@ import posixpath
 import re
 import sys
 
-STATES = ("resolved", "ambiguous", "standard_library", "not_in_repo", "unresolved")
 PY_STDLIB = frozenset(getattr(sys, "stdlib_module_names", ())) | frozenset(sys.builtin_module_names)
 RUST_STD = frozenset(("std", "core", "alloc", "proc_macro", "test"))
 # TypeScript's extension order for relative specifiers; the first existing file wins.

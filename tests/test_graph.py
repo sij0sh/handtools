@@ -10,8 +10,9 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from helper.graph_store import Store, capture, digest, read_file
-from helper.graph_queries import Graph, changes, impact, query, reference
+from helper.graph_store import Store, capture, read_file
+from helper.engine import SQLiteQuery
+from helper.graph_queries import TABLES, Graph, impact, reference
 
 
 class GraphTests(unittest.TestCase):
@@ -119,7 +120,6 @@ class GraphTests(unittest.TestCase):
         b = self.cli("find", "no-such-text-b")
         self.assertNotEqual(a["report"], b["report"])
         self.assertEqual(self.cli("show", a["report"] + "/scope")["results"][0]["text"], "no-such-text-a")
-        self.assertEqual(self.cli("neighbors", "core.py")["scope"]["target"], "core.py")
 
     def test_targets_accept_returned_refs_and_path_tails(self):
         self.fixture()
@@ -280,15 +280,15 @@ class GraphTests(unittest.TestCase):
         self.write("__init__.py", "")
         self.write("a.py", "from b import run\nrun()\n")
         self.write("b.py", "def run():\n    return 1\n")
-        out = self.cli("neighbors", "b.py")
-        self.assertIn("a.py", {r.get("path") for r in out["results"]})
+        out = impact(self.graph(), ["b.py"])
+        self.assertIn("a.py", {r.get("path") for r in out["results"] if r.get("role") == "possible_consumer"})
 
     def test_ambiguous_names_not_silently_selected(self):
         self.write("a.py", "def save():\n    pass\n")
         self.write("b.py", "def save():\n    pass\n")
-        out = self.cli("neighbors", "save", success=False)
-        self.assertIn("ambiguous", out["error"])
-        self.cli("neighbors", "a.py::save")
+        out = self.cli("inspect", "save", "--no-sessions")
+        self.assertEqual((out["status"], out["coverage"]["target"]["reason"]), ("partial", "ambiguous"))
+        self.assertEqual(self.cli("inspect", "a.py::save", "--no-sessions")["target"]["path"], "a.py")
 
     def test_ambiguous_python_roots_are_visible(self):
         self.write("mod.py", "")
@@ -308,14 +308,11 @@ class GraphTests(unittest.TestCase):
         self.assertEqual([r["test"]["path"] for r in tests], ["tests/test_service.py"])
         self.assertTrue(all(r["execution"] == "not_run" for r in tests))
 
-    def test_direction_and_paths(self):
+    def test_consumers_and_dependencies_are_separate(self):
         self.fixture()
-        incoming = self.cli("neighbors", "core.py", "--direction", "in", "--depth", "3")
-        self.assertIn("api.py", {r["path"] for r in incoming["results"]})
-        outward = self.cli("neighbors", "core.py", "--direction", "out")
-        self.assertFalse(outward["results"])
-        path = self.cli("paths", "api.py", "core.py")
-        self.assertEqual(path["results"][0]["distance"], 2)
+        rows = impact(self.graph(), ["core.py"], depth=3)["results"]
+        self.assertIn("api.py", {r["path"] for r in rows if r.get("role") == "possible_consumer"})
+        self.assertFalse([r for r in rows if r.get("role") == "dependency_context"])
 
     def test_depth_and_node_limits_report_frontier(self):
         self.fixture()
@@ -356,36 +353,6 @@ class GraphTests(unittest.TestCase):
         status = self.store.freshness(before.body)
         self.assertEqual(status["state"], "changed")
         self.assertIn("core.py", status["changed_paths"])
-
-    def test_before_after_catches_deletion_and_unrelated_addition(self):
-        self.fixture()
-        before = self.graph()
-        (self.repo/"core.py").unlink()
-        self.write("new/extra.py", "value = 1\n")
-        after = self.graph()
-        report = impact(after, [], before)
-        delta = {r["path"]: r["state"] for r in report["results"] if r["kind"] == "change"}
-        self.assertEqual(delta, {"core.py": "deleted", "new/extra.py": "added"})
-        consumers = {r.get("path") for r in report["results"] if r.get("side") == "base" and r.get("role") == "possible_consumer"}
-        self.assertEqual(consumers, {"api.py", "service.py"})
-
-    def test_partial_inventory_does_not_claim_deletion(self):
-        self.write("a.py", "x=1\n")
-        self.write("b.py", "x=2\n")
-        before = self.graph()
-        after = self.graph(max_files=1)
-        delta = changes(before, after)
-        self.assertEqual(delta[0]["state"], "unknown")
-
-    def test_equal_content_moves_are_not_automatic_identity(self):
-        self.write("a.py", "x=1\n")
-        before = self.graph()
-        (self.repo/"a.py").rename(self.repo/"b.py")
-        after = self.graph()
-        doc = impact(after, [], before)
-        matches = [r for r in doc["results"] if r["kind"] == "correspondence"]
-        self.assertEqual(matches[0]["state"], "unique_content_match")
-        self.assertEqual(matches[0]["after"], ["b.py"])
 
     def test_dirty_untracked_and_missing_git_files(self):
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
@@ -437,24 +404,21 @@ class GraphTests(unittest.TestCase):
 
     def test_sql_works_without_optional_dependencies_and_counts_before_paging(self):
         self.fixture()
-        graph = self.graph()
-        doc = query(graph, "SELECT count(*) AS n FROM files")
-        self.assertEqual(doc["results"], [{"n": 5}])
-        self.assertEqual(query(graph, "SELECT path FROM files WHERE path = :p", {"p": "core.py"})["results"], [{"path": "core.py"}])
-        self.assertFalse(query(graph, "SELECT * FROM files", limit=1)["scope"]["query_complete"])
+        self.assertEqual(self.cli("query", "SELECT count(*) AS n FROM files")["results"], [{"n": 5}])
+        self.assertEqual(self.cli("query", "SELECT path FROM files WHERE path = :p", "--param", "p=core.py")["results"],
+                         [{"path": "core.py"}])
 
     def test_sql_rejects_mutations_external_reads_and_multiple_statements(self):
-        self.fixture()
-        graph = self.graph()
         for sql in ("DELETE FROM nodes", "DROP TABLE edges", "ATTACH DATABASE '/tmp/remember-test.db' AS other",
                     "SELECT load_extension('x')", "PRAGMA database_list", "SELECT 1; SELECT 2", "CREATE TABLE x(a)"):
-            with self.subTest(sql=sql), self.assertRaises(ValueError):
-                query(graph, sql)
+            with self.subTest(sql=sql), self.assertRaises(ValueError), SQLiteQuery(TABLES, 5) as engine:
+                engine.plan(sql, {})
+                engine.evaluate(10)
 
     def test_sql_timeout(self):
-        self.write("a.py", "")
-        with self.assertRaises(ValueError):
-            query(self.graph(), "WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x) SELECT sum(n) FROM x", seconds=0.01)
+        with self.assertRaises(ValueError), SQLiteQuery(TABLES, 0.01) as engine:
+            engine.plan("WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x) SELECT sum(n) FROM x", {})
+            engine.evaluate(10)
 
     def test_sql_blob_and_nonfinite_values_are_json_safe(self):
         out = self.cli("query", "--sql", "SELECT x'00ff' AS blob, 1e999 AS value")
@@ -492,18 +456,6 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(lines(r"unwrap_\w+", "--regex"), [3])
         self.assertIn("Invalid --regex", self.cli("find", "(", "--regex", success=False)["error"])
 
-    def test_status_warns_on_dominant_file_and_uncaptured_reference(self):
-        self.write("big.py", "".join(f"def f{i}():\n    pass\n" for i in range(20)))
-        self.write("small.py", "def g():\n    pass\n")
-        self.write("run.sh", "python3 .tools/check.py\n")
-        self.write("README.md", "See vendor/notes\n")
-        (self.repo / ".tools").mkdir()
-        (self.repo / "vendor").mkdir()
-        rows = self.cli("status", "--exclude", ".tools")["results"][0]["warnings"]
-        self.assertEqual({(w["kind"], w["path"]) for w in rows},
-                         {("dominant_file", "big.py"), ("uncaptured_reference", ".tools")})
-        self.assertEqual(next(w for w in rows if w["path"] == ".tools")["examples"], [{"path": "run.sh", "line": 1}])
-
     def test_gap_calls_column(self):
         self.write("a.py", "def f(obj):\n    return obj.run()\n")
         out = self.cli("query", "--sql", "SELECT sum(calls) AS calls FROM gaps WHERE area = 'calls'")
@@ -534,13 +486,6 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(following["delivery"]["total"], total)
         self.assertNotIn("later.py", {r.get("path") for r in following["results"]})
 
-    def test_budget_does_not_trim_retained_analysis(self):
-        self.fixture()
-        out = self.cli("impact", "core.py", "--max-bytes", "2048")
-        self.assertLessEqual(len(json.dumps(out, sort_keys=True, separators=(",", ":")).encode()) + 1, 2048)
-        full = self.store.load(out["report"])
-        self.assertIn("api.py", {r.get("path") for r in full["results"]})
-
     def test_invalid_expired_and_corrupt_references(self):
         self.write("a.py", "x=1\n")
         graph = self.graph()
@@ -556,13 +501,6 @@ class GraphTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Store(self.repo, self.repo/"cache")
 
-    def test_comparison_rejects_filtered_scope(self):
-        self.fixture()
-        a = self.graph()
-        self.write("core.py", "# new\n")
-        b = self.graph()
-        self.cli("impact", "core.py", "--base", a.snapshot, "--head", b.snapshot, success=False)
-
     def test_common_flags_before_action(self):
         self.fixture()
         proc = subprocess.run([sys.executable, str(ROOT/"scripts/remember.py"), "--repo", str(self.repo),
@@ -572,8 +510,7 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(len(json.loads(proc.stdout)["results"]), 1)
 
     def test_empty_directory_and_empty_query_tables(self):
-        graph = self.graph()
-        self.assertEqual(query(graph, "SELECT count(*) AS n FROM edges")["results"], [{"n": 0}])
+        self.assertEqual(self.cli("query", "SELECT count(*) AS n FROM edges")["results"], [{"n": 0}])
         self.cli("map", "--format", "json")
 
     def test_describe_is_bounded_without_source_capture(self):

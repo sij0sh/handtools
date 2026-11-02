@@ -2,12 +2,30 @@
 import os
 from . import catalog, cite, commit_links, edit_hunks, git_file_history, graph_cli, graph_queries, repo_files
 from .engine import Input
-from .enrichment import remap, parse_root_map
+from .root_map import parse_root_map, remap
 from .git_resolve import GitResolver
 from .graph_store import digest
 from .projection import clean
 from .recording_scan import DiscoveryUnavailable, scan_project
 from .records import RecordCache
+
+
+def session_row(recording, rows):
+    """One recording summarized from its event rows: span, activity and the request that opened it."""
+    stamps = sorted(r["timestamp"] for r in rows if r.get("timestamp"))
+    request = next((r for r in rows if r.get("kind") == "user_message" and (r.get("text") or "").strip()), None)
+    return {"session": recording["session"], "parent_session": recording.get("parent_session"),
+            "independent_session": next((r.get("independent_session") for r in rows), None),
+            "harness": recording.get("harness"), "harness_version": recording.get("harness_version"),
+            "recording_id": next((r.get("recording_id") for r in rows), None) or recording["file"],
+            "root": recording.get("root"), "started_at": stamps[0] if stamps else None,
+            "ended_at": stamps[-1] if stamps else None, "events": len(rows),
+            "user_messages": sum(r.get("kind") == "user_message" for r in rows),
+            "tool_calls": sum(r.get("kind") == "tool_call" for r in rows),
+            "failed_calls": sum(r.get("kind") == "tool_call" and r.get("outcome") == "failed" for r in rows),
+            "repo_paths": len({r["repo_path"] for r in rows if r.get("repo_path")}),
+            "first_request": request["text"][:500] if request else None,
+            "first_request_cite": request.get("cite") if request else None}
 
 
 class Providers:
@@ -63,18 +81,21 @@ class Providers:
         except DiscoveryUnavailable as error:
             if getattr(self.args, "recordings", []):
                 raise
-            self.tables["events"] = self.tables["rows"] = []
+            self.tables["events"] = self.tables["rows"] = self.tables["sessions"] = []
             self.coverage["recordings"] = {"complete": False, "state": "unavailable", "error": str(error)}
             return
         self.roots = {r["file"]: r.get("root") for r in self.recordings}
-        rows = []
+        rows, sessions = [], []
         for recording in self.recordings:
+            first = len(rows)
             for event in recording["events"]:
                 row = clean(event, complete=True)
                 row = cite.tagged(row, event["ref"])
                 row.update(repo_path=self.repo_path(event))
                 rows.append(row)
+            sessions.append(session_row(recording, rows[first:]))
         self.tables["events"] = self.tables["rows"] = rows
+        self.tables["sessions"] = sessions
         reasons = []
         if not scope.get("discovery_complete", True): reasons.append("discovery_limit")
         if any(not g.get("scan_complete", True) for g in groups): reasons.append("scan_limit")

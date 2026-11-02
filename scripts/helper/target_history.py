@@ -6,7 +6,6 @@ renames and caller-supplied relocation/split associations cross their boundary.
 import bisect
 import os
 import re
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,34 +13,11 @@ from types import SimpleNamespace
 from . import cite, commit_links, edit_hunks, git_file_history
 from .recording_scan import scan_project
 from .discovery import normalized_root
-from .enrichment import parse_root_map, remap
+from .root_map import parse_root_map, remap
 from .git_resolve import GitResolver
 from .options import command_line
 from .projection import clean, human, next_for
 from .records import RecordCache
-
-
-def continuation(graph, node, store):
-    target = graph.public(node)["ref"]
-    argv = [sys.executable, str(Path(__file__).resolve().parents[1] / "remember.py"),
-            "history", target, "--repo", store.root, "--cache", str(store.path.parent)]
-    return {"next": {"action": "history", "target": target, "snapshot": graph.snapshot,
-                     "repo": store.root, "argv": command_line(argv)}}
-
-
-def attach(document, graph, targets, store):
-    """Continuation metadata only: never discovers or reads recordings."""
-    found = []
-    for target in targets:
-        hits = graph.resolve(target)
-        if len(hits) == 1 and graph.nodes[hits[0]]["kind"] in ("file", "symbol"):
-            found.append(continuation(graph, graph.nodes[hits[0]], store)["next"])
-    if found:
-        document["history"] = {"next": found[0] if len(found) == 1 else found}
-    for row in document.get("results", []):
-        if row.get("id") in graph.nodes and row.get("kind") in ("file", "symbol"):
-            row["history"] = continuation(graph, graph.nodes[row["id"]], store)
-    return document
 
 
 # A follow-up that opens by rejecting or redirecting the prior work. A lead to expand, not a verdict.
@@ -72,9 +48,10 @@ def note(event):
             "origin": "human" if human(event) else "delegated", "ref": event["ref"]}
 
 
-def intent(event, requests, humans, orders):
-    """The request that opened the event's turn, the next human message after it, and plain signals."""
+def intent(event, requests, humans, orders, responses=None):
+    """The request that opened the event's turn, the turn's final reply, the next human message, and signals."""
     request = event if event["kind"] == "user_message" else requests.get(event.get("turn"))
+    response = (responses or {}).get(event.get("turn"))
     after = bisect.bisect_right(orders, event["order"])
     following = humans[after] if after < len(humans) else None
     signals = []
@@ -85,6 +62,9 @@ def intent(event, requests, humans, orders):
     out = {"signals": signals}
     if request:
         out["request"] = note(request)
+    if response and response is not event:
+        # The turn's last assistant message: what was decided or reported, a lead rather than a verdict.
+        out["response"] = note(response)
     if following:
         out["followup"] = note(following)
     return out
@@ -316,12 +296,14 @@ def run(args, store, get_graph):
         if target["kind"] == "symbol" and symbol["qualname"] == target["qualname"]:
             by_event.setdefault((symbol["recording_id"], symbol["event_id"]), []).append(symbol)
     for recording in recordings:
-        requests, humans = {}, []
+        requests, humans, responses = {}, [], {}
         for event in recording["events"]:
             if event["kind"] == "user_message":
                 requests.setdefault(event.get("turn"), event)
                 if human(event):
                     humans.append(event)
+            elif event["kind"] == "assistant_message" and str(event.get("text") or "").strip():
+                responses[event.get("turn")] = event
         orders = [e["order"] for e in humans]
         calls = {}
         mention_paths = []
@@ -360,7 +342,7 @@ def run(args, store, get_graph):
                 continue
             row = clean(event, SimpleNamespace(preview_chars=300))
             entry = {"category": "recorded_activity" if direct else "text_mention", "basis": basis,
-                     "evidence": row, "intent": intent(event, requests, humans, orders), "symbols": match,
+                     "evidence": row, "intent": intent(event, requests, humans, orders, responses), "symbols": match,
                      "hunks": hunks_here, "ref": event["ref"], "next": next_for(event)}
             if event["kind"] == "tool_call":
                 calls[refkey(event["ref"])] = entry
@@ -378,9 +360,6 @@ def run(args, store, get_graph):
     return rank(result)
 
 
-SESSIONS = Path(__file__).resolve().parents[1] / "sessions.py"
-# Default table columns for compact rows; --fields overrides.
-COMPACT_FIELDS = ["date", "source", "id", "text", "signals", "activity", "ref"]
 
 
 def locator(ref):
@@ -424,6 +403,9 @@ def compact(rows):
             out.append(item)
         operation = (evidence.get("operation") or evidence.get("kind")) if row["category"] == "recorded_activity" else "mention"
         item["counts"][operation] = item["counts"].get(operation, 0) + 1
+        if found.get("response") and "decision" not in item:
+            item["decision"] = found["response"]["text"][:240]
+            item["decision_ref"] = locator(found["response"]["ref"])
         item["signals"] += [s for s in found.get("signals", []) if s not in item["signals"]]
         if "possible_correction" in found.get("signals", []) and "followup" not in item:
             item["followup"] = found["followup"]["text"][:120]

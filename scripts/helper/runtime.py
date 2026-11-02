@@ -1,7 +1,7 @@
 """Single entrypoint runtime: deterministic plans, lazy providers and evidence expansion.
 
 The common query path is SQLite, including graph, Git, recordings and custom
-inputs. Legacy sessions/rows DuckDB interfaces remain compatibility adapters.
+inputs.
 """
 import argparse
 import copy
@@ -11,14 +11,14 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import catalog, continuations, delivery, graph_cli, session_cli, target_history
+from . import catalog, continuations, delivery, graph_cli, recall, session_show, target_history
 from .bindings import parse_params, parse_types, types_for
 from .budget import Deadline, POLICIES
 from .engine import Input, SQLiteQuery, IDENTIFIER, infer_type
 from .envelope import load_rows
 from .graph_queries import DEPENDENCIES, reference, impact
 from .graph_store import Store, digest
-from .operations import COMMON, GRAPH, OPERATIONS, SESSION_COMMANDS, graph_parser
+from .operations import COMMON, GRAPH, OPERATIONS, graph_parser
 from .providers import Providers
 
 
@@ -37,7 +37,7 @@ class Result:
 
 
 def parser():
-    return graph_parser("common", "Remember: map, find, inspect, show, query. Other commands remain advanced compatibility operations.")
+    return graph_parser()
 
 
 def normalize_prefix(argv):
@@ -55,15 +55,18 @@ def normalize_prefix(argv):
         index += 1
         if '=' not in token and option.nargs != 0:
             index += 1
-    if index and index < len(argv) and argv[index] in {*GRAPH, *SESSION_COMMANDS, "inspect"}:
+    if index and index < len(argv) and argv[index] in {*GRAPH, "inspect", "recall"}:
         return [argv[index], *argv[:index], *argv[index + 1:]]
     return argv
 
 
 def normalize(args, argv):
     args = graph_cli.defaults(args)
-    if args.action in ("query", "inspect", "show"):
+    if args.action in ("query", "inspect", "show", "recall"):
         policy = POLICIES[args.budget]
+        if args.action == "recall":
+            # Old work is the point: always read the deep commit/recording window.
+            policy = {**policy, **{k: POLICIES["deep"][k] for k in ("max_commits", "max_recordings")}}
         for key, value in policy.items():
             flag = '--' + key.replace('_', '-')
             if not any(token == flag or token.startswith(flag + '=') for token in argv):
@@ -118,6 +121,8 @@ def custom_inputs(args):
 
 # inspect bounds: source preview, history leads, executable candidate choices.
 PREVIEW_LINES, HISTORY_LEADS, CANDIDATE_CHOICES = 80, 8, 5
+# Human-requested session turns with a recorded reply, surfaced ahead of other history leads.
+DECISION_LEADS = 3
 
 
 class Runtime:
@@ -155,21 +160,6 @@ class Runtime:
         argv = continuations.replace_option(argv, '--offset', None)
         return continuations.encode(continuations.replace_option(argv, '--budget', 'deep'), None,
                                     purpose + '; changes the scan boundary to --budget deep', 'coverage')
-
-    def history_argv(self, ref, snapshot):
-        """Target history with this request's recording scope and resolved limits, pinned to the inspected source."""
-        args = self.args
-        argv = ['history', ref, '--repo', self.store.root, '--cache', str(self.store.path.parent), '--snapshot', snapshot]
-        for name in ('recordings', 'project-root', 'history-repo', 'root-map', 'exclude-session'):
-            for value in getattr(args, name.replace('-', '_')):
-                if name in ('recordings', 'project-root'):
-                    value = str(Path(value).expanduser().resolve())
-                argv += ['--' + name, value]
-        if args.no_sessions:
-            argv.append('--no-sessions')
-        for key in ('max_commits', 'max_recordings', 'max_candidates', 'max_scan_bytes', 'max_events'):
-            argv += ['--' + key.replace('_', '-'), str(getattr(args, key))]
-        return argv
 
     def query(self, deadline):
         args = self.args
@@ -269,7 +259,7 @@ class Runtime:
             found, limits = graph.walk(graph.seeds(node['ref'], grain), 'both', DEPENDENCIES, grain,
                                        args.depth, args.max_nodes, seconds=deadline.remaining())
             rows += [{"section": "relationships", **r} for r in found]
-            rel = graph.document('neighbors', found, traversal=limits)
+            rel = graph.document('relationships', found, traversal=limits)
             if limits['bounds']: rel['gaps'] = [*rel['gaps'], {"area": "traversal", "reason": "bounded"}]
             rel_incomplete = graph_cli.incomplete(rel, graph)
         coverage['relationships'] = {"complete": not rel_incomplete, "gaps": rel_incomplete,
@@ -278,6 +268,12 @@ class Runtime:
         deadline.check()
         history = target_history.run(pinned, self.store, lambda store, options, pin=None: graph)
         compact = target_history.compact(history['results'])
+        decisions = [r for r in compact if r.get("source") == "session" and r.get("decision")
+                     and "delegated_request" not in r.get("signals", [])][:DECISION_LEADS]
+        # Before relationships, which can fill the first delivery page.
+        after_source = next((i for i, r in enumerate(rows) if r["section"] != "source"), len(rows))
+        rows[after_source:after_source] = [{"section": "decision", **r} for r in decisions]
+        compact = [r for r in compact if not any(r is d for d in decisions)]
         rows += [{"section": "history", **r} for r in compact[:HISTORY_LEADS]]
         history_partial = any(c.get('state') in ('partial', 'unavailable') for c in history['coverage'].get('git', []))
         history_partial |= history['coverage'].get('sessions', {}).get('state') in ('partial', 'unavailable')
@@ -291,7 +287,7 @@ class Runtime:
             if isinstance(ref, dict) or (isinstance(ref, str) and '@' in ref and '#' in ref):
                 deadline.check()
                 try:
-                    selected = self.expand_session(ref)
+                    selected = session_show.expand(json.dumps(ref) if isinstance(ref, dict) else ref)
                     for event in selected.get('results', []):
                         if event.get('selected'):
                             rows.append({"section": "evidence", **event})
@@ -311,30 +307,34 @@ class Runtime:
                 ['show', source_ref, '--start-line', str(start+PREVIEW_LINES), '--lines', str(end-start-PREVIEW_LINES+1),
                  '--repo', self.store.root, '--cache', str(self.store.path.parent)], None,
                 "Read the rest of the target source", "expansion"))
-        if len(compact) > HISTORY_LEADS:
-            next_items.append(continuations.encode(self.history_argv(node['ref'], graph.snapshot), None,
-                                                   "Read all target history leads", "expansion"))
         document = {"operation": "inspect", "target": node, "results": rows, "steps": steps, "coverage": coverage,
                     "scope": {"intent": args.intent, "snapshot": graph.snapshot, "retention": "transient"},
                     "status": "partial" if any(c.get('complete') is False for c in coverage.values()) else "ok", "next": next_items}
         return Result(document, digest([graph.snapshot, history['results'], history['coverage']]), argv)
 
-    def expand_session(self, ref):
-        from . import actions
-        value = json.dumps(ref) if isinstance(ref, dict) else ref
-        args = session_cli.parser().parse_args(['context', '--ref', value, '--mode', 'exchange', '--repo', self.store.root])
-        args.limit = 7
-        return actions.run(args)
+    def recall(self, deadline):
+        args = self.args
+        text = ' '.join(args.text)
+        providers = Providers(args, self.store, deadline)
+        providers.load({"commits", "changes"} if args.no_sessions else {"commits", "changes", "commit_links"})
+        tables = providers.tables
+        words, rows = recall.rank(text, tables["commits"], tables["changes"], tables.get("events", []),
+                                  tables.get("commit_links", []), self.store.root)
+        window = recall.horizon(tables["commits"], tables.get("sessions", []))
+        coverage = {name: {"complete": c.get("complete")} for name, c in providers.coverage.items()}
+        partial = any(c["complete"] is not True for c in coverage.values())
+        argv = self.base_argv()
+        recover = self.recovery(argv, "Recall over a wider commit and recording window") if partial else None
+        return Result({"operation": "recall", "status": "partial" if partial else "ok", "results": rows,
+                       "scope": {"terms": words, "window": window, "retention": "transient",
+                                 "meaning": "lexical candidates; read the paths before reusing"},
+                       "coverage": coverage, "next": [recover] if recover else []},
+                      digest([rows, window]), argv)
 
     def show(self, deadline):
         ref = self.args.ref
         if isinstance(ref, str) and (ref.startswith('{') or ('@' in ref and '#' in ref)):
-            result = self.expand_session(ref)
-            result['operation'] = 'show'
-            from .envelope import incomplete
-            reasons = incomplete(result, result.get('scope', {}))
-            result['status'] = 'partial' if reasons else 'ok'
-            result['coverage'] = {"session": {"complete": not reasons, "reasons": reasons}}
+            result = session_show.expand(ref)
             return Result(result, digest(result.get('results', [])), self.base_argv())
         if re.fullmatch(r'(?:git:)?[0-9a-fA-F]{40}', ref):
             from .git_resolve import GitResolver
@@ -371,23 +371,6 @@ def resume(p, args, argv, incoming):
     return normalize(p.parse_args(argv), argv), argv, saved.get('signature')
 
 
-def legacy_query(args, argv):
-    """The original graph-only query --sql shape keeps its retained v1 report; None when it does not apply."""
-    if args.sql_text is not None or args.plan or args.input or args.type or '--budget' in argv:
-        return None
-    try:
-        with SQLiteQuery(graph_cli.TABLES, args.seconds) as legacy_plan:
-            legacy_plan.plan(args.sql, parse_params(args.param))
-    except ValueError:
-        return None  # Additional tables/columns use the canonical catalog.
-    old_args, extra = graph_cli.parser().parse_known_args(argv)
-    if extra:
-        return None
-    old_args = graph_cli.defaults(old_args)
-    store = Store(old_args.repo, old_args.cache)
-    delivery.deliver("retained", graph_cli.run(old_args, store), old_args, store)
-    return 0
-
 
 def run_describe(args, argv, expected):
     rows = catalog.describe(args.table)
@@ -405,10 +388,6 @@ def run_describe(args, argv, expected):
 
 
 def run_runtime(args, argv, expected):
-    if args.action == 'query' and expected is None:
-        handled = legacy_query(args, argv)
-        if handled is not None:
-            return handled
     if args.action == 'show' and args.ref.startswith(('snapshot:', 'report:')) and expected is None:
         store = Store(args.repo, args.cache)
         delivery.deliver("retained", graph_cli.show(store, args), args, store)
@@ -441,20 +420,12 @@ def run_graph(args, argv, expected):
     return 0
 
 
-def run_session(args, argv, expected):
-    return session_cli.main(argv)
-
-
-ROUTES = {"runtime": run_runtime, "describe": run_describe, "graph": run_graph, "session": run_session}
+ROUTES = {"runtime": run_runtime, "describe": run_describe, "graph": run_graph}
 
 
 def main(argv=None):
     incoming = list(sys.argv[1:] if argv is None else argv)
     argv = normalize_prefix(incoming)
-    # Legacy adapters share the package; never exec another CLI process.
-    # Session operations own their parser; route them before the common parser sees their flags.
-    if argv and argv[0] in OPERATIONS and OPERATIONS[argv[0]].route == "session":
-        return run_session(None, argv, None)
     p = parser()
     try:
         args = normalize(p.parse_args(argv), argv)

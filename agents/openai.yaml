@@ -1,8 +1,8 @@
 interface:
   display_name: Remember
-  short_description: Understand current code with relevant Git and session history
-  default_prompt: Use $remember to understand this repository, recover relevant history, and assess
-    the proposed change.
+  short_description: Recall prior similar work, code relationships and session history
+  default_prompt: Use $remember to find earlier work similar to the proposed change, then assess
+    what it affects.
 policy:
   products:
   - chatgpt

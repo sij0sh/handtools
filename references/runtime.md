@@ -2,13 +2,22 @@
 
 ## Operations
 
-`remember.py` is the common entrypoint. `map`, `find`, `inspect`, `show`, and
-`query` cover ordinary work. `describe TABLE` gives focused schemas without
-capturing source. Advanced graph/history commands remain available. Leading
-shared options work before the verb, including for history adapters.
+`remember.py` is the common entrypoint. `recall`, `map`, `find`, `inspect`,
+`show`, and `query` cover ordinary work.
+
+`recall WORDS` ranks non-merge commits against feature words: each term weighs
+log(1 + commits / commits containing it); subject x3, body x1, best path x2,
+linked human request x2, +1 if a changed path still exists; ties go newest.
+Generic verbs (`add`, `new`, `ui`, `fix`, ...) and words under 3 letters are
+dropped; none left is an input error. Rows show up to 5 paths with current
+state (`exists`, `old -> new`, `-> gone`) and the request + cite when a session
+recorded the commit. Uses deep budgets (2000 commits, 100 recordings);
+`scope.window` gives the oldest commit/session scanned, so a miss only covers it. `describe TABLE` gives focused schemas without
+capturing source. Leading shared options work before the verb.
 
 `inspect TARGET` performs a bounded recipe: resolve one target, read its source,
-collect relationships, retrieve target history, expand one session lead. It
+collect relationships, retrieve target history, list up to 3 `decision` rows
+(past request + final reply, with cite) before relationships, expand one session lead. It
 never edits project code. The default `change` intent uses the existing impact
 algorithm, including separately labeled direct/file-only/indirect consumers.
 `bug` and `review` trace both directions at the resolved target's grain. They
@@ -48,6 +57,7 @@ their schema even during planning.
 | `nodes`, `edges`, `gaps` | Source graph nodes, typed edges, unresolved occurrences |
 | `code_items` | Captured symbol; use `nodes` for canonical graph identities |
 | `events` (`rows` alias) | Normalized recorded event |
+| `sessions` | One recording: span, counts, first request; join `events USING(recording_id)` |
 | `commits`, `changes` | Git commits and changes against each parent basis |
 | `commit_links` | Recorded/inferred/unresolved event-to-commit witness |
 | `edit_hunks`, `edit_symbols` | Recorded edit evidence and explicitly qualified symbol mappings |
@@ -92,8 +102,7 @@ Common results use schema version 2:
   source coverage. Page limits do not make complete evidence partial.
 - `next` contains executable continuation refs, with a purpose and effect.
   `delivery` reads another page; `coverage` explicitly widens a computation cap
-  or scan boundary; `expansion` reads more evidence. Inspect expansions: all
-  target history leads (same recording scope/limits), rest of source past the
+  or scan boundary; `expansion` reads more evidence. Inspect expansions: rest of source past the
   80-line preview, one `inspect` per ambiguous candidate (max 5); all pinned to
   the inspected snapshot. Order: coverage, delivery, expansion. A row larger
   than `--max-bytes` gets one delivery continuation sized to fit it.
@@ -111,27 +120,18 @@ saved: a continuation over `--input NAME=-` carries `stdin.tables` and needs the
 same rows piped to `show` again; different rows fail as a source change, a
 terminal stdin fails instead of blocking.
 
-The runtime's new query/inspect/session-show results remain transient. Existing
-source graph operations retain source-only snapshots/reports. Transcript text
+query/inspect/recall/session-show results are transient. `map`/`find` retain
+source-only snapshots/reports. Transcript text
 never goes through the graph report store. Selected event text may require a
 larger `--max-bytes`; an executable delivery continuation increases that cap
 without changing evidence scope.
 
 One delivery component (`helper/delivery.py`) pages and byte-fits every result
-through an explicit adapter: `retained` (graph reports, source-only, saved),
-`history`, `common` (v2) and `envelope` (sessions.py/rows.py), all transient.
-`retained` refuses history/inspect or `retention: transient` documents.
+through an explicit adapter: `retained` (graph reports, source-only, saved) or
+`common` (transient). `retained` refuses inspect or `retention: transient` documents.
 
 ## Compatibility
 
-`sessions.py` and `rows.py` are thin adapters into the same helper package.
-All three CLIs build parsers and routes from one registry, `helper/operations.py`.
-Their established DuckDB SQL dialect and v1 envelopes remain supported and
-still require optional dependencies. No backend is silently selected based on
-installed packages. New work should use positional `remember.py query SQL`.
-
-The original `remember.py query --sql SQL` graph-only shape keeps its retained
-v1 report/paging behavior. Queries using new tables/columns go through the
-common catalog. Retained graph `show` and advanced history commands preserve
-their existing output contracts. This bridge avoids invalidating existing
-consumers while agents adopt the smaller common interface.
+`remember.py` is the only CLI; parsers and routes come from one registry,
+`helper/operations.py`. All SQL is stdlib SQLite.
+ `--sql SQL` is an alias for the positional SQL.

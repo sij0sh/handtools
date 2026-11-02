@@ -1,10 +1,5 @@
-# Query engine for sessions.py select --sql and scripts/rows.py.
-# Install into a venv (see references/reader.md), or on Linux/Homebrew without one:
-#   python3 -m pip install --user --break-system-packages -r requirements.txt
-# These pins require Python 3.11+; scan/search/describe work without them.
-duckdb==2.0.0
-pyarrow==26.0.0
-# Optional: --include symbols for Rust, Go, TypeScript/JavaScript and shell.
+# Optional: syntax/import extraction for Rust, Go, TypeScript/JavaScript and shell.
+# Everything else, including SQL, uses only the Python 3.11+ standard library.
 tree-sitter==0.25.2
 tree-sitter-bash==0.25.1
 tree-sitter-go==0.25.0
