@@ -15,6 +15,7 @@ from .recording_scan import scan_project
 from .discovery import normalized_root
 from .root_map import parse_root_map, remap
 from .git_resolve import GitResolver
+from .graph_store import require_current
 from .options import command_line
 from .projection import clean, human, next_for
 from .records import RecordCache
@@ -169,6 +170,7 @@ class TargetRepository:
         self.state = "source_unavailable"
         if graph:
             row = next((r for r in graph.body["source"]["files"] if r["path"] == target["path"]), {})
+            require_current(graph.snapshot, row)
             self.text = row.get("text")
             self.items = [{**n, "kind": n.get("symbol_kind"), "parent": None}
                           for n in graph.nodes.values() if n["kind"] == "symbol" and n["path"] == target["path"]]
@@ -221,7 +223,8 @@ def literal(text, value):
     return bool(value and re.search(r"(?<![\w./\\])" + re.escape(value) + r"(?![\w./\\])", text))
 
 
-def run(args, store, get_graph):
+def run(args, store, get_graph, scanned=None):
+    """scanned: (recordings, coverage) already loaded by the caller's shared provider scan."""
     for value in args.root_map:
         old, sep, new = value.partition("=")
         if not sep or not old or not new:
@@ -292,7 +295,10 @@ def run(args, store, get_graph):
         result["coverage"]["sessions"] = {"state": "not_searched"}
         return rank(result)
     try:
-        recordings, coverage = scan(args, store.root)
+        recordings, coverage = scanned if scanned is not None else scan(args, store.root)
+        if coverage.get("state") == "unavailable":
+            result["coverage"]["sessions"] = coverage
+            return rank(result)
     except (ValueError, OSError) as error:
         result["coverage"]["sessions"] = {"state": "unavailable", "reason": str(error)}
         return rank(result)

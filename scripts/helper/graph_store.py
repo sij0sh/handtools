@@ -1,4 +1,4 @@
-"""Bounded source capture and immutable local evidence. No project code is executed."""
+"""Bounded source capture and one derived graph snapshot per repository. No project code is executed."""
 import fnmatch
 import hashlib
 import importlib.metadata
@@ -16,7 +16,8 @@ from .budget import check, timeout
 SCHEMA = 1
 DEFAULT_EXCLUDES = (".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", "venv",
                     ".remember", ".pytest_cache", "target", "dist", "build")
-ID = re.compile(r"^(snapshot|report):[0-9a-f]{64}$")
+ID = re.compile(r"^snapshot:[0-9a-f]{64}$")
+SUPERSEDED = "superseded or evicted; rerun the original request"
 
 
 def canonical(value):
@@ -189,6 +190,39 @@ def capture(root, *, max_files=20000, max_file_bytes=1024*1024, max_total_bytes=
                     "status": git(root, "status", "--porcelain=v1", "--untracked-files=all", "--", ".")}}
 
 
+def textless(source):
+    """The capture as stored: digests and states, never file text."""
+    return {**source, "files": [{k: v for k, v in f.items() if k != "text"} for f in source["files"]]}
+
+
+def hydrate(body, texts):
+    """Attach text to a loaded snapshot. A file whose current bytes differ from its digest
+    gets no text and state `changed_since_capture`; it is never served from memory of old bytes."""
+    for row in body["source"]["files"]:
+        if row["state"] != "read":
+            row.setdefault("text", None)
+            continue
+        text = texts(row)
+        if text is None:
+            row.update(text=None, state="changed_since_capture")
+        else:
+            row["text"] = text
+
+
+def require_current(snapshot, row):
+    """Target-scoped reads of a pinned file fail when its bytes changed since capture."""
+    if row.get("state") == "changed_since_capture":
+        raise ValueError(f"{row['path']} changed since snapshot {snapshot}; rerun the original request")
+
+
+def live_text(root, limits):
+    """Current UTF-8 text for a captured row when its bytes still match the recorded digest."""
+    def read(row):
+        found, _ = read_file(Path(root), row["path"], limits["max_file_bytes"], limits["max_file_bytes"])
+        return found["text"] if found["digest"] == row["digest"] else None
+    return read
+
+
 def producer_identity():
     base = Path(__file__).parent
     sources = {name: hashlib.sha256((base / name).read_bytes()).hexdigest() for name in
@@ -210,7 +244,7 @@ def cache_home():
     return Path(base) if base else Path.home()/".cache"
 
 
-# Evict retained evidence nobody read or wrote for this long; sweep at most once per interval.
+# Evict workspaces nobody read or wrote for this long; sweep at most once per interval.
 CACHE_TTL_SECONDS, SWEEP_INTERVAL_SECONDS = 14 * 86400, 86400
 
 
@@ -284,13 +318,22 @@ class Store:
         return key
 
     def load(self, key):
+        """A snapshot with text re-read from the live tree and verified per file."""
+        body = self.load_stored(key)
+        hydrate(body, live_text(body["source"]["root"], body["source"]["inventory"]["limits"]))
+        return body
+
+    def load_stored(self, key):
+        if key.startswith("report:"):
+            raise ValueError("Report refs are retired; rerun the original request. "
+                             "Full gaps: query 'SELECT * FROM gaps'")
         if not ID.fullmatch(key):
-            raise ValueError("Invalid retained reference; use a returned snapshot or report ID")
+            raise ValueError("Invalid snapshot reference; use a returned snapshot ID")
         path = self.path / (key.replace(":", "-") + ".json")
         try:
             body = json.loads(path.read_bytes())
         except FileNotFoundError:
-            raise ValueError(f"Reference unavailable in this repository/cache: {key}") from None
+            raise ValueError(f"Snapshot {key} {SUPERSEDED}") from None
         except (ValueError, OSError):
             raise ValueError(f"Corrupt retained reference: {key}") from None
         if digest(body) != key.split(":", 1)[1]:
@@ -303,18 +346,23 @@ class Store:
         source = capture(self.root, **options)
         identity = producer_identity()
         # A small source-key index avoids re-parsing an unchanged captured tree.
-        lookup = self.path / ("source-" + digest({"source": source, "producer": identity}) + ".json")
+        stored = textless(source)
+        lookup = self.path / ("source-" + digest({"source": stored, "producer": identity}) + ".json")
+        texts = {f["path"]: f.get("text") for f in source["files"]}
         if lookup.is_file():
             try:
                 touch(lookup)
                 key = json.loads(lookup.read_bytes())["snapshot"]
-                body = self.load(key)
-                if body["source"] == source and body["producer"] == identity:
+                body = self.load_stored(key)
+                if body["source"] == stored and body["producer"] == identity:
+                    # This call's capture already holds the matching bytes.
+                    hydrate(body, lambda row: texts.get(row["path"]))
                     return key, body
             except (ValueError, KeyError, OSError):
                 pass
-        body = {"schema": SCHEMA, "source": source, "producer": identity, **build(source)}
-        key = self.save("snapshot", body)
+        graph = build(source)
+        key = self.save("snapshot", {"schema": SCHEMA, "source": stored, "producer": identity, **graph})
+        body = {"schema": SCHEMA, "source": source, "producer": identity, **graph}
         fd, temp = tempfile.mkstemp(dir=self.path, prefix="lookup-")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -323,7 +371,18 @@ class Store:
         finally:
             if os.path.exists(temp):
                 os.unlink(temp)
+        self.supersede(key, lookup)
         return key, body
+
+    def supersede(self, key, lookup):
+        """Keep only the newest snapshot and its lookup; older refs fail instead of serving old code."""
+        keep = {key.replace(":", "-") + ".json", lookup.name}
+        for entry in self.path.glob("*.json"):
+            if entry.name not in keep and entry.name.startswith(("snapshot-", "source-", "report-")):
+                try:
+                    entry.unlink()
+                except OSError:
+                    pass  # A concurrent writer replaced it; the next save retries.
 
     def freshness(self, body):
         before = body["source"]

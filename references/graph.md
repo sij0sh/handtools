@@ -92,14 +92,15 @@ counts source lines alone.
 
 ## Snapshots and cache
 
-Source bytes, inventory, producer versions, graph and gaps are retained under
-content-addressed IDs. Workspace roots isolate caches, including separate Git
-worktrees. Captures include untracked and dirty files and tracked missing paths.
-Files changing during capture are marked unavailable. Pinned reads report
-freshness separately; `show` always reads retained bytes. Cache entries idle
-14 days are deleted (swept at most daily on save; reads refresh age); empty
-workspaces are removed. Expired or corrupt references return errors, never
-current-source substitutes.
+Each workspace keeps one derived snapshot: source bytes, inventory, producer
+versions, graph and gaps under a content-addressed ID. Every read captures the
+tree and reuses the snapshot only when it matches; otherwise it rebuilds and the
+new snapshot supersedes the old one. Workspace roots isolate caches, including
+separate Git worktrees. Captures include untracked and dirty files and tracked
+missing paths. Files changing during capture are marked unavailable. Refs to a
+superseded, expired or corrupt snapshot return errors, never old or
+current-source substitutes; rerun the original request. Workspaces idle 14 days
+are deleted (swept at most daily on save; reads refresh age).
 
 ## Capture, limits and delivery
 
@@ -112,12 +113,13 @@ walks the directory without following symlinks. Both exclude `.git`, `.hg`,
 Defaults: 20,000 files; 1 MiB/file; 32 MiB total. Non-UTF-8/binary files are hashed
 but not parsed. Cache defaults to `$XDG_CACHE_HOME/remember`, else
 `%LOCALAPPDATA%\remember` on Windows, else `~/.cache/remember`; `--cache DIR`
-must be outside the source root. Retained evidence contains source text, never
+must be outside the source root. The snapshot contains source text, never
 transcripts.
 
 Delivery bounds: `--limit` (30 rows; query 200), `--offset`, `--max-bytes`
-(12 KB). They never limit capture or traversal. `map`/`find` results are retained
-before delivery; follow `report`/`next`, or `show REPORT/gaps`. Source reads
+(12 KB). They never limit capture or traversal. `map`/`find` pages replay
+against the pinned snapshot through `next`; `gaps` summarizes counts, and
+`query 'SELECT * FROM gaps'` lists them. Source reads
 support `--start-line` and `--lines`. Delivered rows omit `id`, `key`, `digest`
 and default flags; `--verbose` returns full rows. `--fields` projects rows; an
 unknown name exits 2. `--format table` prints columns plus status and

@@ -54,3 +54,46 @@ Two implementers diverge on: link source (D5 fixes), ranking weights (D6), outpu
 - Graph-command cleanup: scripts 9,092 -> 8,262 lines; tests 167 OK.
 - Tests: `test_recall.py` (D13a, D6/D8), `test_cache.py` (D16). D13b = eval task `enactry-reuse`.
 - Open risk A8: Claude transcripts still purge at 30 d unless user sets `cleanupPeriodDays`.
+
+# Graph cache redesign (2026-11-02)
+Goal: README "stateless" claim true in substance. Source graph = one derived cache per repo, verified every call, never authority.
+Evidence: `~/.cache/remember` 225 MB; snapshots embed full file text, new one per edit; 662 reports = 82 MB. Capture re-reads tree every call anyway (0.02-0.8 s); cache only skips parse (0.5 s remember, 1.3 s enactry, 5.7 s AutoGen). History commands never touch graph.
+Supersedes: D16 multi-entry retention; P0 constraint "disposable source-only snapshots remain allowed" narrowed to D40-D41. D17-D39 live in `.agents/artifacts/p0-memory-design.md`.
+
+## Decisions
+- [x] D40: Cache role? One derived source-graph snapshot per repo workspace. Every call checks it against the tree; mismatch rebuilds. Not evidence authority; refs to a superseded capture fail, never serve old code silently.
+- [x] D41 (after: D40): Retention? Newest snapshot only. After saving a snapshot, delete other `snapshot-*`/`source-*` entries in that workspace. Loading a missing snapshot -> "superseded or evicted; rerun the original request". 14-day idle sweep stays for abandoned workspaces.
+- [x] D42 (after: D40): Reports? Retired. `map`/`find` (non-text) and `describe` overview use the common v2 adapter. Delete `delivery.retained`, `report` store kind, `report:` show path. A `report:` ref returns an error naming the replacement (rerun; full gaps via `query 'SELECT * FROM gaps'`).
+- [x] D43 (after: D42): Graph paging? `continue:` token pinned to `--snapshot` + `--offset`, signature = digest of full result rows. Add `map`/`find` to continuation ALLOWED. Graph route rejects signature mismatch with runtime's existing error. Superseded snapshot -> D41 error.
+- [x] D44 (after: D42): Graph envelope? v2: rows compacted as before unless `--verbose`/`--fields`; `status` partial when answer-limiting gaps exist (existing `incomplete()`), `unknown` when assessment unknown; `gaps` = `{count, incomplete, query}` summary; freshness stays in scope; primer passed through, never stored.
+- [x] D45 (after: D41): Concurrency? Atomic replace only, no locks. Concurrent reader losing a race gets the D41 error. Worktrees = separate workspaces.
+- [x] D46 (after: D40): Snapshot content? (step 2) Digests, nodes, edges; no file text. `show snapshot:/source/PATH` reads the live file, verifies digest, mismatch -> stale error with rerun.
+- [x] D47 (after: D46): Freshness check? (step 3) Revised: deferred. Measured joern (2k files): inventory+lstat 0.19 s vs full capture 0.72 s; remember/enactry capture <0.1 s. map/find/inspect still need text, so gain needs lazy text across ~25 `row["text"]` sites - cost > benefit now. Full capture + digest compare stays the check.
+- [x] D48 (after: D46, D47): Incremental rebuild? (step 4) Revised: algorithmic fixes, no per-file cache. Python call binding reads other files' symbol tables mid-walk, so per-file call edges are not separable without redesign. Done: one shared import Resolver + per-path import index (was rebuilt per file), single ast parse reused by calls, cyclic GC paused during build. Output digest identical to before.
+- [x] D49 (after: D41-D47): Docs? Each step updates README/references cache text in the same commit; README drops "deleting the cache expires references" once D46 lands. Version +0.0.1 per commit.
+
+## Challenge
+Two implementers could diverge on: envelope fields (D44 fixes), what deletes when (D41 fixes), paging verification (D43 fixes). D48 resolved after reading calls binding.
+
+## Outcome step 1 (2026-11-02)
+- D41-D45 implemented. Reports + `delivery.retained` removed; map/find/describe = v2 with signed continuations pinned to `--snapshot`. Store keeps newest snapshot; older refs -> "superseded". Envelope reader accepts v2 (`delivery` omissions) so map/find output stays pipeable via `--input`.
+- Tests: 250 OK. Rewritten for new contract: report/scope, pinned-old-source, report paging, retained-adapter tests.
+- Next: step 2 (D46, digests not text).
+
+## Outcome steps 2-4 (2026-11-02)
+- D46: snapshots textless; pinned loads verify per-file digest, mismatch -> "changed since snapshot; rerun". Size AutoGen 35->23 MB, joern 17->2.4 MB.
+- D47 deferred (see row). D48: AutoGen cold build 5.17 -> 4.2 s; warm map 0.54 s.
+- Tests: 250 OK.
+
+# P0 slice 3: investigate (2026-11-02)
+Source: `.agents/artifacts/p0-investigate-plan.md` I1-I16, adopted as written. Implementation notes:
+- [x] D50 (after: I4): Scheduler lives in `recording_scan.scan_scheduled`; `--max-recordings/--max-scan-bytes/--max-events` are invocation totals for investigate (per-harness elsewhere, unchanged). Match half newest-first round-robin across harnesses; context half alternates oldest/newest of the rest; unused allowance lends forward.
+- [x] D51 (after: I13): Frozen frontier = (file, byte end of last complete record, its sha256). Continuations carry it via hidden `--frontier`, so active-session appends do not break paging; archive appends still do.
+- [x] D52 (after: I11): View counts per page computed in `delivery.page` from row `categories`; `views` is top-level, rendered in table mode, kept by byte-fit fallback.
+- [x] D53 (after: I15): Inspect shares one scheduled scan between target history and packet (`target_history.run(..., scanned=)`); packet leads replace the 3-row `decision` cap; history rows carrying a `decision` lead before relationships; no history truncation. Bare map primer replacement deferred to slice 4 cleanup unless cheap - recorded in outcome.
+
+## Outcome slice 3 (2026-11-02)
+- Done: `investigate` op (four views + prior_work), scheduled scan, frozen frontier, per-page views, budget recovery envelope (views + one delivery ref, `next_omitted`), inspect on shared packet/scan (same lead IDs, archive read once; `coverage.history.allocation`). Docs: SKILL.md investigate -> trace -> show; runtime/history refs; README.
+- Gates: recall CSV fixture via investigate prior_work top 3 with request + path; live enactry "follow-up button" -> `15f730f` first in recall and investigate.
+- Deferred: bare map primer on packet selector (slice 4); real checkpoint/test/push/live payload support (needs sanitized samples); retrieval-quality targets (need labeled replays).
+- Measured: this repo ~1.7 s, 37-47 leads. Tests: 267 OK.

@@ -163,16 +163,17 @@ class RuntimeTests(unittest.TestCase):
 
     def test_inspect_plan_reads_nothing(self):
         out=self.cli('inspect','core.py','--plan')
-        self.assertEqual(len(out['results']),5)
+        self.assertEqual([r['stage'] for r in out['results']],['resolve','source','packet','relationships','history','expand'])
         self.assertFalse(self.cache.exists())
 
     def test_inspect_collects_source_consumers_history_and_evidence(self):
         out=self.cli('inspect','core.py','--recordings',self.recording,'--max-bytes','50000')
         sections={r['section'] for r in out['results']}
-        self.assertTrue({'source','relationships','decision','evidence'}<=sections, out)
+        self.assertTrue({'source','relationships','history','evidence'}<=sections, out)
+        self.assertIn('views', out)
         self.assertTrue(any(r.get('path')=='app.py' for r in out['results']))
         # The human request and its reply lead, before relationships can fill a delivery page.
-        self.assertEqual(out['results'][1]['section'],'decision')
+        self.assertEqual(out['results'][1]['section'],'history')
         self.assertEqual(out['results'][1]['text'],'Please fix core.py save.')
         self.assertEqual(out['results'][1]['decision'],'Inspect callers before changing core.py.')
         self.assertRegex(out['results'][1]['decision_ref'],r'^fixture@\d+#[0-9a-f]{12}$')
@@ -250,15 +251,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(len(choices),2)
         refs={r['ref'] for r in out['results']}
         self.assertEqual({self.decoded(c)[1] for c in choices},refs)
-        # The candidate stays inspectable from the ambiguous snapshot after the live file changes.
-        (self.repo/'other.py').write_text('def keep(x):\n    return x\n')
         other=next(r['ref'] for r in out['results'] if r['path']=='other.py')
         chosen=next(c for c in choices if self.decoded(c)[1]==other)
         picked=self.cli('show',chosen['ref'],'--max-bytes','60000')
         self.assertEqual(picked['target']['path'],'other.py')
         self.assertIn('def save',next(r for r in picked['results'] if r['section']=='source')['text'])
+        # Once the live file changes, the pinned candidate fails instead of serving old bytes.
+        (self.repo/'other.py').write_text('def keep(x):\n    return x\n')
+        self.assertIn('changed since snapshot',self.cli('show',chosen['ref'],'--max-bytes','60000',ok=False)['error'])
 
-    def test_inspect_deleted_target_is_unresolved_but_pinned_source_remains(self):
+    def test_inspect_deleted_target_is_unresolved_and_pinned_source_superseded(self):
         body=''.join(f'    x{i} = {i}\n' for i in range(100))
         (self.repo/'gone.py').write_text('def gone():\n'+body)
         out=self.cli('inspect','gone.py','--no-sessions','--max-bytes','60000')
@@ -267,7 +269,8 @@ class RuntimeTests(unittest.TestCase):
         missing=self.cli('inspect','gone.py','--no-sessions')
         self.assertEqual(missing['coverage']['target']['reason'],'unresolved')
         self.assertFalse(missing['results'])
-        self.assertTrue(self.cli('show',rest['ref'],'--limit','500','--max-bytes','60000')['results'])
+        # The deleted file's capture superseded the pinned one; its source is not served stale.
+        self.assertIn('superseded',self.cli('show',rest['ref'],'--limit','500','--max-bytes','60000',ok=False)['error'])
 
     def test_stdin_continuation_replays_same_piped_rows(self):
         rows='[{"x":1},{"x":2}]'
@@ -360,14 +363,6 @@ class RegistryTests(unittest.TestCase):
         self.assertIn('inspect', common)
         for name in common:
             self.assertIn(OPERATIONS[name].route, ROUTES)
-
-    def test_retained_delivery_refuses_transient_results(self):
-        from helper import delivery
-        args = parser().parse_args(['map'])
-        for doc in ({'operation': 'inspect', 'scope': {}},
-                    {'operation': 'query', 'scope': {'retention': 'transient'}}):
-            with self.assertRaises(ValueError):
-                delivery.retained(None, doc, args)
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@
 import collections
 
 from .graph_queries import Graph, evidence, warnings, path_matches
+from .graph_store import require_current
 from .whole_repo import MAX_BYTES, MAX_LINES, TEXT_BYTES, render, summary
 
 from .operations import graph_parser
@@ -66,16 +67,6 @@ def get_graph(store, args, pin=None):
 def show(store, args):
     key, *tail = args.ref.split("/", 2)
     body = store.load(key)
-    if key.startswith("report:"):
-        if not tail:
-            return body
-        section = tail[0]
-        if section not in ("gaps", "results", "coverage", "scope") or len(tail) != 1:
-            raise ValueError("Report sections: results, gaps, coverage, scope")
-        rows = body.get(section, [])
-        return {"operation": "show", "snapshots": body.get("snapshots", []),
-                "results": rows if isinstance(rows, list) else [rows], "gaps": [],
-                "coverage": {}, "scope": {"report": key, "section": section}}
     graph = Graph(key, body)
     if not tail:
         return graph.document("show", [{"snapshot": key, "root": body["source"]["root"],
@@ -87,6 +78,7 @@ def show(store, args):
         row = next((r for r in body["source"]["files"] if r["path"] == target), None)
         if row is None:
             raise ValueError("Source path is not present in this snapshot")
+        require_current(key, row)
         if row["text"] is None:
             return graph.document("show", [{k: v for k, v in row.items() if k != "text"}])
         lines = row["text"].splitlines()
@@ -99,7 +91,7 @@ def show(store, args):
         raise ValueError("Unknown reference section")
     item = next((r for r in body[section] if r["id"] == target), None)
     if item is None:
-        raise ValueError("Reference not present in retained snapshot")
+        raise ValueError("Reference not present in this snapshot")
     return graph.document("show", [evidence(graph, item)])
 
 

@@ -2,6 +2,7 @@
 from .budget import check
 import ast
 import collections
+import gc
 import re
 from pathlib import PurePosixPath
 
@@ -77,6 +78,7 @@ class Builder:
         self.symbols = collections.defaultdict(list)
         self.unparsed = collections.Counter()  # non-code or unsupported languages: coverage, not gaps
         self.inline = {}  # path -> [(line, end_line)] of inline Rust test items
+        self.trees = {}  # path -> Python ast parsed once for symbols, reused for calls
 
     def node(self, kind, key, **fields):
         ident = "node:" + digest([kind, key])[:24]
@@ -124,7 +126,8 @@ class Builder:
             data = row["text"].encode()
             language, ext = repo_files.language_of(path, data)
             self.nodes[node]["language"] = language
-            rows, state, error = repo_files.parse_symbols(data, row["text"], self.source["root"], path, language, ext)
+            rows, state, error = repo_files.parse_symbols(data, row["text"], self.source["root"], path, language, ext,
+                                                          keep=lambda tree, path=path: self.trees.__setitem__(path, tree))
             self.nodes[node]["parse_state"] = state
             if state == "unsupported":
                 self.unparsed[language or "unknown"] += 1
@@ -211,19 +214,24 @@ class Builder:
         return dict(counts)
 
     def calls(self):
+        # Built once: per-file construction made call extraction quadratic in repository size.
+        resolver = import_targets.Resolver(self.files, lambda p: self.files.get(p, {}).get("text"))
+        imports = collections.defaultdict(list)
+        for row in self.items:
+            if row["kind"] == "import":
+                imports[row["path"]].append(row)
         for path, row in self.files.items():
             check()
             if row["state"] != "read" or self.nodes[self.file_id(path)].get("language") != "python":
                 continue
+            tree = self.trees.pop(path, None)
+            if tree is None:
+                continue  # Symbol extraction already recorded the syntax or parse failure.
             try:
-                tree = ast.parse(row["text"], filename=path)
-            except (SyntaxError, ValueError, RecursionError):
-                continue
-            try:
-                PythonCalls(self, path, tree).run()
+                PythonCalls(self, path, tree, resolver, imports[path]).run()
             except RecursionError:
                 self.gap("calls", "ast_recursion_limit", path)
-        syntax_calls.produce(self, import_targets.Resolver(self.files, lambda p: self.files.get(p, {}).get("text")))
+        syntax_calls.produce(self, resolver)
 
 
 class Scope:
@@ -243,13 +251,11 @@ class Scope:
 
 class PythonCalls:
     """No receiver inference, re-export guessing, alias propagation or runtime execution."""
-    def __init__(self, builder, path, tree):
+    def __init__(self, builder, path, tree, resolver, imports):
         self.b, self.path, self.tree = builder, path, tree
         self.scopes = {}
         self.lines = builder.files[path]["text"].splitlines()
-        self.imports = [r for r in builder.items if r["path"] == path and r["kind"] == "import"]
-        self.resolver = import_targets.Resolver(builder.files,
-                                                lambda p: builder.files.get(p, {}).get("text"))
+        self.imports, self.resolver = imports, resolver
 
     def symbol(self, qualname, line):
         return next((sid for sid in self.b.symbols.get((self.path, qualname), [])
@@ -377,6 +383,18 @@ class PythonCalls:
 
 
 def build(source):
+    # Builds allocate millions of short-lived ast/dict objects; cyclic GC passes over them
+    # cost ~30% of build time on large Python repos. Refcounting still frees them.
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        return _build(source)
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def _build(source):
     builder = Builder(source)
     dirs = builder.structures()
     counts = builder.imports(dirs)

@@ -75,7 +75,7 @@ class PrimerTests(unittest.TestCase):
 
     def env(self, **extra):
         env = {key: value for key, value in os.environ.items()
-               if key not in ("PI_SESSION_FILE", "PI_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID")}
+               if key not in ("PI_SESSION_FILE", "PI_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID")}
         env["TRACE_SESSIONS_SETTINGS"] = str(self.settings)
         env.update(extra)
         return env
@@ -129,9 +129,8 @@ class PrimerTests(unittest.TestCase):
         full = self.json_map("--primer")
         self.assertEqual(len(full["primer"]["sessions"]), 1)
         self.assertEqual(full["primer"]["sessions"][0]["goal"], "UNIQUE_PRIVATE_REQUEST text")
-        report = self.cli("show", full["report"])
-        self.assertNotIn("primer", json.loads(report))
-        self.assertNotIn("UNIQUE_PRIVATE_REQUEST", report)
+        for entry in self.cache.rglob("*.json"):
+            self.assertNotIn("UNIQUE_PRIVATE_REQUEST", entry.read_text())
 
     def test_text_map_never_saves_a_report(self):
         self.init()

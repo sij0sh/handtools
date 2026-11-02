@@ -51,6 +51,9 @@ def render_table(output, fields=None):
     present = list(dict.fromkeys(k for row in rows for k in row))
     if output.get('operation') == 'query':
         columns = fields or present
+    elif output.get('operation') == 'investigate':
+        wanted = ('section', 'categories', 'excerpt', 'subject', 'paths', 'relevance', 'ref')
+        columns = fields or [k for k in wanted if k in present]
     else:
         columns = fields or [k for k in COLUMNS if k in present] or present
     def cell(value):
@@ -66,6 +69,10 @@ def render_table(output, fields=None):
     for key in ('path_result', 'assessment', 'unresolved_mentions'):
         if key in scope:
             lines.append(f'{key}: {json.dumps(scope[key], ensure_ascii=True)}')
+    if output.get('views'):
+        # Category states survive every page and projection.
+        lines.append('views: ' + ' '.join(
+            f"{k}={v.get('state')}({v.get('delivered', 0)}/{v.get('eligible', 0)})" for k, v in output['views'].items()))
     primer = output.get('primer')
     if isinstance(primer, str):
         lines.append('primer: ' + primer)

@@ -27,29 +27,30 @@ class Operation:
     family: str          # graph | runtime
     help: str
     route: str           # runtime | graph | describe
-    delivery: str        # common | retained
     tier: str = "advanced"
     summary: str = ""    # common-interface description, when it differs from help
 
 
 OPERATIONS = {op.name: op for op in (
     Operation("map", "graph", "List source files, directories or symbols and graph coverage (default).",
-              "graph", "retained", "common", "Orient in current source."),
+              "graph", "common", "Orient in current source."),
     Operation("find", "graph", "Locate names, paths and literal source occurrences; matches are candidates.",
-              "graph", "retained", "common", "Locate a concrete anchor."),
-    Operation("show", "graph", "Expand retained source, nodes, edges or report pages without refreshing them.",
-              "runtime", "common", "common", "Expand evidence or execute a returned continuation."),
+              "graph", "common", "Locate a concrete anchor."),
+    Operation("show", "graph", "Expand source, nodes, edges, session or commit evidence; run a continuation.",
+              "runtime", "common", "Expand evidence or execute a returned continuation."),
     Operation("query", "graph", "Run one read-only SQLite SELECT/CTE over nodes, edges, files and gaps.",
-              "runtime", "common", "common", "Query built-in and custom tables; dependencies load automatically."),
-    Operation("describe", "graph", "Describe commands, predicates and SQL tables without scanning source.", "describe", "common"),
+              "runtime", "common", "Query built-in and custom tables; dependencies load automatically."),
+    Operation("describe", "graph", "Describe commands, predicates and SQL tables without scanning source.", "describe"),
     Operation("activity", "runtime", "Chronological recorded operations for one file or symbol target, with outcomes and witnesses.",
-              "runtime", "common", "common", "See what was read, written, run and committed for a target."),
+              "runtime", "common", "See what was read, written, run and committed for a target."),
     Operation("trace", "runtime", "Reconstruct the branch-aware episode around a request, failure, checkpoint or commit.",
-              "runtime", "common", "common", "Reconstruct an episode: chronology, coverage gaps, task observations."),
+              "runtime", "common", "Reconstruct an episode: chronology, coverage gaps, task observations."),
     Operation("recall", "runtime", "Rank past commits like a planned feature, with linked requests and current path state.",
-              "runtime", "common", "common", "Before building: find prior similar work to extend."),
+              "runtime", "common", "Before building: find prior similar work to extend."),
+    Operation("investigate", "runtime", "Four evidence views for a goal: pitfalls, invariants, task state, decisions.",
+              "runtime", "common", "Before building or resuming: pitfalls, invariants, task state, decisions."),
     Operation("inspect", "runtime", "Collect source, consumers, dependencies and relevant history.",
-              "runtime", "common", "common", "Collect source, consumers, dependencies and relevant history."),
+              "runtime", "common", "Collect source, consumers, dependencies and relevant history."),
 )}
 
 
@@ -101,7 +102,7 @@ def every(*excluded, family=GRAPH + ("inspect", "recall")):
 GRAPH_SHARED = (
     arg("--repo", help="Source root, including an ordinary directory; default current directory"),
     arg("--cache", help="Cache parent outside source tree; default $XDG_CACHE_HOME/remember"),
-    arg("--snapshot", help="Use a retained snapshot instead of capturing current source"),
+    arg("--snapshot", help="Use the current cached snapshot ID instead of capturing source; superseded IDs fail"),
     arg("--exclude", action="append", help="Exclude relative-path/component glob; repeatable"),
     arg("--max-files", type=positive, help="Capture file count limit (20000)"),
     arg("--max-file-bytes", type=positive, help="Per-file read limit (1 MiB)"),
@@ -110,7 +111,7 @@ GRAPH_SHARED = (
     arg("--offset", type=nonnegative, help="Delivered row offset (0)"),
     arg("--max-bytes", type=positive, help="JSON response budget, at least 2048 (12000)"),
     arg("--format", choices=("json", "table"), help="Result format; bare map defaults to text"),
-    arg("--fields", help="Comma-separated result columns; full reports remain retained"),
+    arg("--fields", help="Comma-separated result columns"),
     arg("--verbose", action="store_true",
         help="Full rows: ids, keys, digests, witness endpoints"),
 )
@@ -119,6 +120,7 @@ TARGET_HISTORY = ("inspect",)
 ACTIVITY = ("activity",)
 TRACE = ("trace",)
 RECALL = ("recall",)
+INVESTIGATE = ("investigate",)
 GRAPH_ARGS = (
     arg("--kind", ops=("map", "find"), action="append", choices=("file", "directory", "symbol", "external", "occurrence")),
     # The primer belongs to map; elsewhere these flags are accepted and ignored.
@@ -185,7 +187,18 @@ GRAPH_ARGS = (
     *(arg("--" + name, ops=RECALL, type=positive)
       for name in ("max-recordings", "max-candidates", "max-scan-bytes", "max-events", "max-commits")),
     arg("--no-sessions", ops=RECALL, action="store_true", help="Git only; skip recordings"),
-    arg("--budget", ops=("query", "inspect", "show", "recall", "activity", "trace"), choices="POLICIES", default="standard"),
+    arg("goal", ops=INVESTIGATE, nargs="*", help="Goal words; omit for repository orientation"),
+    arg("--path", ops=INVESTIGATE, action="append", default=[], help="Exact repository-relative path (may be historical); repeatable"),
+    arg("--error", ops=INVESTIGATE, action="append", default=[], help="Literal error text; repeatable"),
+    arg("--session", ops=INVESTIGATE, help="Active task anchor: returned event JSON ref or cite token"),
+    arg("--frontier", ops=INVESTIGATE + TARGET_HISTORY, help=argparse.SUPPRESS),
+    arg("--plan", ops=INVESTIGATE, action="store_true", help="Describe retrieval steps without loading providers"),
+    arg("--no-sessions", ops=INVESTIGATE, action="store_true", help="Git only; views report not_searched"),
+    *(arg("--" + name, ops=INVESTIGATE, action="append", default=[])
+      for name in ("recordings", "project-root", "root-map", "exclude-session")),
+    *(arg("--" + name, ops=INVESTIGATE, type=positive)
+      for name in ("max-recordings", "max-candidates", "max-scan-bytes", "max-events", "max-commits")),
+    arg("--budget", ops=("query", "inspect", "show", "recall", "activity", "trace", "investigate"), choices="POLICIES", default="standard"),
 )
 
 def constants():
@@ -229,11 +242,11 @@ class GraphParser(argparse.ArgumentParser):
 def graph_parser():
     """remember.py: every operation, one parser."""
     shared = add(argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS), GRAPH_SHARED)
-    p = GraphParser(description="Remember: recall, map, find, inspect, trace, activity, show, query.", parents=[shared])
+    p = GraphParser(description="Remember: investigate, recall, map, find, inspect, trace, activity, show, query.", parents=[shared])
     sub = p.add_subparsers(dest="action")
-    for name in GRAPH + ("inspect", "recall", "activity", "trace"):
+    for name in GRAPH + ("investigate", "inspect", "recall", "activity", "trace"):
         op = OPERATIONS[name]
-        text = op.summary if name in ("inspect", "recall", "activity", "trace") else op.help
+        text = op.summary if name in ("investigate", "inspect", "recall", "activity", "trace") else op.help
         q = sub.add_parser(name, help=text, description=text, parents=[shared])
         add(q, GRAPH_ARGS, name)
     sub.choices["query"].description = COMMON["query"] + " SQL dialect: SQLite."

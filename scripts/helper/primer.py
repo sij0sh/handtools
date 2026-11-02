@@ -322,10 +322,8 @@ def _discover(roots, depth, excluded):
 
 def _exclusions(values):
     excluded = {str(value) for value in values or () if value}
-    for name in ("CODEX_THREAD_ID", "PI_SESSION_ID", "CLAUDE_SESSION_ID"):
-        value = os.environ.get(name)
-        if value:
-            excluded.add(value)
+    from .recording_scan import env_sessions
+    excluded.update(env_sessions())
     current = os.environ.get("PI_SESSION_FILE")
     if current:
         excluded.add(str(Path(current).absolute()))

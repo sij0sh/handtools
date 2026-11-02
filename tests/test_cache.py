@@ -26,24 +26,36 @@ class CacheTests(unittest.TestCase):
         return path
 
     def test_idle_entries_expire_and_empty_workspaces_go(self):
-        key = self.store.save("report", {"x": 1})
+        key = self.store.save("snapshot", {"x": 1})
         path = self.age(key, CACHE_TTL_SECONDS + 60)
         self.assertEqual(prune(self.base, now=time.time() + 2 * 86400), 1)
         self.assertFalse(path.exists())
         self.assertFalse(self.store.path.exists())
-        with self.assertRaisesRegex(ValueError, "unavailable"):
+        with self.assertRaisesRegex(ValueError, "superseded"):
             self.store.load(key)
 
     def test_read_refreshes_age(self):
-        key = self.store.save("report", {"x": 2})
+        key = self.store.save("snapshot", {"x": 2})
         path = self.age(key, CACHE_TTL_SECONDS + 60)
-        self.store.load(key)
+        self.store.load_stored(key)
         prune(self.base, now=time.time() + 2 * 86400)
         self.assertTrue(path.exists())
 
+    def test_new_capture_supersedes_older_snapshot(self):
+        repo = Path(self.store.root)
+        (repo / "a.py").write_text("x = 1\n")
+        old, _ = self.store.snapshot()
+        (repo / "a.py").write_text("x = 2\n")
+        new, _ = self.store.snapshot()
+        self.assertNotEqual(old, new)
+        self.assertEqual(len(list(self.store.path.glob("snapshot-*.json"))), 1)
+        with self.assertRaisesRegex(ValueError, "superseded"):
+            self.store.load(old)
+        self.store.load(new)
+
     def test_sweep_runs_at_most_once_per_interval(self):
-        self.store.save("report", {"x": 3})  # first save sweeps and stamps the marker
-        key = self.store.save("report", {"x": 4})
+        self.store.save("snapshot", {"x": 3})  # first save sweeps and stamps the marker
+        key = self.store.save("snapshot", {"x": 4})
         self.age(key, CACHE_TTL_SECONDS + 60)
         self.assertEqual(prune(self.base), 0)
 

@@ -74,6 +74,17 @@ class RecallTests(unittest.TestCase):
         self.assertEqual(top["request"], "Users need to export the table; add a button")
         self.assertIn("@", top["cite"])
 
+    def test_investigate_prior_work_keeps_the_golden_path(self):
+        self.session("Users need to export the table; add a button", self.export, "Add export button to table toolbar")
+        p = subprocess.run([sys.executable, str(ROOT / "scripts/remember.py"), "investigate", "add", "a", "csv",
+                            "download", "button", "to", "the", "table", "--recordings", str(self.archive),
+                            "--repo", str(self.repo), "--cache", str(self.cache)], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        prior = [r for r in json.loads(p.stdout)["results"] if r["section"] == "prior_work"][:3]
+        hit = next(r for r in prior if r["sha"] == self.export)
+        self.assertIn("ui/export-button.tsx", json.dumps(hit))
+        self.assertIn("Users need to export the table", json.dumps(hit))
+
     def test_moved_and_deleted_paths_report_current_state(self):
         (self.repo / "ui/actions").mkdir()
         self.git("mv", "ui/export-button.tsx", "ui/actions/export-button.tsx")

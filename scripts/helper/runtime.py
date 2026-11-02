@@ -11,13 +11,14 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import catalog, continuations, delivery, graph_cli, recall, session_show, target_history, trace
+from . import catalog, continuations, delivery, graph_cli, investigate, recall, session_show, target_history, trace
 from .bindings import parse_params, parse_types, types_for
 from .budget import Deadline, POLICIES
 from .engine import Input, SQLiteQuery, IDENTIFIER, infer_type
 from .envelope import load_rows
+from .graph_output import compact_row
 from .graph_queries import DEPENDENCIES, reference, impact
-from .graph_store import Store, digest
+from .graph_store import Store, digest, require_current
 from .operations import COMMON, GRAPH, OPERATIONS, graph_parser
 from .providers import Providers
 
@@ -55,14 +56,14 @@ def normalize_prefix(argv):
         index += 1
         if '=' not in token and option.nargs != 0:
             index += 1
-    if index and index < len(argv) and argv[index] in {*GRAPH, "inspect", "recall", "activity", "trace"}:
+    if index and index < len(argv) and argv[index] in {*GRAPH, "inspect", "recall", "activity", "trace", "investigate"}:
         return [argv[index], *argv[:index], *argv[index + 1:]]
     return argv
 
 
 def normalize(args, argv):
     args = graph_cli.defaults(args)
-    if args.action in ("query", "inspect", "show", "recall", "activity", "trace"):
+    if args.action in ("query", "inspect", "show", "recall", "activity", "trace", "investigate"):
         policy = POLICIES[args.budget]
         if args.action == "recall":
             # Old work is the point: always read the deep commit/recording window.
@@ -119,10 +120,8 @@ def custom_inputs(args):
     return result
 
 
-# inspect bounds: source preview, history leads, executable candidate choices.
-PREVIEW_LINES, HISTORY_LEADS, CANDIDATE_CHOICES = 80, 8, 5
-# Human-requested session turns with a recorded reply, surfaced ahead of other history leads.
-DECISION_LEADS = 3
+# inspect bounds: source preview, executable candidate choices.
+PREVIEW_LINES, CANDIDATE_CHOICES = 80, 5
 
 
 class Runtime:
@@ -213,7 +212,7 @@ class Runtime:
 
     def inspect(self, deadline):
         args = self.args
-        stages = ['resolve', 'source', 'relationships', 'history', 'expand']
+        stages = ['resolve', 'source', 'packet', 'relationships', 'history', 'expand']
         if args.plan:
             return Result({"operation": "inspect", "results": [{"stage": s} for s in stages],
                            "plan": {"intent": args.intent, "budget": args.budget, "limits": POLICIES[args.budget],
@@ -242,6 +241,7 @@ class Runtime:
         pinned.snapshot, pinned.target = graph.snapshot, node['ref']
         rows, steps, coverage = [], [], {}
         src = next(r for r in graph.body['source']['files'] if r['path'] == node['path'])
+        require_current(graph.snapshot, src)
         text = (src.get('text') or '').splitlines()
         start, end = node.get('line') or 1, node.get('end_line') or len(text)
         source_ref = reference(graph.snapshot, 'source', node['path'])
@@ -266,19 +266,28 @@ class Runtime:
                                      "meaning": "static potential relationships; absence is not proof of safety"}
         steps.append({"stage": "relationships", "state": "bounded" if rel_incomplete else "completed"})
         deadline.check()
-        history = target_history.run(pinned, self.store, lambda store, options, pin=None: graph)
+        # One scheduled scan feeds both the packet and target history.
+        providers = Providers(pinned, self.store, deadline)
+        name = node.get('qualname') or ''
+        packet, active_state = investigate.collect(pinned, providers, deadline, name.replace('.', ' '),
+                                                   [node['path']], [], sessions=not args.no_sessions)
+        scanned = None if args.no_sessions else (providers.recordings, providers.session_coverage())
+        history = target_history.run(pinned, self.store, lambda store, options, pin=None: graph, scanned=scanned)
         compact = target_history.compact(history['results'])
-        decisions = [r for r in compact if r.get("source") == "session" and r.get("decision")
-                     and "delegated_request" not in r.get("signals", [])][:DECISION_LEADS]
-        # Before relationships, which can fill the first delivery page.
+        leads = investigate.order(list(packet.leads.values()), [])
+        views = investigate.views(leads, providers, not args.no_sessions)
+        # Packet before relationships, which can fill the first delivery page.
         after_source = next((i for i, r in enumerate(rows) if r["section"] != "source"), len(rows))
-        rows[after_source:after_source] = [{"section": "decision", **r} for r in decisions]
-        compact = [r for r in compact if not any(r is d for d in decisions)]
-        rows += [{"section": "history", **r} for r in compact[:HISTORY_LEADS]]
+        # Session history carrying a decision leads too: it is the task memory relationships would bury.
+        led = [{"section": "history", **r} for r in compact if r.get('decision')]
+        rows[after_source:after_source] = leads + led
+        rows += [{"section": "history", **r} for r in compact if not r.get('decision')]
+        coverage['selection'] = {"eligible": len(leads), "suppressed": packet.suppressed}
+        steps.append({"stage": "packet", "state": "not_searched" if args.no_sessions else "completed"})
         history_partial = any(c.get('state') in ('partial', 'unavailable') for c in history['coverage'].get('git', []))
         history_partial |= history['coverage'].get('sessions', {}).get('state') in ('partial', 'unavailable')
         coverage['history'] = {"complete": not history_partial, "details": target_history.summary(history['coverage']),
-                               "leads_omitted": max(0, len(compact)-HISTORY_LEADS)}
+                               **({"allocation": providers.allocation} if providers.allocation else {})}
         steps.append({"stage": "history", "state": "bounded" if history_partial else "completed"})
         # Expand one strongest session lead. The selected event remains distinguishable from previews.
         expanded = False
@@ -298,6 +307,9 @@ class Runtime:
                 break
         steps.append({"stage": "expand", "state": "completed" if expanded else "not_available"})
         argv = continuations.replace_option(self.base_argv(), '--snapshot', graph.snapshot)
+        frontier = investigate.frontier_token(active_state, packet.active)
+        if frontier:
+            argv = continuations.replace_option(argv, '--frontier', frontier)
         next_items = []
         if history_partial:
             recover = self.recovery(argv, "Rescan target history with wider recording limits")
@@ -307,10 +319,14 @@ class Runtime:
                 ['show', source_ref, '--start-line', str(start+PREVIEW_LINES), '--lines', str(end-start-PREVIEW_LINES+1),
                  '--repo', self.store.root, '--cache', str(self.store.path.parent)], None,
                 "Read the rest of the target source", "expansion"))
-        document = {"operation": "inspect", "target": node, "results": rows, "steps": steps, "coverage": coverage,
-                    "scope": {"intent": args.intent, "snapshot": graph.snapshot, "retention": "transient"},
+        document = {"operation": "inspect", "target": node, "views": views, "results": rows, "steps": steps,
+                    "coverage": coverage,
+                    "scope": {"intent": args.intent, "snapshot": graph.snapshot, "retention": "transient",
+                              "active": {k: v for k, v in active_state.items() if k != "sha256"}},
                     "status": "partial" if any(c.get('complete') is False for c in coverage.values()) else "ok", "next": next_items}
-        return Result(document, digest([graph.snapshot, history['results'], history['coverage']]), argv)
+        return Result(document, digest([graph.snapshot, history['results'], history['coverage'], leads,
+                                        providers.coverage.get('recordings', {}).get('signature'),
+                                        active_state.get('end'), active_state.get('sha256')]), argv)
 
     def activity(self, deadline):
         args = self.args
@@ -426,6 +442,49 @@ class Runtime:
                        "coverage": coverage, "next": [recover] if recover else []},
                       digest([rows, window]), argv)
 
+    def investigate(self, deadline):
+        args = self.args
+        goal = ' '.join(args.goal)
+        paths = investigate.validate_paths(args.path)
+        if args.plan:
+            return Result({"operation": "investigate", "results": investigate.plan(),
+                           "plan": {"budget": args.budget, "sessions": not args.no_sessions,
+                                    "limits": {k: getattr(args, k) for k in POLICIES[args.budget]},
+                                    "graph": "not used"}})
+        providers = Providers(args, self.store, deadline)
+        providers.load({"commits", "changes"})
+        packet, active_state = investigate.collect(args, providers, deadline, goal, paths, args.error,
+                                                   sessions=not args.no_sessions)
+        active = packet.active
+        deadline.check()
+        leads = list(packet.leads.values())
+        prior = investigate.prior_work(goal, providers) if goal else []
+        rows = investigate.order(leads, prior)
+        views = investigate.views(leads, providers, not args.no_sessions)
+        recordings = providers.coverage.get("recordings", {})
+        coverage = {name: {k: v for k, v in item.items() if k not in ("gaps", "signature")}
+                    for name, item in providers.coverage.items()}
+        coverage["selection"] = {"eligible": len(leads), "prior_work": len(prior), "suppressed": packet.suppressed,
+                                 "meaning": "suppression is selection policy, not a scan gap"}
+        active_scope = {k: v for k, v in active_state.items() if k not in ("sha256",)}
+        scope = {"repo": self.store.root, "git": investigate.git_scope(providers), "paths": paths,
+                 "goal_terms": packet.words, "errors": args.error, "active": active_scope,
+                 "archive_horizon": recall.horizon(providers.tables.get("commits", []), providers.tables.get("sessions", [])),
+                 "retention": "transient",
+                 "meaning": "leads with evidence refs, not accepted rules or task verdicts; read source before acting"}
+        partial = any(c.get("complete") is False for c in providers.coverage.values())
+        argv = self.base_argv()
+        pinned = investigate.frontier_token(active_state, active)
+        if pinned:
+            argv = continuations.replace_option(argv, '--frontier', pinned)
+            argv = continuations.replace_option(argv, '--session', None)
+        recover = self.recovery(argv, "Rescan with the deep recording and commit allowance") if partial else None
+        document = {"operation": "investigate", "status": "partial" if partial else "ok", "views": views,
+                    "results": rows, "coverage": coverage, "scope": scope, "next": [recover] if recover else []}
+        signature = digest([goal, paths, args.error, rows, views, recordings.get("signature"),
+                            active_state.get("end"), active_state.get("sha256"), scope["git"]])
+        return Result(document, signature, argv)
+
     def show(self, deadline):
         ref = self.args.ref
         if isinstance(ref, str) and (ref.startswith('{') or ('@' in ref and '#' in ref)):
@@ -471,22 +530,24 @@ def run_describe(args, argv, expected):
     rows = catalog.describe(args.table)
     scope = {"common_commands": COMMON, "dialect": "sqlite"}
     if args.table is None:
-        # The overview keeps its retained v1 report; schema rows hold no recorded data.
         rows = [{"kind": "command", "name": name, "description": description}
                 for name, description in COMMON.items()] + [{"kind": "table", **r} for r in rows]
-        doc = {"operation": "describe", "results": rows, "snapshots": [], "scope": scope, "gaps": [], "coverage": {}}
-        delivery.deliver("retained", doc, args, Store(args.repo, args.cache))
-    else:
-        doc = {"operation": "describe", "results": rows, "snapshots": [], "scope": {**scope, "retention": "transient"}}
-        delivery.deliver("common", doc, args)
+    doc = {"operation": "describe", "results": rows, "snapshots": [], "scope": {**scope, "retention": "transient"}}
+    signature = digest(rows)
+    if expected and signature != expected:
+        raise ValueError("Continuation source changed; rerun the original request. Paging was not silently recomputed.")
+    base = list(argv) if argv and argv[0] == "describe" else ["describe", *argv]
+
+    def next_page(offset, empty, need=None):
+        following = continuations.replace_option(base, '--offset', offset)
+        if empty:
+            following = continuations.replace_option(following, '--max-bytes', max(args.max_bytes * 2, need or 0))
+        return continuations.encode(following, signature, 'Read the next page')
+    delivery.deliver(doc, args, continuation=next_page)
     return 0
 
 
 def run_runtime(args, argv, expected):
-    if args.action == 'show' and args.ref.startswith(('snapshot:', 'report:')) and expected is None:
-        store = Store(args.repo, args.cache)
-        delivery.deliver("retained", graph_cli.show(store, args), args, store)
-        return 0
     result = Runtime(Request(args, tuple(argv), expected)).execute()
 
     def next_page(offset, empty, need=None):
@@ -501,7 +562,7 @@ def run_runtime(args, argv, expected):
             'Increase output budget to read the next row' if empty else 'Read the next page', effect))
     for item in result.document.get('next') or []:
         continuations.mark_stdin(item)
-    delivery.deliver("common", result.document, args, continuation=next_page if result.argv else None)
+    delivery.deliver(result.document, args, continuation=next_page if result.argv else None)
     return 0
 
 
@@ -510,8 +571,42 @@ def run_graph(args, argv, expected):
     doc = graph_cli.run(args, store)
     if 'text' in doc:
         sys.stdout.write(doc['text'])
-    else:
-        delivery.deliver(OPERATIONS[args.action].delivery, doc, args, store)
+        return 0
+    limited = doc.pop('incomplete')
+    # Presentation (--fields, --verbose) may change on replay; the evidence rows may not.
+    signature = digest(doc['results'])
+    rows = doc['results']
+    if not args.verbose and not args.fields:
+        rows = [compact_row(r) for r in rows]
+    if expected and signature != expected:
+        raise ValueError("Continuation source changed; rerun the original request. Paging was not silently recomputed.")
+    status = ('unknown' if doc['scope'].get('assessment') == 'unknown' else 'partial' if limited else 'ok')
+    out = {"operation": doc['operation'], "status": status, "snapshots": doc['snapshots'],
+           "scope": {**doc['scope'], "retention": "transient"}, "coverage": doc['coverage'], "results": rows,
+           "gaps": {"count": len(doc['gaps']), "incomplete": len(limited), "query": "SELECT * FROM gaps"}}
+    if 'primer' in doc:
+        primer = doc['primer']
+        if args.format == 'table' and isinstance(primer, dict):
+            from .primer import render as render_primer
+            primer = render_primer(primer, args.primer_bytes)
+        out['primer'] = primer
+        # A requested primer that would crowd out every row says so instead of vanishing.
+        if (isinstance(primer, (dict, list))
+                and len(delivery.render({**out, "results": rows[:1]}, args, args.fields)) + delivery.NEXT_MARGIN > args.max_bytes):
+            out['primer'] = f"omitted: byte cap; raise --max-bytes above {args.max_bytes}"
+    # Later pages pin this capture; a newer capture supersedes it and the replay fails explicitly.
+    base = list(argv) if argv and argv[0] == args.action else [args.action, *argv]
+    base = continuations.replace_option(base, '--repo', store.root)
+    base = continuations.replace_option(base, '--cache', str(store.path.parent))
+    base = continuations.replace_option(base, '--snapshot', doc['snapshots'][0])
+
+    def next_page(offset, empty, need=None):
+        following = continuations.replace_option(base, '--offset', offset)
+        if empty:
+            following = continuations.replace_option(following, '--max-bytes', max(args.max_bytes * 2, need or 0))
+        return continuations.encode(following, signature,
+                                    'Increase output budget to read the next row' if empty else 'Read the next page')
+    delivery.deliver(out, args, continuation=next_page)
     return 0
 
 

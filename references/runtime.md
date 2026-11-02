@@ -2,8 +2,13 @@
 
 ## Operations
 
-`remember.py` is the common entrypoint. `recall`, `map`, `find`, `inspect`,
-`activity`, `trace`, `show`, and `query` cover ordinary work.
+`remember.py` is the common entrypoint. `investigate`, `recall`, `map`, `find`,
+`inspect`, `activity`, `trace`, `show`, and `query` cover ordinary work.
+
+`investigate` returns the four-view evidence packet (pitfall, invariant, task,
+decision) plus prior-work commits; see [history](history.md#investigate).
+`--plan` describes it without reading. `--no-sessions` marks every view
+`not_searched`.
 
 `recall WORDS` ranks non-merge commits against feature words: each term weighs
 log(1 + commits / commits containing it); subject x3, body x1, best path x2,
@@ -16,8 +21,8 @@ recorded the commit. Uses deep budgets (2000 commits, 100 recordings);
 capturing source. Leading shared options work before the verb.
 
 `inspect TARGET` performs a bounded recipe: resolve one target, read its source,
-collect relationships, retrieve target history, list up to 3 `decision` rows
-(past request + final reply, with cite) before relationships, expand one session lead. It
+select packet leads (shared with `investigate`), collect relationships, retrieve
+target history (rows with a `decision` lead before relationships), expand one session lead. It
 never edits project code. The default `change` intent uses the existing impact
 algorithm, including separately labeled direct/file-only/indirect consumers.
 `bug` and `review` trace both directions at the resolved target's grain. They
@@ -40,7 +45,7 @@ exact event ref reads only its recording; a commit anchor uses the bounded
 recording archive, with a targeted SHA/subject rescan when the archive horizon
 omits the witness. Results are transient.
 
-`show` accepts retained source/node/edge/report refs, session citation tokens or
+`show` accepts snapshot source/node/edge refs, session citation tokens or
 JSON refs, full commit SHAs (`git:SHA` also works), and `continue:...` tokens.
 For recordings outside configured directories, use their JSON refs. A selected
 session event is marked `selected: true`; surrounding rows are previews.
@@ -122,7 +127,9 @@ Common results use schema version 2:
   or scan boundary; `expansion` reads more evidence. Inspect expansions: rest of source past the
   80-line preview, one `inspect` per ambiguous candidate (max 5); all pinned to
   the inspected snapshot. Order: coverage, delivery, expansion. A row larger
-  than `--max-bytes` gets one delivery continuation sized to fit it.
+  than `--max-bytes` gets one delivery continuation sized to fit it. If
+  metadata alone still overflows, only `views`, status and that delivery ref
+  survive; `next_omitted` names what was dropped. `views` counts are per page.
 
 SQL sees full bounded provider inputs before display projection or paging.
 `--limit` controls delivered rows, not aggregate input. Use SQL LIMIT/OFFSET
@@ -137,15 +144,13 @@ saved: a continuation over `--input NAME=-` carries `stdin.tables` and needs the
 same rows piped to `show` again; different rows fail as a source change, a
 terminal stdin fails instead of blocking.
 
-query/inspect/recall/activity/trace/session-show results are transient. `map`/`find` retain
-source-only snapshots/reports. Transcript text
-never goes through the graph report store. Selected event text may require a
+All results are transient. The only cache entry is one source-only snapshot per
+workspace; a newer capture supersedes it. Transcript text never enters it. Selected event text may require a
 larger `--max-bytes`; an executable delivery continuation increases that cap
 without changing evidence scope.
 
-One delivery component (`helper/delivery.py`) pages and byte-fits every result
-through an explicit adapter: `retained` (graph reports, source-only, saved) or
-`common` (transient). `retained` refuses inspect or `retention: transient` documents.
+One delivery component (`helper/delivery.py`) pages and byte-fits every result;
+later pages recompute through continuations. `report:` refs are retired.
 
 ## Compatibility
 

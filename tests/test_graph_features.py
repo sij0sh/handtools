@@ -50,15 +50,16 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(result['results'][0], {'x': 1101})
         self.assertEqual(len(result['results']), 100)
 
-    def test_projection_preserves_retained_report(self):
+    def test_projection_selects_columns_and_pages(self):
         self.fixture()
         out = self.cli('map', '--kind', 'file', '--fields', 'path,kind', '--limit', '1')
         self.assertEqual(set(out['results'][0]), {'path', 'kind'})
-        self.assertIn('digest', self.store.load(out['report'])['results'][0])
         self.assertIn('results_truncated', out)
+        following = self.cli('show', out['next'][0]['ref'], '--fields', 'path,kind,digest')
+        self.assertIn('digest', following['results'][0])
         table = self.raw('map', '--kind', 'file', '--fields', 'path,kind', '--format', 'table')
         self.assertIn('core.py', table)
-        self.assertIn(out['report'].split(':')[0], table)
+        self.assertIn('transient', table)
         self.cli('map', '--fields', ',', success=False)
 
     def test_large_map_summary_and_explicit_formats(self):

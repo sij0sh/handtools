@@ -9,7 +9,7 @@ from .git_resolve import GitResolver
 from .graph_store import digest
 from .options import DiscoveryOptions, ScanOptions, TEXT_BYTES_DEFAULT
 from .projection import clean, human
-from .recording_scan import DiscoveryUnavailable, lineages, scan_group, scan_project, text_budget
+from .recording_scan import DiscoveryUnavailable, lineages, scan_group, scan_project, scan_scheduled, text_budget
 from .discovery import candidate_files
 from .records import RecordCache
 
@@ -48,6 +48,8 @@ class Providers:
         self.mapped_events = set()
         # Focused scans read one referenced recording first instead of the bounded archive.
         self.recording_files = None
+        # Scheduled scans (investigate, inspect): invocation-wide totals, active file excluded.
+        self.scheduled, self.exclude_files, self.allocation = False, (), None
 
     def load(self, names):
         for provider in catalog.providers_for(names):
@@ -151,6 +153,9 @@ class Providers:
                 for recording in self.recordings:
                     for event in recording["events"]:
                         event["independent_session"] = keys[recording["file"]]
+            elif self.scheduled:
+                self.recordings, groups, _, excluded, _, self.allocation = scan_scheduled(
+                    self.args, self.store.root, scope, self.exclude_files)
             else:
                 self.recordings, groups, _, excluded, _ = scan_project(self.args, self.store.root, scope)
         except DiscoveryUnavailable as error:
@@ -160,6 +165,7 @@ class Providers:
             self.coverage["recordings"] = {"complete": False, "state": "unavailable", "error": str(error)}
             return
         self.roots = {r["file"]: r.get("root") for r in self.recordings}
+        self.scan_groups, self.scan_scope, self.scan_excluded = groups, scope, excluded
         rows, sessions = [], []
         for recording in self.recordings:
             first = len(rows)
@@ -193,7 +199,23 @@ class Providers:
                                        "current_session_exclusion": ("not_applied_focused" if focused else
                                                                      "configured" if excluded else "unknown"),
                                        "interpretation": interpretation,
+                                       **({"allocation": self.allocation} if self.allocation else {}),
                                        "signature": digest([g.get("snapshot", []) for g in groups])}
+
+    def session_coverage(self):
+        """Loaded recordings' coverage in target-history form, so inspect reuses this scan."""
+        state = self.coverage.get("recordings", {})
+        if state.get("state") == "unavailable":
+            return {"state": "unavailable", "reason": state.get("error")}
+        groups, scope = self.scan_groups, self.scan_scope
+        partial = not scope.get("discovery_complete", True) or any(
+            not g.get("scan_complete", True) or not g.get("text_complete", True) for g in groups)
+        return {**{k: v for k, v in scope.items() if k != "snapshot"}, "groups": groups,
+                "state": "partial" if partial else "searched", "excluded_sessions": sorted(self.scan_excluded),
+                "current_session_exclusion": "configured" if self.scan_excluded else "unknown; pass --exclude-session",
+                "independent_sessions": len({e.get("independent_session") for r in self.recordings
+                                             for e in r["events"][:1]}),
+                **({"allocation": self.allocation} if self.allocation else {})}
 
     def load_git(self):
         root = self.resolver.repo(self.store.root)

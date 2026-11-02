@@ -73,9 +73,9 @@ def _shebang(data):
     return next((SHEBANGS[token] for token in re.split(r"[^A-Za-z0-9]+", line[2:]) if token in SHEBANGS), None)
 
 
-def _symbols(text, repo_id, path):
+def _symbols(text, repo_id, path, tree=None):
     """Definitions and imports from Python's ast; nested names are dotted qualnames."""
-    tree = ast.parse(text, filename=path)
+    tree = tree or ast.parse(text, filename=path)
     rows = []
 
     def visit(node, parents):
@@ -111,8 +111,9 @@ def _symbols(text, repo_id, path):
     return rows
 
 
-def parse_symbols(data, text, repo_id, path, language, parse_ext):
-    """(rows, parse_state, error) for one file's content; never raises for bad source."""
+def parse_symbols(data, text, repo_id, path, language, parse_ext, keep=None):
+    """(rows, parse_state, error) for one file's content; never raises for bad source.
+    `keep(tree)` receives a successfully parsed Python ast so callers need not parse again."""
     if code_symbols.supported(parse_ext):
         try:
             found, error = code_symbols.symbols(data, repo_id, path, parse_ext)
@@ -122,7 +123,11 @@ def parse_symbols(data, text, repo_id, path, language, parse_ext):
     if language != "python":
         return [], "unsupported", None
     try:
-        return _symbols(text, repo_id, path), "parsed", None
+        tree = ast.parse(text, filename=path)
+        rows = _symbols(text, repo_id, path, tree)
+        if keep:
+            keep(tree)
+        return rows, "parsed", None
     except (SyntaxError, ValueError, RecursionError) as error:
         return [], "syntax_error", str(error)[:300]
 

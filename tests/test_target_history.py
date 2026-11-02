@@ -142,11 +142,13 @@ class TargetHistoryTests(unittest.TestCase):
         with patch("helper.target_history.scan_project", side_effect=AssertionError("scan")):
             self.assertEqual(self.history("target")["status"], "ambiguous")
         ref = self.pinned_ref()
-        self.write("a.py", "def replacement():\n    return 4\n")
         out = self.history(ref)
         self.assertEqual(out["target"]["qualname"], "target")
         self.assertEqual(out["target"]["snapshot"], ref.split("/")[0])
         self.assertEqual(out["coverage"]["mapping"]["source_basis"], "pinned_source")
+        self.write("a.py", "def replacement():\n    return 4\n")
+        with self.assertRaisesRegex(ValueError, "changed since snapshot"):
+            self.history(ref)
 
     def test_project_roots_and_path_relocation_are_separate(self):
         old = self.home / "old"
@@ -241,7 +243,7 @@ class TargetHistoryTests(unittest.TestCase):
         self.assertFalse(witnesses[0]["evidence"]["failed"])
         self.assertTrue(witnesses[0]["next"])
 
-    def test_hunk_matches_pinned_text_not_changed_live_lines(self):
+    def test_pinned_ref_fails_after_change_and_live_lines_do_not_match(self):
         ref = self.pinned_ref()
         self.write("a.py", "def unrelated():\n    return 9\n")
         edit_call = {"type": "message", "id": "a", "message": {"role": "assistant", "content": [
@@ -253,9 +255,9 @@ class TargetHistoryTests(unittest.TestCase):
         path = self.archive / "edit.jsonl"
         path.write_text("".join(json.dumps(r)+"\n" for r in [
             {"type": "session", "id": "past", "cwd": str(self.repo)}, edit_call, edit_result]))
-        pinned = self.history(ref)
-        lead = next(r for r in pinned["results"] if r["basis"] == "recorded_text_matches_target_source")
-        self.assertEqual(lead["hunks"][0]["anchor"], "exact")
+        # A pinned ref never matches against bytes that are no longer on disk.
+        with self.assertRaisesRegex(ValueError, "changed since snapshot"):
+            self.history(ref)
         live = self.history("a.py::unrelated")
         self.assertFalse(any(r["basis"] == "recorded_text_matches_target_source" for r in live["results"]))
         self.assertTrue(any(r["basis"] == "symbol -> file" for r in live["results"]))

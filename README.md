@@ -11,7 +11,7 @@ flowchart LR
   A[Current source] --> D[(SQLite, built per call)]
   B[Git history] --> D
   C[pi / Codex / Claude Code<br/>session recordings] --> D
-  D -->|agent writes SQL<br/>or runs recall / inspect / trace| E[Evidence with refs]
+  D -->|agent writes SQL<br/>or runs investigate / inspect / trace| E[Evidence with refs]
   D -.->|dropped after the call| X[Nothing to maintain]
 ```
 
@@ -29,16 +29,18 @@ flowchart LR
 
 **Agents already write their own scripts.** Capable agents answer code questions by writing ad hoc `grep`, `git log` and Python one-offs. remember gives that habit a better target: one schema joining files, symbols, imports, calls, commits, changes, session events and tool operations. The agent writes the query it needs instead of a human predicting it. `describe TABLE` lists columns; table dependencies load automatically.
 
-**Stateless by design.** Session and history tables are invocation-local SQLite: built from inputs, queried, dropped. No memory store, no indexer, no second system to drift. Transcript text never enters the cache. The only retained data is disposable source-graph snapshots, auto-evicted after 14 idle days and safe to delete.
+**Stateless by design.** Session and history tables are invocation-local SQLite: built from inputs, queried, dropped. No memory store, no indexer, no second system to drift. The one cache is a single source-graph snapshot per repository, checked against the tree on every call and rebuilt when stale; refs to an older capture fail instead of serving old code. Transcript text never enters it.
 
 **Tuned for what search cannot rediscover.** Where `src/auth/` lives is cheap to find again. Why it looks that way, and what broke last time, is not. remember aims at four high-value signals:
 
-| Signal | Where it comes from today |
+| Signal | Where it comes from |
 |---|---|
-| Known pitfalls | Failed commands and edits in `operations`; failed attempts and corrections in `inspect` history; `activity TARGET` |
-| Critical invariants | Human requests kept apart from agent text (`events WHERE role='user'`); prior requests touching a target in `inspect` history |
-| Current task state | `trace REF`: requested, edited, verified, committed, pushed, observed separately; checkpoint claims checked against later events |
-| Architectural decisions | `decision` rows in `inspect`; commit subjects and linked requests via `recall`; `git log -S` for symbols |
+| Known pitfalls | `investigate` `pitfall` view: failed operations, human corrections; `activity TARGET` |
+| Critical invariants | `invariant` view: human "must/never" constraints, found without goal keywords |
+| Current task state | `task` view: unverified requests, checkpoint claims; `trace REF` splits requested, edited, verified, committed, pushed |
+| Architectural decisions | `decision` view: human choices, assistant proposals (attributed, with later rejections); `prior_work` commits via `recall` ranking |
+
+Each view reports `leads_found`, `none_found_in_scanned_scope`, `not_searched` or `unavailable`, so an empty view is never silent. Recordings are scheduled across harnesses and ages: half the budget goes to the newest matches, half to older context.
 
 Results are leads with evidence refs, not conclusions. The agent reads the source before acting on them.
 
@@ -54,24 +56,30 @@ Use `~/.claude/skills/remember` for Claude Code, or your harness's configured sk
 
 ## Quick start
 
-Before building a feature, find earlier work to extend:
+Before building a feature, ask what shaped this area:
 
 ```bash
 cd /path/to/repo
 S="$HOME/.agents/skills/remember/scripts"
-python3 "$S/remember.py" recall cache eviction --format table
+python3 "$S/remember.py" investigate graph cache snapshot --format table --limit 5 --fields section,categories,excerpt
 ```
 
-Real output on this repository (paths and subjects truncated):
+Real output on this repository (excerpts truncated):
 
 ```text
-ok | recall | 2 of 2 rows | transient
-paths                                     sha                                       subject                                          request
-["tests/test_cache.py",".agents/des...  76cd2b79d5f1ce3c9f9d28edff2f54de362f4414  refactor: recall-first memory skill; drop ...   yes
-[".gitattributes",".github/workflo...   c2adceb33177a3aa5f3ca0c1c4d4e1a42662811e  fix: run on Linux, macOS and Windows
+partial | investigate | 5 of 47 rows | transient
+views: pitfall=leads_found(1/19) invariant=leads_found(1/2) task=leads_found(1/5) decision=leads_found(2/12)
+section     categories                excerpt
+lead        ["pitfall"]               git_commit_plan failed: git add -A -- :(literal).agents/design/decisions.md :...
+lead        ["invariant","decision"]  ... with the commit, rather than just the session the commit occured. Also ne...
+lead        ["task"]                  continue through the steps until the original plan is complete. Then read .ag...
+lead        ["decision"]              ... '%retry%'`. - **Evals:** `evals/score.py` now checks report citations dir...
+prior_work
 ```
 
-Rows are past commits ranked by your words, with changed paths, their current state, and whether a recorded session holds the human request behind them. `transient` means nothing was retained.
+Each round takes one lead per view, then one `prior_work` commit (subject, SHA, paths, linked request). `partial` means the scan was bounded; `next` offers a deeper rescan. Add `--path PATH` or `--error TEXT` to anchor on files or a failure. `transient` means nothing was retained.
+
+`recall WORDS` ranks past commits alone, with changed paths and their current state.
 
 ## Use
 
@@ -90,6 +98,7 @@ Tables: `nodes`, `edges`, `files`, `code_items`, `gaps`, `commits`, `changes`, `
 
 | Question | Start with |
 |---|---|
+| What pitfalls, constraints, task state and decisions apply? | `investigate GOAL --path PATH --error TEXT` |
 | Has similar work been done before? | `recall WORDS` |
 | What is in this repository? | `map` |
 | Where does this name appear? | `find TEXT --path GLOB --not-path GLOB` |
@@ -99,7 +108,7 @@ Tables: `nodes`, `edges`, `files`, `code_items`, `gaps`, `commits`, `changes`, `
 | Which build or CI paths are broken? | `map`: `referenced but missing` lists manifest paths absent on disk |
 | What evidence supports this result? | `show REF` |
 
-Abridged `inspect` result: a past decision, a possible consumer and a candidate test.
+Abridged `inspect` result: a lead from past sessions, a possible consumer and a candidate test.
 
 ```json
 {
@@ -107,7 +116,7 @@ Abridged `inspect` result: a past decision, a possible consumer and a candidate 
   "operation": "inspect",
   "results": [
     {"section": "source", "path": "src/store.py", "line": 1, "text": "def save(value): ..."},
-    {"section": "decision", "source": "session", "text": "Keep save synchronous", "ref": "past@812#a1b2c3d4e5f6"},
+    {"section": "lead", "categories": ["decision"], "excerpt": "Keep save synchronous", "ref": "past@812#a1b2c3d4e5f6"},
     {"section": "relationships", "path": "src/api.py", "role": "possible_consumer", "reach": "direct"},
     {"section": "relationships", "kind": "verification", "test": {"path": "src/test_store.py"}, "execution": "not_run"}
   ]
@@ -160,11 +169,11 @@ Use `.venv/bin/python` for commands that need those packages.
 | Setting | Default | Purpose |
 |---|---|---|
 | Recording roots | `settings.json` | Locations of pi, Codex and Claude Code JSONL recordings |
-| Graph cache | `$XDG_CACHE_HOME/remember` or `~/.cache/remember` | Disposable source snapshots; idle entries deleted after 14 days |
+| Graph cache | `$XDG_CACHE_HOME/remember` or `~/.cache/remember` | One source snapshot per repository, replaced when source changes; idle repositories deleted after 14 days |
 | Exclusions | Built-in defaults plus `.rememberignore` | Globs excluded from capture |
 | Capture limits | 20,000 files, 1 MiB per file, 32 MiB total | Bounds for one capture |
 
-Use `--repo DIR` for another repository, `--cache DIR` to relocate the cache, `--snapshot ID` to query a retained capture. `remember.py describe` lists commands and schemas.
+Use `--repo DIR` for another repository, `--cache DIR` to relocate the cache, `--snapshot ID` to reuse the current capture. `remember.py describe` lists commands and schemas.
 
 ## Tests
 

@@ -1,7 +1,7 @@
 """One bounded JSON envelope, coverage summary, and display clipping."""
 import json
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def clip(text, chars=400, needle=None, tail=False, match_at=None):
@@ -29,6 +29,17 @@ def omitted_rows(omissions):
                and k in ("selection", "results_budget", "rows_budget", "links_budget", "upstream_rows"))
 
 
+def undelivered(value):
+    """v2 rows a paged envelope did not deliver: None when unknown (more rows, total unknown)."""
+    delivery = value.get("delivery") if isinstance(value.get("delivery"), dict) else {}
+    if value.get("schema_version") != 2 or delivery.get("complete") is not False:
+        return 0
+    total = delivery.get("total")
+    if not isinstance(total, int):
+        return None
+    return max(0, total - (delivery.get("offset") or 0) - (delivery.get("returned") or 0))
+
+
 def incomplete(value, scope):
     """Reasons an envelope reports it is known to be incomplete; [] means none reported, not complete."""
     reasons = []
@@ -46,7 +57,7 @@ def incomplete(value, scope):
         reasons.append("query_limit")
     if omissions.get("envelope_omitted"):
         reasons.append("output_budget")
-    elif omitted_rows(omissions):
+    elif omitted_rows(omissions) or undelivered(value) != 0:
         # Truncated delivery is harmless to its reader but not to a consumer treating it as the whole set.
         reasons.append("rows_omitted")
     if value.get("status") == "partial":
@@ -64,6 +75,7 @@ def coverage(value):
             if v:
                 omissions[f"{g.get('harness')}.{k}"] = v
     dropped = omitted_rows(value.get("omissions", {})) + sum(omitted_rows(g.get("omissions", {})) for g in groups)
+    dropped += undelivered(value) or 0
     summary = {"scope": {k: scope[k] for k in ("files_scanned", "scan_complete", "discovery_complete",
                                               "project_filter", "harnesses", "text_complete",
                                               "text_truncated_events") if k in scope},

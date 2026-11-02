@@ -114,12 +114,12 @@ class GraphTests(unittest.TestCase):
         calls = [e for e in graph.body["edges"] if e["predicate"] == "CALLS_STATIC"]
         self.assertEqual({(e["evidence"]["path"], e["evidence"]["line"]) for e in calls}, {("app.py", 3), ("direct.py", 2)})
 
-    def test_reports_record_their_query_and_targets(self):
+    def test_results_record_their_query_and_write_no_report(self):
         self.fixture()
         a = self.cli("find", "no-such-text-a")
-        b = self.cli("find", "no-such-text-b")
-        self.assertNotEqual(a["report"], b["report"])
-        self.assertEqual(self.cli("show", a["report"] + "/scope")["results"][0]["text"], "no-such-text-a")
+        self.assertEqual((a["schema_version"], a["scope"]["text"], a["scope"]["retention"]), (2, "no-such-text-a", "transient"))
+        self.assertEqual(list(self.cache.rglob("report-*")), [])
+        self.assertIn("retired", self.cli("show", "report:" + "a"*64, success=False)["error"])
 
     def test_targets_accept_returned_refs_and_path_tails(self):
         self.fixture()
@@ -340,16 +340,20 @@ class GraphTests(unittest.TestCase):
         self.assertEqual({r["path"] for r in rows}, {"b.py", "c.py"})
         self.assertTrue(limits["complete_within_predicates"])
 
-    def test_snapshot_is_repeatable_and_pinned(self):
+    def test_snapshot_is_repeatable_and_superseded(self):
         self.fixture()
         before = self.graph()
         self.assertEqual(before.snapshot, self.graph().snapshot)
         original = (self.repo/"core.py").read_text()
+        shown = self.cli("show", reference(before.snapshot, "source", "core.py"))
+        self.assertEqual("\n".join(r["text"] for r in shown["results"]) + "\n", original)
         self.write("core.py", "# replaced\n")
         after = self.graph()
         self.assertNotEqual(before.snapshot, after.snapshot)
-        shown = self.cli("show", reference(before.snapshot, "source", "core.py"))
-        self.assertEqual("\n".join(r["text"] for r in shown["results"]) + "\n", original)
+        # Only the newest capture is kept; an older ref fails instead of serving old code.
+        self.assertEqual(sorted(p.name.split("-")[0] for p in self.store.path.glob("*.json")), ["snapshot", "source"])
+        error = self.cli("show", reference(before.snapshot, "source", "core.py"), success=False)["error"]
+        self.assertIn("superseded", error)
         status = self.store.freshness(before.body)
         self.assertEqual(status["state"], "changed")
         self.assertIn("core.py", status["changed_paths"])
@@ -435,10 +439,10 @@ class GraphTests(unittest.TestCase):
     def test_last_page_is_complete(self):
         self.fixture()
         first = self.cli("map", "--kind", "file", "--limit", "3")
-        last = self.cli("show", first["report"], "--offset", "3", "--limit", "100")
+        last = self.cli("show", first["next"][0]["ref"], "--limit", "100")
         self.assertFalse(first["delivery"]["complete"])
         self.assertTrue(last["delivery"]["complete"])
-        self.assertEqual((last["status"], last["omissions"]["selection"]), ("ok", 0))
+        self.assertEqual((last["status"], last["delivery"]["offset"]), ("ok", 3))
 
     def test_map_path_limits_rows(self):
         self.fixture()
@@ -477,14 +481,14 @@ class GraphTests(unittest.TestCase):
         listing = self.cli("map", "--whole-repo-lines", "0")
         self.assertIn("core.py", {r["path"] for r in listing["results"]})
 
-    def test_paging_is_pinned_not_recomputed(self):
+    def test_paging_replays_pinned_capture_and_fails_once_superseded(self):
         self.fixture()
         page = self.cli("map", "--whole-repo-lines", "0", "--limit", "1")
-        total = page["delivery"]["total"]
+        following = self.cli("show", page["next"][0]["ref"], "--limit", "100")
+        self.assertEqual(following["delivery"]["total"], page["delivery"]["total"])
         self.write("later.py", "")
-        following = self.cli("show", page["report"], "--offset", "1", "--limit", "100")
-        self.assertEqual(following["delivery"]["total"], total)
-        self.assertNotIn("later.py", {r.get("path") for r in following["results"]})
+        self.cli("map", "--whole-repo-lines", "0", "--limit", "1")
+        self.assertIn("superseded", self.cli("show", page["next"][0]["ref"], success=False)["error"])
 
     def test_invalid_expired_and_corrupt_references(self):
         self.write("a.py", "x=1\n")
