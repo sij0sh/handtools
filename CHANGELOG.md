@@ -160,3 +160,7 @@ First release.
 ## 0.2.7 - 2026-11-02
 
 - Use "SWE" instead of "competent implementers" in the Challenge step.
+
+## 0.2.8 - 2026-11-02
+
+- README: lead with "Unslop your project"; credit Matt Pocock's grilling skill as loop inspiration; drop the sample record block.

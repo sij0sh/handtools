@@ -1,54 +1,29 @@
 # Simple by Design
 
 **A coding-agent skill that gets the big design choices on paper before any
-code gets written, so you can check them first.**
+code gets written, so you can audit and adjust them first.**
 
-## The problem
+## Unslop your project
 
-A coding agent makes a lot of decisions while it works. Who owns this data?
-What shape is it? What happens when a call fails? Which library? Most of these
-choices never get said out loud. You find them later, buried in the diff.
+Intent is the difference between your vision and slop. Your coding harness makes a surprising amount of decisions for you, even when you believe you are diligently steering.
+Who owns this data? What shape is it? What happens when a call fails? Which library? Most of these choices never get said out loud. 
 
-By then they are baked in. Review turns into guessing what the agent meant.
-Changing course gets expensive. And two sessions given the same task can build
-two different things.
+This skill isn't a fix all, but it helps convert material decisions into an easy to scan list.
 
-## The fix
+For vibe coders that keep `accept` on hot key this skill also standardizes coding standards for more consistent up front decisions which it will default to if another pattern isn't found in the project or instructions.
 
-This skill makes the agent write those decisions down first, in a short list
-you can read in a minute. You check the plan, then the code gets written.
+## The loop
 
-Here is what a run produces:
-
-```md
-# Goal
-Ship an inventory UI matching the existing app.
-
-## Constraints
-Preserve existing API and visual language.
-
-## Decisions
-- [x] D1: State authority? Server.
-- [x] D2 (after: D1): Updates? Optimistic with rollback - instant UI; server stays authoritative.
-- [ ] D3 (after: D2): Conflict behavior? Open - goal sets no merge policy.
-```
-
-Each line is one decision. `[x]` means settled, `[ ]` means still open, and
-`(after: D1)` means it depends on an earlier one. Anything not obvious gets a
-short reason. D3 stays open because the goal says nothing about conflicts. The agent flags the gap instead of making
-something up.
-
-How does it know when it's done? It imagines two good developers following the
-list. If they could still build meaningfully different things, a decision is
-missing, so it keeps going. When they couldn't, the list is complete.
+This skill's loop was inspired by Matt Pocock's popular [grilling](https://github.com/mattpocock/skills/tree/main) skill but it looks at the problem from the bottom up instead of top down. 
+It imagines two good developers following the finalized decision list. If they could still build it in a different way, a decision is missing and it will keep going.
 
 ## Why decide first
 
-Fixing a design choice in a plan costs a sentence. Fixing it after it's in the
-code costs a rewrite. Thinking choices through up front pays off in the result:
+At this point writing code is cheap. Design decisions are a bottleneck. Sure your AI will make them for you, but there are many reasons why that will leave you with a solution that isn't quite what you intended. 
+Thinking choices through up front pays off in the result:
 
 - **Fewer surprises.** You see what the agent intends before it builds it.
-- **Better choices.** Each decision gets a moment of thought instead of being
+- **Better AI choices.** Each decision gets a moment of thought instead of being
   made on the fly mid-edit.
 - **Honest gaps.** Unknowns show up as open questions, not hidden guesses.
 - **Easier review.** You read what was intended, then check the code against
