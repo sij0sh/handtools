@@ -178,3 +178,7 @@ First release.
 ## 0.2.10 - 2026-11-03
 
 - Rename `languages/agent-instructions.md` to `languages/skills.md`; skills only. Two structures: Progressive Disclosure and Workflow, chosen by what the agent holds at once. Add `references/workflow.py` template and tests.
+
+## 0.3.0 - 2026-11-03
+
+- README rewritten around intent, the script-driven loop, and honest open questions; trim install, quick start, and file table.
