@@ -103,15 +103,16 @@ left open, and a short handoff. No implementation code.
 | `references/decisions.schema.json` | Shape of `decisions.json` | Script can check the record |
 | `references/defaults.md` | Keep it simple, one owner per thing, local reasoning, clear boundaries | One starting point for every session |
 | `references/contract.md` | Ownership, dependencies, state, resources, failures, tradeoffs | Keeps a growing system easy to follow |
-| `languages/*.md` | Rules for 10 languages plus agent instructions | Consistent choices per language |
+| `references/workflow.py` | Template script for Workflow skills | Starting point for step-by-step skills |
+| `languages/*.md` | Rules for 10 languages plus skills | Consistent choices per language |
 
 The script prints the defaults every run. The agent opens the contract or a
 language file only when a decision needs it.
 
 ### Language profiles
 
-TypeScript, JavaScript, Python, Go, Rust, Java, C#, C, C++, SQL, and agent
-instructions (skills, `AGENTS.md`, `CLAUDE.md`). Each starts with one top rule,
+TypeScript, JavaScript, Python, Go, Rust, Java, C#, C, C++, SQL, and skills
+(Progressive Disclosure vs Workflow structure). Each starts with one top rule,
 then lists structure, preferred patterns, and patterns to avoid. Rules are
 tagged by strength:
 

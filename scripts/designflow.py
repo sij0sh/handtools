@@ -26,7 +26,7 @@ DEFAULTS = SKILL_DIR / 'references' / 'defaults.md'
 CONTRACT = SKILL_DIR / 'references' / 'contract.md'
 SCHEMA = SKILL_DIR / 'references' / 'decisions.schema.json'
 LANGUAGES = SKILL_DIR / 'languages'
-AGENT_INSTRUCTIONS = LANGUAGES / 'agent-instructions.md'
+SKILLS = LANGUAGES / 'skills.md'
 
 ORDER = ['ground', 'branch', 'decide', 'challenge', 'handoff']
 
@@ -54,8 +54,7 @@ PROMPTS = {
         '   - Ownership, contracts, dependencies, boundaries, or failures: {contract}\n'
         '   - Language-specific design, types, errors, or concurrency: '
         '{languages}/<language>.md (available: {language_list})\n'
-        '   - Skills, AGENTS.md, CLAUDE.md, or other agent instructions: '
-        '{agent_instructions}\n'
+        '   - Skill design or structure: {skills}\n'
         '5. The simplest adequate choice.\n'
         'Ask the user when essential intent, permissions, or a consequential '
         'tradeoff stays unanswered by all five.\n'
@@ -85,7 +84,7 @@ DONE_MSG = 'DONE: design record is ready for user review; do not implement witho
 
 def prompt(state):
     phase = state['phase']
-    names = sorted(p.stem for p in LANGUAGES.glob('*.md') if p != AGENT_INSTRUCTIONS)
+    names = sorted(p.stem for p in LANGUAGES.glob('*.md') if p != SKILLS)
     return PROMPTS[phase].format(
         goal=state.get('goal'),
         schema=SCHEMA,
@@ -94,7 +93,7 @@ def prompt(state):
         contract=CONTRACT,
         languages=LANGUAGES,
         language_list=', '.join(names),
-        agent_instructions=AGENT_INSTRUCTIONS,
+        skills=SKILLS,
     )
 
 

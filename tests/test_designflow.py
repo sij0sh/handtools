@@ -130,9 +130,9 @@ class DesignflowTest(unittest.TestCase):
         out = self.advance().stdout
         self.assertIn('PHASE: DECIDE', out)
         self.assertIn(str(SKILL_DIR / 'references' / 'contract.md'), out)
-        self.assertIn(str(SKILL_DIR / 'languages' / 'agent-instructions.md'), out)
+        self.assertIn(str(SKILL_DIR / 'languages' / 'skills.md'), out)
         self.assertIn('python', out)
-        self.assertNotIn('agent-instructions,', out)
+        self.assertNotIn('skills,', out)
 
     def test_challenge_zero_gaps_with_open_rows_fails(self):
         self.to_challenge()
@@ -165,6 +165,43 @@ class DesignflowTest(unittest.TestCase):
         self.assertIn('DONE', result.stdout)
         self.assertFalse(self.state.exists())
         self.assertTrue(self.record.exists())
+
+
+TEMPLATE = SKILL_DIR / 'references' / 'workflow.py'
+
+
+class WorkflowTemplateTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.state = self.root / '.agents' / 'workflow' / 'workflow.json'
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cmd(self, *args):
+        return subprocess.run(
+            [sys.executable, str(TEMPLATE), '--root', str(self.root), *args],
+            capture_output=True, text=True,
+        )
+
+    def test_result_a_runs_z(self):
+        self.assertIn('STEP: X', self.run_cmd('start').stdout)
+        self.assertIn('STEP: Y', self.run_cmd('done').stdout)
+        self.assertEqual(self.run_cmd('done').returncode, 1)
+        self.assertIn('STEP: Z', self.run_cmd('done', '--result', 'A').stdout)
+        self.assertIn('DONE', self.run_cmd('done').stdout)
+        self.assertFalse(self.state.exists())
+
+    def test_other_result_finishes(self):
+        self.run_cmd('start')
+        self.run_cmd('done')
+        self.assertIn('DONE', self.run_cmd('done', '--result', 'B').stdout)
+        self.assertFalse(self.state.exists())
+
+    def test_result_outside_y_fails(self):
+        self.run_cmd('start')
+        self.assertEqual(self.run_cmd('done', '--result', 'A').returncode, 1)
 
 
 if __name__ == '__main__':

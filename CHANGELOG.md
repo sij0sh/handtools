@@ -174,3 +174,7 @@ First release.
 - Handoff deletes `decisions.md` and has the agent rewrite it once from the JSON in ASD-STE100 Simplified Technical English.
 - Add `tests/test_designflow.py` (stdlib unittest).
 - README: Python 3.9+ requirement, script loop section, updated file table.
+
+## 0.2.10 - 2026-11-03
+
+- Rename `languages/agent-instructions.md` to `languages/skills.md`; skills only. Two structures: Progressive Disclosure and Workflow, chosen by what the agent holds at once. Add `references/workflow.py` template and tests.
