@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import catalog, continuations, delivery, commit_rank, graph_cli, investigate, session_show, signals, target_history, trace
+from . import catalog, continuations, delivery, commit_rank, file_observations, graph_cli, investigate, session_show, signals, target_history, trace
 from .bindings import parse_params, parse_types, types_for
 from .budget import Deadline, POLICIES
 from .engine import Input, SQLiteQuery, IDENTIFIER, infer_type
@@ -77,6 +77,13 @@ def normalize(args, argv):
     if args.action == "query" and not args.sql_text:
         raise ValueError("Supply query SQL; describe TABLE lists columns")
     return args
+
+
+def _counts(rows, field):
+    out = {}
+    for row in rows:
+        out[row.get(field)] = out.get(row.get(field), 0) + 1
+    return dict(sorted(out.items(), key=lambda kv: str(kv[0])))
 
 
 def custom_inputs(args):
@@ -407,6 +414,8 @@ class Runtime:
             return early
         path, qualname, snapshot = found["path"], found["qualname"], found["snapshot"]
         providers, selected, symbol_events = found["providers"], found["selected"], found["symbol_events"]
+        providers.load({"file_observations"})
+        observed, changed = file_observations.target_rows(providers, path, selected, qualname)
         coverage = {name: {key: value for key, value in item.items() if key != "gaps"}
                     for name, item in providers.coverage.items()}
         operation_coverage = dict(providers.coverage.get("operations", {}))
@@ -420,6 +429,8 @@ class Runtime:
             "symbol_resolution": ("symbol_event_mapping" if qualname and symbol_events else
                                   "unmapped" if qualname else "path"),
             "symbol_mapped_events": len(symbol_events) if symbol_events is not None else None,
+            "file_observations": len(observed), "changes": len(changed),
+            "by_completeness": _counts(observed, "completeness"), "by_attribution": _counts(changed, "attribution"),
             "scope": "scanned recordings and exact repository paths only; no baseline matching",
         }
         partial = any(item.get("complete") is not True for name, item in coverage.items() if name != "activity")
@@ -427,12 +438,12 @@ class Runtime:
         recover = self.recovery(argv, "Widen recording limits for activity") if partial else None
         document = {"operation": "activity", "status": "partial" if partial else "ok",
                     "target": {"path": path, "qualname": qualname, "snapshot": snapshot},
-                    "results": selected, "coverage": coverage,
+                    "results": selected + observed + changed, "coverage": coverage,
                     "scope": {"repo": self.store.root, "retention": "transient",
                               "ordering": "lane, then recorded physical order",
                               "meaning": "recorded operations; matching a path does not prove a commit contains the edit"},
                     "next": [recover] if recover else []}
-        return Result(document, digest([selected, coverage]), argv)
+        return Result(document, digest([selected, observed, changed, coverage]), argv)
 
     def trace(self, deadline):
         providers = Providers(self.args, self.store, deadline)

@@ -8,6 +8,7 @@ reusable pitfalls; a correction is matched by phrasing only.
 import json
 
 from . import trace
+from .file_observations import read_pairs
 from .investigate import _key, locator, noise
 from .message_segments import prose, visible
 from .profiles import PROFILES
@@ -144,7 +145,11 @@ def checkpoint_gaps(ops, files, checkpoints):
     return rows, unresolved
 
 
-def repeated_reads(ops, files):
+def repeated_reads(ops, files, observations=()):
+    ids = {op.get("operation_id") for op in ops}
+    states = {}
+    for _, later, state in read_pairs([o for o in observations if o["operation_id"] in ids]):
+        states.setdefault(later["recording_id"], []).append(state)
     sessions = {}
     for op in ops:
         if op.get("action") == "file_read":
@@ -158,7 +163,9 @@ def repeated_reads(ops, files):
                          len(reads), {o.get("tool") for o in reads}, _ref(reads[-1].get("call_ref")), files.get(file),
                          reads=len(reads), extra_reads=len(reads) - 1,
                          turns=len({o.get("turn") for o in reads}), first=_ref(reads[0].get("call_ref")),
-                         meaning="file may have changed between reads; not waste"))
+                         unchanged_pairs=states.get(file, []).count("unchanged"),
+                         changed_pairs=states.get(file, []).count("changed"),
+                         meaning="unchanged_pairs: same extent, same content hash; not waste"))
     return rows
 
 
@@ -196,16 +203,16 @@ def views(by_kind, providers, sessions):
 
 def collect(providers, selected):
     """(rows in delivery order, by_kind, selection coverage)."""
-    providers.load({"checkpoints"})
+    providers.load({"checkpoints", "file_observations"})
     files = {r["file"]: r for r in providers.recordings}
     by_ref = {_key(e["ref"]): e for r in providers.recordings for e in r["events"]}
     ops = _unique(sorted(selected, key=lambda r: (r.get("recording_id") or "", r.get("order") or 0)))
     failed, empty_exits = failed_exchanges(ops, files, by_ref)
     gaps, unresolved = checkpoint_gaps(ops, files, providers.tables.get("checkpoints", []))
     by_kind = {"failed_exchange": failed, "correction_candidate": corrections(ops, files, by_ref),
-               "checkpoint_gap": gaps, "repeated_read": repeated_reads(ops, files)}
+               "checkpoint_gap": gaps, "repeated_read": repeated_reads(ops, files, providers.tables.get("file_observations", []))}
     coverage = {"operations": len(ops), "empty_nonzero_exits_skipped": empty_exits,
                 "checkpoints_unresolved": unresolved,
-                "deferred": ["failure_after_fix", "unchanged_content_reread"],
+                "deferred": ["failure_after_fix"],
                 "meaning": "signals are leads with refs; they do not establish waste, cause or fix"}
     return order(by_kind), by_kind, coverage

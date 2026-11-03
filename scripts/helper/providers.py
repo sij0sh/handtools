@@ -1,7 +1,7 @@
 """Invocation-local provider registry; shared source, Git and recording datasets."""
 import os
 from types import SimpleNamespace
-from . import (catalog, cite, commit_links, edit_hunks, episode_links, message_segments, git_file_history, graph_cli, graph_queries,
+from . import (catalog, cite, commit_links, edit_hunks, episode_links, file_observations, message_segments, git_file_history, graph_cli, graph_queries,
                 operation_facts, repo_files)
 from .engine import Input
 from .root_map import parse_root_map, remap
@@ -128,11 +128,11 @@ class Providers:
         """Replace recording-derived tables with a targeted scan, keeping Git facts loaded."""
         self.recording_files = list(files)
         self.recordings = []
-        keep = {"recordings", "operations", "checkpoints", "links", "episodes", "segments"}
+        keep = {"recordings", "operations", "checkpoints", "links", "episodes", "segments", "observations"}
         self.loaded = [name for name in self.loaded if name not in keep]
         self.episodes = None
         for key in ("events", "rows", "sessions", "operations", "checkpoints", "commit_links", "episodes",
-                    "episode_links", "message_segments"):
+                    "episode_links", "message_segments", "file_observations", "change_observations"):
             self.tables.pop(key, None)
         self.load({"recordings", "operations", "checkpoints", "commit_links"})
 
@@ -260,6 +260,13 @@ class Providers:
             self.recordings, self.tables.get("operations", []), self.tables.get("commit_links", []), self.store.root)
         self.tables["episodes"], self.tables["episode_links"] = rows, links
         self.coverage["episodes"] = coverage
+
+    def load_observations(self):
+        rows, changes, coverage = file_observations.build(
+            self.recordings, self.cache, self.tables.get("operations", []), self.repo_path)
+        self.tables["file_observations"], self.tables["change_observations"] = rows, changes
+        coverage["complete"] = coverage["complete"] and self.coverage["operations"]["complete"]
+        self.coverage["observations"] = coverage
 
     def load_checkpoints(self):
         rows, coverage = operation_facts.checkpoints(self.recordings, self.cache)

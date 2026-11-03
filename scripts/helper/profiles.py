@@ -163,3 +163,60 @@ def content_text(value):
     if isinstance(value, list):
         return "\n".join(str(x.get("text", "")) for x in value if isinstance(x, dict) and x.get("type") in ("text", "input_text", "output_text"))
     return ""
+
+
+# Per-harness read adapters (D145): recorded read result -> observed text and its extent.
+CAT_N = re.compile(r"^ *(\d+)(?:\t|→)(.*)$")
+PI_MORE = re.compile(r"\n*\[(\d+) more lines in file\. Use offset=(\d+) to continue\.\]\s*$")
+
+
+def _line_count(text):
+    return text.count("\n") + (1 if text and not text.endswith("\n") else 0)
+
+
+def _int(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def read_view(harness, record, text, arguments):
+    """{content, start_line, line_count, total_lines, completeness, adapter} or None.
+
+    ``complete`` needs positive evidence: recorded start and totals (Claude), or no
+    offset/limit and no truncation marker (pi). Marker: ``truncated``; range: ``range``.
+    """
+    arguments = arguments if isinstance(arguments, dict) else {}
+    ranged = _int(arguments.get("offset")) is not None or _int(arguments.get("limit")) is not None
+    if harness == "claude-code":
+        result = record.get("toolUseResult") if isinstance(record, dict) else None
+        file = result.get("file") if isinstance(result, dict) else None
+        if isinstance(file, dict) and isinstance(file.get("content"), str):
+            start, count, total = (_int(file.get(k)) for k in ("startLine", "numLines", "totalLines"))
+            complete = start == 1 and count is not None and count == total
+            return {"content": file["content"], "start_line": start, "line_count": count, "total_lines": total,
+                    "completeness": "complete" if complete else "range" if start else "unknown",
+                    "adapter": "claude:read_file"}
+        if not isinstance(text, str):
+            return None
+        lines = text.split("\n")
+        while lines and not lines[-1]:
+            lines.pop()
+        matched = [CAT_N.match(line) for line in lines]
+        if not lines or not all(matched):
+            return None
+        return {"content": "\n".join(m.group(2) for m in matched), "start_line": int(matched[0].group(1)),
+                "line_count": len(matched), "total_lines": None, "completeness": "unknown",
+                "adapter": "claude:cat_n"}
+    if harness == "pi" and isinstance(text, str):
+        start = _int(arguments.get("offset")) or 1
+        more = PI_MORE.search(text)
+        if more:
+            following = int(more.group(2))
+            return {"content": text[:more.start()], "start_line": start, "line_count": following - start,
+                    "total_lines": following - 1 + int(more.group(1)), "completeness": "truncated",
+                    "adapter": "pi:read_text"}
+        # No offset/limit arguments and no truncation marker is the positive evidence (D143).
+        count = _line_count(text)
+        return {"content": text, "start_line": start, "line_count": count,
+                "total_lines": None if ranged else count, "completeness": "range" if ranged else "complete",
+                "adapter": "pi:read_text"}
+    return None

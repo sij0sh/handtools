@@ -113,7 +113,8 @@ class SignalsTests(unittest.TestCase):
         self.assertEqual(len(gap["refs"]), 1)
         read, = self.rows(out, "repeated_read")
         self.assertEqual((read["reads"], read["extra_reads"]), (2, 1))
-        self.assertEqual(read["meaning"], "file may have changed between reads; not waste")
+        self.assertEqual((read["unchanged_pairs"], read["changed_pairs"]), (0, 0))  # one read failed
+        self.assertIn("not waste", read["meaning"])
         for row in out["results"]:
             self.assertNotIn("waste", row["excerpt"])
         for entry in self.cache.rglob("*"):

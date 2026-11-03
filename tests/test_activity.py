@@ -57,7 +57,9 @@ class ActivityTests(unittest.TestCase):
         out = self.cli("activity", "src/app.py::main", "--max-bytes", "12000")
         self.assertEqual(out["coverage"]["activity"]["symbol_resolution"], "symbol_event_mapping")
         self.assertTrue(out["results"])
-        self.assertEqual({row["tool"] for row in out["results"]}, {"edit"})
+        self.assertEqual({row["tool"] for row in out["results"] if "section" not in row}, {"edit"})
+        self.assertTrue(all(row["operation_id"] in {r["operation_id"] for r in out["results"] if "section" not in r}
+                            for row in out["results"] if row.get("section") == "change"))
 
     def test_same_relative_path_in_another_project_is_not_activity(self):
         other = self.home / "other.jsonl"
