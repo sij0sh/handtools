@@ -22,6 +22,15 @@ def call(mid, parent, name, path, error=None, content="x = 1\n"):
                 "content": [{"type": "text", "text": text}]}}]
 
 
+def bash(mid, parent, command, error=None):
+    """A pi bash call; ``error`` marks a failed result with that output."""
+    return [{"type": "message", "id": mid, "parentId": parent, "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "id": mid + "c", "name": "bash", "arguments": {"command": command}}]}},
+            {"type": "message", "id": mid + "r", "parentId": mid, "message": {
+                "role": "toolResult", "toolCallId": mid + "c", "toolName": "bash", "isError": bool(error),
+                "content": [{"type": "text", "text": error or "ok"}]}}]
+
+
 def user(mid, parent, text):
     return {"type": "message", "id": mid, "parentId": parent, "message": {"role": "user", "content": text}}
 
@@ -31,7 +40,7 @@ def say(mid, parent, text):
             "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
 
 
-class SignalsTests(unittest.TestCase):
+class Fixture(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -92,12 +101,16 @@ class SignalsTests(unittest.TestCase):
     def rows(self, out, kind):
         return [row for row in out["results"] if row.get("categories") == [kind]]
 
+
+
+class SignalsTests(Fixture):
     def test_each_kind_found_with_refs_and_meaning(self):
         self.fixture()
         out = self.cli("a.py", "--max-bytes", "60000")
         self.assertEqual({k: v["state"] for k, v in out["views"].items()},
-                         dict.fromkeys(("failed_exchange", "correction_candidate", "checkpoint_gap",
-                                        "repeated_read"), "leads_found"))
+                         {**dict.fromkeys(("failed_exchange", "correction_candidate", "checkpoint_gap",
+                                           "repeated_read"), "leads_found"),
+                          **dict.fromkeys(("failure_after_fix", "verification_gap"), "none_found_in_scanned_scope")})
         failed, = self.rows(out, "failed_exchange")
         self.assertEqual(failed["count"], 1)
         self.assertEqual(failed["last_outcome"], "succeeded")
@@ -175,7 +188,7 @@ class SignalsTests(unittest.TestCase):
         self.assertEqual(len(ids), 4)
         tiny = self.cli("a.py", "--max-bytes", "2048")
         self.assertEqual(set(tiny["views"]), {"failed_exchange", "correction_candidate", "checkpoint_gap",
-                                              "repeated_read"})
+                                              "repeated_read", "failure_after_fix", "verification_gap"})
 
     def test_investigate_and_inspect_offer_signals_expansions(self):
         self.fixture()
@@ -192,6 +205,58 @@ class SignalsTests(unittest.TestCase):
         self.assertTrue(shown["results"])
         inspected = run("inspect", "a.py")
         self.assertEqual(sum(n["purpose"] == "Recorded signals for a.py" for n in inspected["next"]), 1)
+
+
+class FixAndVerificationTests(Fixture):
+    CRASH = "Traceback (most recent call last):\nValueError: bad token at line 3"
+
+    def chain(self, sid, later_request):
+        self.session(sid, [
+            user("u1", None, "Fix the crash in a.py when parsing input"),
+            *bash("t1", "u1", "python3 -m pytest tests", error=self.CRASH),
+            *call("w1", "t1r", "write", "a.py", content="fixed = 1\n"),
+            say("s1", "w1r", "Fixed the parser in a.py; should work now."),
+            user("u2", "s1", later_request),
+            *bash("t2", "u2", "python3 -m pytest tests", error=self.CRASH),
+        ], "2026-02-01T00:00:00Z")
+
+    def test_failure_after_fix_chain_with_exposure(self):
+        self.chain("s5", "The crash in a.py is back again, look at it")
+        out = self.cli("a.py", "--max-bytes", "60000")
+        row, = self.rows(out, "failure_after_fix")
+        self.assertEqual((row["subtype"], row["exposure"]), ("failure_after_fix", "same_lane_after_fix"))
+        self.assertEqual(row["basis"], "error_family_exact")
+        self.assertTrue(row["initial"] and row["fixes"] and row["later"])
+        self.assertIn("not proof", row["meaning"])
+        self.assertEqual(out["coverage"]["signals"]["chains"], 1)
+
+    def test_expected_failure_is_excluded(self):
+        self.chain("s5", "The crash in a.py is a negative test now, rerun it")
+        out = self.cli("a.py", "--max-bytes", "60000")
+        self.assertEqual(self.rows(out, "failure_after_fix"), [])
+        self.assertEqual(out["coverage"]["signals"]["chains_excluded"], 1)
+
+    def test_verification_gap_subtypes(self):
+        self.session("s6", [
+            user("u1", None, "Update a.py and push it to origin"),
+            *call("w1", "u1", "write", "a.py"),
+            say("s1", "w1r", "Done. All tests pass now."),
+            user("u2", "s1", "Now tidy a.py further please"),
+            *bash("t1", "u2", "python3 -m unittest discover"),
+            *call("w2", "t1r", "write", "a.py", content="x = 2\n"),
+            user("u3", "w2r", "Check a.py with the tests again"),
+            *call("r1", "u3", "read", "a.py"),
+            *bash("t2", "r1r", "python3 -m pytest; echo done"),
+            *bash("t3", "t2r", "python3 -m pytest", error="FAILED test_a.py::test_x"),
+        ], "2026-03-01T00:00:00Z")
+        out = self.cli("a.py", "--max-bytes", "60000")
+        gaps = {row["subtype"]: row for row in self.rows(out, "verification_gap")}
+        self.assertEqual(set(gaps), {"publication_unconfirmed", "claim_without_observed_check",
+                                     "check_predates_change", "check_scope_unknown", "check_failed"})
+        self.assertEqual(gaps["claim_without_observed_check"]["missing"], {"verified": "not_observed_in_scope"})
+        self.assertEqual(gaps["publication_unconfirmed"]["missing"], {"pushed": "not_observed_in_scope"})
+        self.assertIn(gaps["check_failed"]["scope"]["reason"], ("complete", "truncated"))
+        self.assertEqual(len({row["id"] for row in self.rows(out, "verification_gap")}), 5)
 
 
 if __name__ == "__main__":

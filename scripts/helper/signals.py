@@ -1,13 +1,17 @@
-"""Target-scoped recorded signals: leads with refs, never verdicts (D67-D73).
+"""Target-scoped recorded signals: leads with refs, never verdicts (D67-D73, D148-D151).
 
-Four kinds over the scheduled scan's operations for one file or symbol:
-failed_exchange, correction_candidate, checkpoint_gap, repeated_read. Python grouping over
-provider rows; nothing is persisted. Repeated reads do not prove waste; errors do not prove
-reusable pitfalls; a correction is matched by phrasing only.
+Six kinds over the scheduled scan's operations for one file or symbol: failed_exchange,
+correction_candidate, checkpoint_gap, repeated_read, failure_after_fix, verification_gap.
+Python grouping over provider rows; nothing is persisted. Repeated reads do not prove waste;
+errors do not prove reusable pitfalls; a correction is matched by phrasing only; a failure
+after a fix does not prove the fix failed; a verification gap is absence in scanned scope.
 """
+import hashlib
 import json
+import re
 
-from . import trace
+from . import error_signatures, reconciliation, trace
+from .episode_links import episode_for
 from .file_observations import read_pairs
 from .investigate import _key, locator, noise
 from .message_segments import prose, visible
@@ -16,7 +20,11 @@ from .projection import human
 from .reader import message_graph
 from .target_history import CORRECTION
 
-KINDS = ("failed_exchange", "correction_candidate", "checkpoint_gap", "repeated_read")
+KINDS = ("failed_exchange", "correction_candidate", "checkpoint_gap", "repeated_read", "failure_after_fix",
+         "verification_gap")
+VERIFY_CLAIM = re.compile(r"\b(tests? pass(es|ed)?|all (tests )?green|verified|works now)\b", re.I)
+EXPECTED_FAIL = re.compile(r"expect(ed|s)? (it )?to fail|xfail|negative test", re.I)
+PUBLISH = re.compile(r"(?:^|[.!?;:]\s+|\b(?:please|then|and|now|to)\s+)(push|publish|release|deploy)\b", re.I)
 MAX_REFS = 5
 CHECKPOINT_HARNESSES = frozenset(name for name, profile in PROFILES.items()
                                  if '"emit": "checkpoint"' in json.dumps(profile))
@@ -201,18 +209,181 @@ def views(by_kind, providers, sessions):
     return out
 
 
+def _lane_ops(operations):
+    lanes = {}
+    for op in _unique(sorted(operations, key=lambda r: (r.get("recording_id") or "", r.get("order") or 0,
+                                                         r.get("association") or 0))):
+        lanes.setdefault((op.get("recording_id"), op.get("lane")), []).append(op)
+    return lanes
+
+
+def _checks(ops):
+    """[(order, value, op)] verified observations, one owner: reconciliation."""
+    by_id = {op.get("operation_id"): op for op in ops}
+    rows = reconciliation.observations(None, ops, [])
+    return [(row.get("order") or 0, row["value"], by_id.get(row.get("operation_id"))) for row in rows
+            if row["dimension"] == "verified"]
+
+
+def _text(by_ref, op, name="result_ref"):
+    event = by_ref.get((op.get("recording_id"), _key(op.get(name)))) if op else None
+    return visible(event.get("text") or "") if event else ""
+
+
+def failure_chains(target_eps, lookup, links, lanes, observations, files, by_ref, scope):
+    """D149: earlier failure, fix attempt, later failure of the same family; leads, not verdicts."""
+    rows, seen, excluded = [], set(), 0
+    by_id = (lookup or {}).get("by_id", {})
+    for link in links:
+        if link["relation"] != "possible_regression" or not ({link["source"], link["target"]} & target_eps):
+            continue
+        earlier, later = by_id.get(link["source"]), by_id.get(link["target"])
+        if earlier is None or later is None:
+            continue
+        for family, first_order, first in earlier.failures:
+            fixes = [op for op in earlier.ops if op.get("action") == "file_edit" and op.get("outcome") == "succeeded"
+                     and (op.get("order") or 0) > first_order]
+            again = next(((o, op) for fam, o, op in later.failures if fam == family), None)
+            if not fixes or again is None:
+                continue
+            later_order, second = again
+            chain = "chain:" + hashlib.sha256(json.dumps([first.get("operation_id"), second.get("operation_id")])
+                                               .encode()).hexdigest()[:16]
+            if chain in seen:
+                continue
+            seen.add(chain)
+            first_text, second_text = _text(by_ref, first), _text(by_ref, second)
+            duplicate = (first.get("recording_id") != second.get("recording_id") and first_text == second_text
+                         and earlier.request.get("independent_session") == later.request.get("independent_session"))
+            expected = any(EXPECTED_FAIL.search(t or "") for t in (
+                first.get("command"), second.get("command"), prose(later.request), prose(earlier.request)))
+            if duplicate or expected or not second_text:
+                excluded += 1
+                continue
+            fix = fixes[-1]
+            path = fix.get("path")
+            lane = lanes.get((second.get("recording_id"), second.get("lane")), [])
+            same_lane = fix.get("recording_id") == second.get("recording_id") and fix.get("lane") == second.get(
+                "lane") and not any(op.get("action") == "file_edit" and op.get("path") == path and op.get(
+                    "outcome") == "succeeded" and (fix.get("order") or 0) < (op.get("order") or 0) < later_order
+                    for op in lane)
+            post = next((o["content_sha256"] for o in observations if o["operation_id"] == fix.get("operation_id")
+                         and o["completeness"] == "complete"), None)
+            identical = post and any(
+                o["kind"] == "read_result" and o["completeness"] == "complete" and o["path"] == path
+                and o["content_sha256"] == post and o["recording_id"] == second.get("recording_id")
+                and (o.get("order") or 0) < later_order
+                and (o["recording_id"] != fix.get("recording_id") or (o.get("order") or 0) > (fix.get("order") or 0))
+                for o in observations)
+            exposure = "same_lane_after_fix" if same_lane else "content_identity" if identical else "unknown"
+            exact = {e for e, _ in error_signatures.signature(first_text)} & {
+                e for e, _ in error_signatures.signature(second_text)}
+            verification = [_ref(op.get("call_ref")) for op in earlier.ops + later.ops
+                            if op.get("action") == "command" and "test" in reconciliation.command_kinds(
+                                op.get("command")) and (fix.get("order") or 0) < (op.get("order") or 0)
+                            and (op.get("recording_id") != second.get("recording_id")
+                                 or (op.get("order") or 0) < later_order)][:MAX_REFS]
+            subtype = "failure_after_fix" if exposure != "unknown" else "possible_failure_after_fix"
+            row = _row("failure_after_fix", second, f"{family[:120]} failed again after a fix attempt", 1,
+                       {first.get("tool"), second.get("tool")}, _ref(second.get("result_ref") or second.get("call_ref")),
+                       files.get(second.get("recording_id")), subtype=subtype, chain_id=chain, exposure=exposure,
+                       basis="error_family_exact" if exact else "error_family", family=family,
+                       initial=_ref(first.get("result_ref") or first.get("call_ref")),
+                       fixes=[_ref(op.get("call_ref")) for op in fixes][-MAX_REFS:], later=_ref(second.get("result_ref")),
+                       verification=verification, refs=[_ref(first.get("result_ref")), _ref(fix.get("call_ref")),
+                                                         _ref(second.get("result_ref"))],
+                       rules=["possible_regression_link", "fix_attempt_D145", "same_error_family"],
+                       uncertainty=None if exposure != "unknown" else "fix not shown to precede the later failure "
+                       "on the same lane or file content", scope=scope,
+                       meaning="same error family after a recorded fix attempt; not proof the fix failed")
+            row["id"] = f"failure_after_fix:{chain}"
+            rows.append(row)
+    return rows, excluded
+
+
+def verification_gaps(target_eps, lookup, lanes, path, files, scope):
+    """D150 subtypes per target episode; absence is reported in scope, never as a verdict."""
+    rows = []
+    by_id = (lookup or {}).get("by_id", {})
+    def emit(subtype, ep, anchor, ref, excerpt, rules, missing=None, count=1, **fields):
+        reason = "truncated" if not ep.recording.get("scan_complete", True) else scope["reason"]
+        row = _row("verification_gap", anchor, excerpt, count, {anchor.get("tool")} if anchor.get("tool") else set(),
+                   ref, files.get(ep.recording["file"]), subtype=subtype, rules=rules, episode_id=ep.id,
+                   scope={**scope, "reason": reason}, missing={missing: "not_observed_in_scope"} if missing else {},
+                   meaning="a check or publication not observed in scanned scope; not proof it did not happen",
+                   **fields)
+        row["id"] = f"verification_gap:{subtype}:{ref}"
+        rows.append(row)
+    for episode_id in sorted(target_eps):
+        ep = by_id.get(episode_id)
+        if ep is None:
+            continue
+        checks = _checks(ep.ops)
+        lane = lanes.get((ep.recording["file"], ep.lane), [])
+        lane_checks = _checks(lane)
+        claims = [e for e in ep.events if e.get("kind") == "assistant_message" and VERIFY_CLAIM.search(prose(e))]
+        if claims and not checks:
+            emit("claim_without_observed_check", ep, claims[0], _ref(claims[0]["ref"]), prose(claims[0])[:200],
+                 ["VERIFY_CLAIM", "no_verified_observation"], "verified")
+        # One row per episode and subtype; count and refs carry the instances (D114, D151).
+        failed = [op for order, value, op in checks if value == "test_run_failed"
+                  and not any(o > order and v == "test_run_passed" for o, v, _ in lane_checks)]
+        if failed:
+            emit("check_failed", ep, failed[-1], _ref(failed[-1].get("result_ref") or failed[-1].get("call_ref")),
+                 f"test failed: {(failed[-1].get('command') or '')[:160]}",
+                 ["test_run_failed", "no_later_success_on_lane"], "verified", basis="recorded_test_result",
+                 count=len(failed), refs=[_ref(op.get("result_ref")) for op in failed][-MAX_REFS:])
+        compound = [op for _, value, op in checks if value == "test_run_unattributed"]
+        if compound:
+            emit("check_scope_unknown", ep, compound[-1], _ref(compound[-1].get("call_ref")),
+                 f"compound test command: {(compound[-1].get('command') or '')[:160]}", ["compound_command_D115"],
+                 uncertainty="aggregate exit status does not belong to the test", count=len(compound),
+                 refs=[_ref(op.get("call_ref")) for op in compound][-MAX_REFS:])
+        passed = [o for o, v, _ in checks if v == "test_run_passed"]
+        if passed:
+            edits = [op for op in lane if op.get("action") == "file_edit" and op.get("outcome") == "succeeded"
+                     and op.get("path") == path and (op.get("order") or 0) > max(passed)]
+            later = edits and not any(o > (edits[-1].get("order") or 0) and v == "test_run_passed"
+                                      for o, v, _ in lane_checks)
+            if later:
+                emit("check_predates_change", ep, edits[-1], _ref(edits[-1].get("call_ref")),
+                     f"{path} edited after the last passing check", ["test_run_passed", "later_edit_on_lane",
+                                                                    "no_later_success_on_lane"], "verified",
+                     check=next(_ref(op.get("call_ref")) for o, v, op in checks if o == max(passed)))
+        request = prose(ep.request)
+        if PUBLISH.search(request):
+            pushes = [row for row in reconciliation.observations(None, ep.ops, [])
+                      if row["dimension"] == "pushed" and row["value"] == "push_succeeded"]
+            if not pushes:
+                emit("publication_unconfirmed", ep, ep.request, _ref(ep.request["ref"]), request[:200],
+                     ["PUBLISH_imperative", "no_push_succeeded"], "pushed")
+    return rows
+
+
 def collect(providers, selected):
     """(rows in delivery order, by_kind, selection coverage)."""
-    providers.load({"checkpoints", "file_observations"})
+    providers.load({"checkpoints", "file_observations", "episodes"})
     files = {r["file"]: r for r in providers.recordings}
     by_ref = {_key(e["ref"]): e for r in providers.recordings for e in r["events"]}
     ops = _unique(sorted(selected, key=lambda r: (r.get("recording_id") or "", r.get("order") or 0)))
     failed, empty_exits = failed_exchanges(ops, files, by_ref)
     gaps, unresolved = checkpoint_gaps(ops, files, providers.tables.get("checkpoints", []))
+    observations = providers.tables.get("file_observations", [])
+    lookup, lanes = providers.episodes, _lane_ops(providers.tables.get("operations", []))
+    target_eps = {ep for ep in (episode_for(lookup, op.get("recording_id"), op.get("request_ref")) for op in ops) if ep}
+    complete = all(providers.coverage.get(name, {}).get("complete") is True for name in ("recordings", "operations"))
+    scope = {"episodes": len(target_eps), "lanes": len({(op.get("recording_id"), op.get("lane")) for op in ops}),
+             "reason": "complete" if complete else "truncated"}
+    by_file = {(r["file"], _key(e["ref"])): e for r in providers.recordings for e in r["events"]}
+    chains, chains_excluded = failure_chains(target_eps, lookup, providers.tables.get("episode_links", []), lanes,
+                                             observations, files, by_file, scope)
+    path = next((op.get("path") for op in ops if op.get("path")), None)
     by_kind = {"failed_exchange": failed, "correction_candidate": corrections(ops, files, by_ref),
-               "checkpoint_gap": gaps, "repeated_read": repeated_reads(ops, files, providers.tables.get("file_observations", []))}
+               "checkpoint_gap": gaps, "repeated_read": repeated_reads(ops, files, observations),
+               "failure_after_fix": chains,
+               "verification_gap": verification_gaps(target_eps, lookup, lanes, path, files, scope)}
     coverage = {"operations": len(ops), "empty_nonzero_exits_skipped": empty_exits,
-                "checkpoints_unresolved": unresolved,
-                "deferred": ["failure_after_fix"],
+                "checkpoints_unresolved": unresolved, "episodes": len(target_eps),
+                "chains": len({row["chain_id"] for row in chains}), "chains_excluded": chains_excluded,
                 "meaning": "signals are leads with refs; they do not establish waste, cause or fix"}
     return order(by_kind), by_kind, coverage

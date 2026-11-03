@@ -132,7 +132,7 @@ class ObservationCliTests(unittest.TestCase):
         out = self.cli("signals", "a.py", "--max-bytes", "60000")
         read, = [r for r in out["results"] if r.get("categories") == ["repeated_read"]]
         self.assertEqual((read["reads"], read["unchanged_pairs"], read["changed_pairs"]), (4, 1, 1))
-        self.assertEqual(out["coverage"]["signals"]["deferred"], ["failure_after_fix"])
+        self.assertNotIn("deferred", out["coverage"]["signals"])
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ class FeatureTests(unittest.TestCase):
         found = ec.features(text, root)
         self.assertLessEqual({("path", "src/app.py"), ("path", "lib/util.ts"), ("sha", "3f9ab21")}, found)
         self.assertIn(("error_exact", " ".join(text.split())), found)
+        self.assertEqual(ec.features("see ~nosuchuser9/x.py", root), set())  # unknown ~user: no crash
         self.assertFalse({v for k, v in found if k == "path"} & {"/etc/hosts", "etc/hosts", "a.js"})
         self.assertNotIn(("sha", "1234567"), found)
 
