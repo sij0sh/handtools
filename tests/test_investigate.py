@@ -258,6 +258,22 @@ class InvestigateTests(unittest.TestCase):
         self.assertEqual(lead["via"], failed["ref"])
         self.assertEqual(out["coverage"]["seeds"]["by_basis"], {"error": 2})
 
+    def test_error_family_matches_other_positions(self):
+        self.session("f", [("user", "Run the loader suite and report back"),
+                           ("fail", "pytest", "Traceback (most recent call last):\n  File \"a.py\", line 9\n"
+                                              "KeyError: 'name' at /tmp/run-77/x.json:12")])
+        out = self.investigate("zebra", "--error", "KeyError: 'name' at /tmp/run-1/x.json:4")
+        self.assertIn("error", self.leads(out, "pitfall")[0]["match_bases"])
+
+    def test_leads_carry_episode_and_related_context(self):
+        self.session("e1", [("user", "Tidy ui/table.tsx; columns must stay sortable."), ("edit", "ui/table.tsx")],
+                     mtime=1_000_000_000_000_000_000)
+        self.session("e2", [("user", "Widen ui/table.tsx; headers must stay sticky."), ("edit", "ui/table.tsx")])
+        leads = self.leads(self.investigate("--path", "ui/table.tsx"), "invariant")
+        self.assertEqual(len({l["episode_id"] for l in leads}), 2)
+        self.assertTrue(all(l["episode_id"].startswith("ep:") for l in leads))
+        self.assertEqual({r["relation"] for l in leads for r in l["related"]}, {"related_context"})
+
     def test_renamed_path_is_resolved_seed(self):
         self.git("mv", "ui/table.tsx", "ui/grid.tsx")
         self.git("commit", "-qm", "Rename table to grid")

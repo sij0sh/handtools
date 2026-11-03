@@ -75,7 +75,7 @@ Full history: `.agents/artifacts/decisions-archive-2026-11-02.md`, `.agents/arti
 - [x] D135: Vocabulary on unknown roots? Unchanged: applicability stays `scope_unknown`; never upgraded by words.
 
 ### M3 - Episodes and links
-- [x] D136: Episode? One per human request (prose not noise): all events whose `request_ref` points at it in that recording. Fields `episode_id, recording_id, independent_session, lane, request_ref, start_order, end_order, events, operations, boundary` (`closed` next request on lane exists / `open` recording end / `truncated` scan limit). `ep` ID from (recording, request event_id). Built by new `episode_links.py`, provider `episodes` depending on `recordings`, `operations`, `links` - reuses reader's `request_ref`; no new branch logic.
+- [x] D136: Episode? One per human request (prose not noise): all events whose `request_ref` points at it in that recording. Fields `episode_id, recording_id, independent_session, lane, request_ref, start_order, end_order, events, operations, boundary` (`closed` next request on lane exists / `open` recording end / `truncated` scan limit). `ep` ID from (recording, request event_id). Built by new `episode_links.py`, provider `episodes` depending on `recordings`, `operations`, `links` - reuses reader's `request_ref`; no new branch logic. Human noise messages (acks) join the lane's current episode. Error signatures read line-preserving visible text (`message_segments.visible_lines`).
 - [x] D137: Forked/duplicate episodes? Same `independent_session` + same request message id + equal prose hash -> one episode with `recordings: [...]`; counts use `episode_id`.
 - [x] D138: Link relations and rules? Candidate pairs only via shared feature index (D127); earlier -> later by ordering basis.
   - `explicit_followup`: later prose names an earlier episode's commit SHA, or recording `parent_session` -> earlier recording's last episode. strength `explicit`.
@@ -87,7 +87,7 @@ Full history: `.agents/artifacts/decisions-archive-2026-11-02.md`, `.agents/arti
   - `related_context`: shared path only. strength `weak`; never causal.
   Fields: `link_id, source, target, relation, strength, basis, matched, evidence_refs (<= 5), ordering_basis (same_lane_order / ancestry / timestamp_only / unknown), alternatives (other candidate targets, <= 3)`.
 - [x] D139: Ambiguous acknowledgment? An ack after several proposals in the same assistant turn links to each with `response=unclear` and `alternatives`; acceptance never inferred from silence or implementation alone; later proposal never marks earlier one superseded.
-- [x] D140: Bounds? Per episode <= 5 links per relation, one hop; overflow counted in coverage `links_omitted`.
+- [x] D140: Bounds? Per episode <= 5 links per relation, one hop; overflow counted in coverage `links_omitted` (selection bound; episodes coverage carries no `complete` flag).
 - [x] D141: Exposure? `investigate` lead gets `episode_id` and `related` (<= 3 `{relation, strength, target ref}`); `trace` emits `section: "link"` rows plus a `trace` continuation per target episode; `_related` uses the operation's own `request_ref`. Chronological order only where `ordering_basis` is not `unknown`; otherwise listed after, flagged.
 
 ### M4 - File observations

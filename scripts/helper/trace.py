@@ -8,13 +8,14 @@ request, result or state. All projections are invocation-local.
 import json
 import re
 
-from . import cite, continuations, message_segments, reconciliation
+from . import cite, continuations, episode_links, message_segments, reconciliation
 from .graph_store import digest
 from .reader import message_graph
 
 MAX_DEEPEN = 2
 MAX_WIDEN = 3
 MAX_RELATED = 5
+MAX_LINKS = 8
 SHA = re.compile(r"(?:git:)?[0-9a-fA-F]{40}")
 
 
@@ -501,8 +502,11 @@ def event_trace(args, store, providers, deadline, base_argv):
     coverage = {name: _compact({key: value for key, value in item.items() if key != "gaps"})
                 for name, item in providers.coverage.items()}
     coverage.update(_compact(data["coverage"]))
+    links, link_refs = _link_rows(providers, recording, data["request"])
+    data["rows"] = data["rows"] + links
+    coverage["episodes"] = _compact({k: v for k, v in providers.coverage.get("episodes", {}).items()})
     deepen, deepen_omitted = _deepen(base_argv, store, data)
-    widen, widen_omitted = _widen(base_argv, recording, data)
+    widen, widen_omitted = _widen(base_argv, recording, data, link_refs)
     deepen_items, widen_items = _unique(deepen), _unique(widen)
     partial = any(item.get("complete") is False for item in coverage.values())
     document = {"operation": "trace", "status": "partial" if partial else "ok",
@@ -523,6 +527,43 @@ def event_trace(args, store, providers, deadline, base_argv):
                 "next_omitted": {"deepen": max(deepen_omitted, len(deepen_items) - MAX_DEEPEN),
                                  "widen": max(widen_omitted, len(widen_items) - MAX_WIDEN)}}
     return document, digest([data["rows"], data["dimensions"], coverage])
+
+
+def _link_rows(providers, recording, request):
+    """(section "link" rows, widen refs) for the anchor request's episode (D141).
+
+    Chronological where ordering is known; links with unknown ordering follow, flagged."""
+    if request is None:
+        return [], []
+    providers.load({"episodes"})
+    lookup = providers.episodes
+    episode_id = episode_links.episode_for(lookup, recording.get("file"), request.get("ref"))
+    if episode_id is None:
+        return [], []
+    rows, extra = [], []
+    for link in providers.tables.get("episode_links", []):
+        if episode_id not in (link["source"], link["target"]):
+            continue
+        later = link["source"] == episode_id
+        other_id = link["target"] if later else link["source"]
+        other = lookup["by_id"].get(other_id)
+        ref = other.request["ref"] if other is not None else None
+        if other_id == episode_id:
+            ref = None
+        rows.append({"section": "link", "episode_id": episode_id, "relation": link["relation"],
+                     "strength": link["strength"], "basis": link["basis"], "matched": link["matched"],
+                     "direction": "later" if later else "earlier", "target_episode": other_id,
+                     "target": ref, "timestamp": other.request.get("timestamp") if other is not None else None,
+                     "ordering_basis": link["ordering_basis"], "response": link["response"],
+                     "alternatives": link["alternatives"], "evidence_refs": link["evidence_refs"],
+                     "meaning": "candidate relation via shared features; not causal proof"})
+    rows.sort(key=lambda r: (r["ordering_basis"] == "unknown", r["timestamp"] or ""))
+    for row in rows:
+        if row["ordering_basis"] == "unknown":
+            row["ordering_unknown"] = True
+        if isinstance(row["target"], dict):
+            extra.append((row["target"], f"Trace the {row['relation'].replace('_', ' ')} episode"))
+    return rows[:MAX_LINKS], extra
 
 
 def _commit_fact(providers, sha):
@@ -573,10 +614,10 @@ def _related(providers, commit_sha, changed_paths, witness_recordings):
             omitted += 1
             continue
         recording = recordings.get(recording_id)
-        request = next((event for event in (recording or {}).get("events", [])
-                        if event.get("kind") == "user_message"
-                        and event.get("request_origin") == "human"
-                        and event.get("lane") == operation.get("lane")), None)
+        # The operation's own request, not the lane's first one.
+        request = _find(recording, operation.get("request_ref"))
+        if request is not None and request.get("request_origin") != "human":
+            request = None
         rows.append({"section": "related", "relation": "related_context", "basis": "path_overlap",
                      "recording_id": recording_id, "lane": operation.get("lane"),
                      "path": path, "path_raw": operation.get("path_raw"),

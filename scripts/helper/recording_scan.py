@@ -32,8 +32,9 @@ def _snapshot(path, scope, before):
         scope.setdefault("snapshot", []).append({
             "file": canonical_path(path), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
             "inode": stat.st_ino, "bytes_scanned": scanned, "scan_complete": scanned >= stat.st_size})
+        return scanned >= stat.st_size
     except OSError:
-        pass
+        return None
 
 
 def lineages(recordings):
@@ -60,9 +61,10 @@ def scan_group(files, options, counters):
             counters["byte_limit_reached"] = counters["scan_limit_reached"]
             break
         before = counters["bytes_scanned"]
-        recordings.append(scan_file(path, options, counters))
+        recording = scan_file(path, options, counters)
+        recordings.append(recording)
         counters["files_scanned"] += 1
-        _snapshot(path, counters, before)
+        recording["scan_complete"] = _snapshot(path, counters, before) is not False
     return recordings
 
 
@@ -224,7 +226,7 @@ def scan_scheduled(args, root, scope, exclude_files=(), needles=()):
         recording = scan_file(path, scan, group)
         group["files_scanned"] += 1
         group["files_selected"] += 1
-        _snapshot(path, group, before_bytes)
+        recording["scan_complete"] = _snapshot(path, group, before_bytes) is not False
         used_bytes += group["bytes_scanned"] - before_bytes
         used_events += group["events_projected"] - before_events
         recording["schedule_lane"] = lane

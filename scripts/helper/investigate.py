@@ -9,7 +9,7 @@ import os
 import re
 from pathlib import Path
 
-from . import (cite, commit_links, commit_rank, error_signatures, evidence_candidates, message_segments,
+from . import (cite, commit_links, commit_rank, episode_links, error_signatures, evidence_candidates, message_segments,
                operation_facts, reconciliation)
 from .budget import check
 from .graph_store import canonical_path, digest
@@ -241,7 +241,7 @@ class Packet:
         self.suppressed = {}
         self.leads = {}
         # Internal per-lead facts, never emitted: exchange key, prose digest, unmatched-outside-repo flag.
-        self.exchange, self.digests, self.pending = {}, {}, set()
+        self.exchange, self.digests, self.pending, self.requests = {}, {}, set(), {}
         self.prior, self.seed_coverage = [], {}
 
     def suppress(self, reason):
@@ -265,7 +265,7 @@ class Packet:
                 base = "error" if value.lower() in low else None
             elif kind == "error_family":
                 if families is None:
-                    families = {f for _, f in error_signatures.signature(flat)}
+                    families = {f for _, f in error_signatures.signature(text)}
                 base = "error" if value in families else None
             elif kind == "sha":
                 if shas is None:
@@ -297,6 +297,7 @@ class Packet:
             if unmatched and applicability != "repository":
                 self.pending.add(key)  # kept only if one-hop expansion reaches it (D132)
             self.exchange[key] = ((recording or {}).get("file"), _key(event.get("request_ref") or ref))
+            self.requests[key] = ((recording or {}).get("file"), event.get("request_ref") or ref)
             lead = self.leads[key] = {
                 "section": "lead", "id": lead_id(ref), "categories": [], "kinds": [], "excerpt": excerpt(text, match),
                 "evidence": evidence, "applicability": applicability, "match_bases": bases, "matched": matched,
@@ -350,7 +351,7 @@ class Packet:
                     continue
                 text = prose(event)
                 spans = message_segments.prose_spans(event)
-                context = message_segments.visible(event.get("text"))
+                context = message_segments.visible_lines(event.get("text"))
 
                 def first(pattern, limit=None):
                     for item in spans:
@@ -415,6 +416,7 @@ class Packet:
             # Failure detail first: it is what the next attempt must avoid.
             text = f"{op.get('tool') or op.get('action')} failed: {detail[:160] or 'no output'} | {what[:120]}"
             self.add(event, "pitfall", "failed_operation", "tool_observation", text,
+                     context=message_segments.visible_lines(result.get("text") if result else "") + "\n" + text,
                      recording=files.get(op.get("recording_id")), op_paths={op.get("repo_path"), op.get("path")},
                      active=active,
                      extra={"path": op.get("path")} if op.get("path") else None)
@@ -461,6 +463,18 @@ class Packet:
             if via and via != lead["ref"]:
                 lead["via"] = via
             self.pending.discard(key)
+
+    def link(self, providers):
+        """Each lead's episode and up to three related episodes (D141)."""
+        lookup, rows = providers.episodes, providers.tables.get("episode_links", [])
+        for key, lead in self.leads.items():
+            episode = episode_links.episode_for(lookup, *self.requests[key])
+            if episode is None:
+                continue
+            lead["episode_id"] = episode
+            related = episode_links.related(episode, rows, lookup["by_id"])
+            if related:
+                lead["related"] = related
 
     def finish(self):
         """Drop unexpanded out-of-repo leads; collapse copied prose to the earliest recording (D134)."""
@@ -724,6 +738,8 @@ def collect(args, providers, deadline, goal, paths, errors, sessions=True, graph
         deadline.check()
         packet.active_task(active, state, providers.cache)
     packet.finish()
+    providers.load({"episodes"})
+    packet.link(providers)
     if goal:
         packet.prior = prior_work(goal, providers)  # requests need the loaded commit links
     return packet, state

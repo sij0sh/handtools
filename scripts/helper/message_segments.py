@@ -181,6 +181,13 @@ def visible(text):
                      if "<" in text else text)
 
 
+def visible_lines(text):
+    """Like ``visible`` but keeps line breaks (each line whitespace-collapsed), for line-based error signatures."""
+    text = str(text or "")
+    kept = "\n".join(text[s.start:s.end] for s in parse(text) if s.kind != "harness_context") if "<" in text else text
+    return "\n".join(" ".join(line.split()) for line in kept.splitlines() if line.strip())
+
+
 def prose_spans(event):
     """[(segment, raw text)] for the prose spans of one event."""
     text = str(event.get("text") or "")

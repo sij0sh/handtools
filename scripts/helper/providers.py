@@ -1,7 +1,7 @@
 """Invocation-local provider registry; shared source, Git and recording datasets."""
 import os
 from types import SimpleNamespace
-from . import (catalog, cite, commit_links, edit_hunks, message_segments, git_file_history, graph_cli, graph_queries,
+from . import (catalog, cite, commit_links, edit_hunks, episode_links, message_segments, git_file_history, graph_cli, graph_queries,
                 operation_facts, repo_files)
 from .engine import Input
 from .root_map import parse_root_map, remap
@@ -49,6 +49,7 @@ class Providers:
         self.recording_files = None
         # Scheduled scans (investigate, inspect): invocation-wide totals, active file excluded.
         self.scheduled, self.exclude_files, self.allocation = False, (), None
+        self.episodes = None  # episode lookup {by_id, by_request} once the episodes provider loads
         # Exact seed needles (paths, errors, SHAs) for the scheduled scan's probe.
         self.needles = ()
 
@@ -127,9 +128,11 @@ class Providers:
         """Replace recording-derived tables with a targeted scan, keeping Git facts loaded."""
         self.recording_files = list(files)
         self.recordings = []
-        keep = {"recordings", "operations", "checkpoints", "links"}
+        keep = {"recordings", "operations", "checkpoints", "links", "episodes", "segments"}
         self.loaded = [name for name in self.loaded if name not in keep]
-        for key in ("events", "rows", "sessions", "operations", "checkpoints", "commit_links"):
+        self.episodes = None
+        for key in ("events", "rows", "sessions", "operations", "checkpoints", "commit_links", "episodes",
+                    "episode_links", "message_segments"):
             self.tables.pop(key, None)
         self.load({"recordings", "operations", "checkpoints", "commit_links"})
 
@@ -251,6 +254,12 @@ class Providers:
         coverage["source"] = "stored message text; truncated messages are partial"
         coverage["complete"] = coverage["complete"] and self.coverage["recordings"]["complete"]
         self.coverage["segments"] = coverage
+
+    def load_episodes(self):
+        rows, links, coverage, self.episodes = episode_links.build(
+            self.recordings, self.tables.get("operations", []), self.tables.get("commit_links", []), self.store.root)
+        self.tables["episodes"], self.tables["episode_links"] = rows, links
+        self.coverage["episodes"] = coverage
 
     def load_checkpoints(self):
         rows, coverage = operation_facts.checkpoints(self.recordings, self.cache)
