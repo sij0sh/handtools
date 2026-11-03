@@ -19,6 +19,7 @@ class GitResolver:
         self.identities = {}
         self.errors = 0
         self.calls = 0
+        self.verified = {}
 
     def _run(self, cwd, *args, stdin=None, binary=False, timeout=15):
         self.calls += 1
@@ -70,6 +71,22 @@ class GitResolver:
             return sha
         out = self.run(repo, "rev-parse", "--verify", "--quiet", sha + "^{commit}")
         return out.strip() if out and re.fullmatch(SHA, out.strip()) else None
+
+    def verify(self, repo, sha):
+        """(object_resolved, reachable_from_head) as 'true'/'false'/'unknown'; never inferred."""
+        if not sha or len(sha) != 40:
+            return "unknown", "unknown"
+        if not repo:
+            return "unknown", "unknown"
+        key = (repo, sha)
+        if key not in self.verified:
+            exists = self.run(repo, "cat-file", "-e", sha + "^{commit}")
+            if exists is None:  # repo was already resolved, so a failed lookup means absent here
+                self.verified[key] = ("false", "unknown")
+            else:
+                head = self.run(repo, "merge-base", "--is-ancestor", sha, "HEAD")
+                self.verified[key] = ("true", "true" if head is not None else "false")
+        return self.verified[key]
 
     def subject(self, repo, subject):
         subject = normalize_subject(subject)

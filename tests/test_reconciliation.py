@@ -23,7 +23,7 @@ def witness(witness_id, value, order, **extra):
            "branch": "a1", "order": order, "timestamp": f"2026-01-01T10:01:0{order}Z",
            "confidence": "recorded", "sha": value, "recorded_sha": value,
            "basis": "structured_commit_result", "subject": "Keep lock ordering",
-           "ref": {"offset": order}}
+           "object_resolved": "true", "reachable_from_head": "true", "ref": {"offset": order}}
     row.update(extra)
     return row
 
@@ -42,11 +42,11 @@ class ObservationTests(unittest.TestCase):
         wits = [witness("w", "a" * 40, 4)]
         rows = reconciliation.observations(None, ops, wits)
         summary = reconciliation.summarize(rows, [])
-        self.assertEqual(summary["edited"]["state"], "observed")
-        self.assertEqual(summary["verified"]["state"], "observed")
-        self.assertEqual(summary["committed"]["state"], "observed")
-        self.assertEqual(summary["pushed"]["state"], "unknown")
-        self.assertEqual(summary["live_confirmed"]["state"], "unknown")
+        self.assertEqual(summary["edited"]["evidence_presence"], "observed")
+        self.assertEqual(summary["verified"]["evidence_presence"], "observed")
+        self.assertEqual(summary["committed"]["evidence_presence"], "observed")
+        self.assertEqual(summary["pushed"]["evidence_presence"], "unknown")
+        self.assertEqual(summary["live_confirmed"]["evidence_presence"], "unknown")
         self.assertFalse(any(row.get("value") == "completed" for row in rows))
         self.assertEqual(set(reconciliation.DIMENSIONS), set(summary))
 
@@ -103,7 +103,7 @@ class ObservationTests(unittest.TestCase):
         committed = [row for row in rows if row["dimension"] == "committed"]
         self.assertEqual([row["value"] for row in committed], ["commit_failed"])
         self.assertEqual(committed[0]["evidence_kind"], "tool_observation")
-        self.assertEqual(reconciliation.summarize(rows, [])["committed"]["state"], "observed")
+        self.assertEqual(reconciliation.summarize(rows, [])["committed"]["evidence_presence"], "observed")
 
     def test_subject_inference_does_not_establish_committed_state(self):
         wits = [witness("w", "a" * 40, 3, confidence="inferred", basis="repo_subject")]
@@ -150,13 +150,91 @@ class ClaimTests(unittest.TestCase):
         self.assertEqual(fields, {"openIssues", "nextActions", "verificationState", "constraints"})
         self.assertTrue(all(claim["value"] == claim["excerpt"] for claim in claims))
         summary = reconciliation.summarize([], claims)
-        self.assertEqual(summary["blocked_remaining"]["state"], "claimed")
-        self.assertEqual(summary["verified"]["state"], "claimed")
+        self.assertEqual(summary["blocked_remaining"]["evidence_presence"], "claimed")
+        self.assertEqual(summary["verified"]["evidence_presence"], "claimed")
 
     def test_unsupported_checkpoint_shape_yields_no_invented_claims(self):
         cp = checkpoint()
         cp["structured"] = ["not", "a", "mapping"]
         self.assertEqual(reconciliation.claims_for(cp), [])
+
+
+class OutcomeTests(unittest.TestCase):
+    """M0: evidence presence and recorded outcome stay separate; failures stay failures."""
+
+    def summary(self, ops=(), wits=()):
+        return reconciliation.summarize(reconciliation.observations(None, list(ops), list(wits)), [])
+
+    def test_failed_test_is_observed_but_failed(self):
+        verified = self.summary([operation("t", "command", "failed", 2, command="pytest -q")])["verified"]
+        self.assertEqual((verified["evidence_presence"], verified["outcome"]), ("observed", "failed"))
+        self.assertFalse(reconciliation.settled(verified))
+
+    def test_failed_then_passed_is_mixed_and_latest_passed(self):
+        verified = self.summary([operation("t1", "command", "failed", 2, command="pytest"),
+                                 operation("t2", "command", "succeeded", 3, command="pytest")])["verified"]
+        self.assertEqual(verified["outcome"], "mixed")
+        self.assertEqual(verified["latest"]["value"], "test_run_passed")
+        self.assertTrue(reconciliation.settled(verified))
+
+    def test_failed_push_is_failed(self):
+        pushed = self.summary([operation("p", "command", "failed", 2, command="git push")])["pushed"]
+        self.assertEqual(pushed["outcome"], "failed")
+
+    def test_failed_edit_is_an_attempt_not_an_edit(self):
+        edited = self.summary([operation("e", "file_edit", "failed", 2, path="a.py")])["edited"]
+        self.assertEqual((edited["evidence_presence"], edited["outcome"]), ("observed", "failed"))
+
+    def test_masked_test_exit_is_unattributed(self):
+        for command in ("pytest; echo done", "pytest || true", "pytest | tail -3", "if pytest; then :; fi"):
+            rows = reconciliation.observations(None, [operation("t", "command", "succeeded", 2,
+                                                                command=command)], [])
+            verified = [row for row in rows if row["dimension"] == "verified"]
+            self.assertEqual([row["value"] for row in verified], ["test_run_unattributed"], command)
+            self.assertEqual(verified[0]["outcome"], "unknown")
+        for command in ("pytest -q", "cd x && pytest 2>&1", "pytest >log 2>&1"):
+            self.assertEqual(reconciliation.test_attribution(command), "attributable", command)
+
+    def test_unverified_full_sha_is_not_a_git_fact(self):
+        for resolved in ("unknown", "false"):
+            wits = [witness("w", "a" * 40, 3, object_resolved=resolved, reachable_from_head="unknown")]
+            rows = reconciliation.observations(None, [], wits)
+            self.assertEqual(rows[0]["evidence_kind"], "tool_observation")
+            committed = reconciliation.summarize(rows, [])["committed"]
+            self.assertEqual((committed["evidence_presence"], committed["outcome"]), ("observed", "unknown"))
+
+    def test_resolved_sha_is_a_git_fact_without_implying_reachability(self):
+        wits = [witness("w", "a" * 40, 3, reachable_from_head="false")]
+        rows = reconciliation.observations(None, [], wits)
+        self.assertEqual(rows[0]["evidence_kind"], "git_fact")
+        self.assertEqual(rows[0]["reachable_from_head"], "false")
+
+    def test_requested_and_remaining_have_no_outcome(self):
+        summary = self.summary()
+        self.assertEqual(summary["requested"]["outcome"], "not_applicable")
+        self.assertEqual(summary["verified"]["outcome"], "unknown")
+
+
+class GitVerifyTests(unittest.TestCase):
+    def test_verify_separates_resolution_and_reachability(self):
+        import subprocess, tempfile
+        from helper.git_resolve import GitResolver
+        with tempfile.TemporaryDirectory() as temp:
+            def git(*args):
+                return subprocess.run(["git", "-C", temp, "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                                      capture_output=True, text=True, check=True).stdout.strip()
+            git("init", "-q")
+            git("commit", "-q", "--allow-empty", "-m", "one")
+            head = git("rev-parse", "HEAD")
+            git("checkout", "-q", "-b", "side")
+            git("commit", "-q", "--allow-empty", "-m", "two")
+            side = git("rev-parse", "HEAD")
+            git("checkout", "-q", "-")
+            resolver = GitResolver()
+            self.assertEqual(resolver.verify(temp, head), ("true", "true"))
+            self.assertEqual(resolver.verify(temp, side), ("true", "false"))
+            self.assertEqual(resolver.verify(temp, "f" * 40), ("false", "unknown"))
+            self.assertEqual(resolver.verify(None, head), ("unknown", "unknown"))
 
 
 if __name__ == "__main__":

@@ -358,15 +358,15 @@ class Packet:
                 last[event.get("lane")] = event
         for request in last.values():
             dims = self.dimensions(recording, request, operations, witnesses)
-            edited = dims["edited"]["state"] == "observed"
-            open_ = dims["verified"]["state"] == "unknown" and dims["committed"]["state"] == "unknown"
+            edited = dims["edited"]["outcome"] in ("succeeded", "mixed")
+            open_ = not reconciliation.settled(dims["verified"]) and not reconciliation.settled(dims["committed"])
             key = _key(request["ref"])
             own = [o for o in operations if o.get("recording_id") == recording["file"]
                    and _key(o.get("request_ref")) == key]
             ended_failed = bool(own) and max(own, key=lambda o: o.get("order") or 0).get("outcome") == "failed"
             if edited and open_ or ended_failed:
                 self.add(request, "task", "unverified_request", "human", strip(request.get("text")),
-                         recording=recording, extra={"dimensions": {k: v["state"] for k, v in dims.items()}})
+                         recording=recording, extra={"dimensions": _dimension_view(dims)})
 
     @staticmethod
     def dimensions(recording, request, operations, witnesses, checkpoints=()):
@@ -391,8 +391,13 @@ class Packet:
                 cps = [c for c in checkpoints if c.get("lane") == lane]
                 dims = self.dimensions(recording, request, ops, witnesses, cps)
                 self.add(request, "task", "active_request", "human", strip(request.get("text")), recording=recording,
-                         active=True, extra={"dimensions": {k: v["state"] for k, v in dims.items()}})
+                         active=True, extra={"dimensions": _dimension_view(dims)})
         self.scan([recording], [o for o in ops if o.get("outcome") == "failed"], witnesses, checkpoints, active=True)
+
+
+def _dimension_view(dims):
+    """Compact per-dimension view: evidence presence and recorded outcome."""
+    return {k: {"evidence_presence": v["evidence_presence"], "outcome": v["outcome"]} for k, v in dims.items()}
 
 
 def rank_key(lead):

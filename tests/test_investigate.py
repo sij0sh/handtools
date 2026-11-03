@@ -167,8 +167,8 @@ class InvestigateTests(unittest.TestCase):
         out = self.investigate("export")
         task = self.leads(out, "task")
         self.assertEqual(len(task), 1)
-        self.assertEqual(task[0]["dimensions"]["edited"], "observed")
-        self.assertEqual(task[0]["dimensions"]["verified"], "unknown")
+        self.assertEqual(task[0]["dimensions"]["edited"]["evidence_presence"], "observed")
+        self.assertEqual(task[0]["dimensions"]["verified"]["evidence_presence"], "unknown")
 
     def test_schedule_reaches_old_constraint_beyond_newest_window(self):
         base = 1_700_000_000_000_000_000
@@ -205,7 +205,7 @@ class InvestigateTests(unittest.TestCase):
         task = self.leads(out, "task")[0]
         self.assertEqual(task["kinds"], ["active_request"])
         self.assertTrue(task["active_context"])
-        self.assertEqual(task["dimensions"]["edited"], "observed")
+        self.assertEqual(task["dimensions"]["edited"]["evidence_presence"], "observed")
         self.assertEqual(out["views"]["task"]["delivered"], 1)  # leads the task view in round one
         # The active recording is not archive corroboration.
         self.assertFalse(any("totals" in r.get("excerpt", "") for r in self.leads(out) if not r.get("active_context")))

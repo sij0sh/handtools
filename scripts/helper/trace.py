@@ -670,12 +670,14 @@ def commit_trace(args, store, providers, deadline, base_argv):
     witness_shas = sorted({row.get("sha") for row in witnesses if row.get("sha")})
     dimensions = reconciliation.summarize(observations, claims)
     # The commit itself is one Git fact; witnesses are separate recordings, not one task.
-    dimensions["committed"] = {"state": "observed", "observations": 1,
-                               "claims": 0, "values": [fact.get("sha")]}
+    dimensions["committed"] = {"evidence_presence": "observed", "outcome": "succeeded",
+                               "latest": {"observation_id": f"commit:{fact.get('sha')}", "value": fact.get("sha"),
+                                          "outcome": "succeeded"},
+                               "observations": 1, "claims": 0, "values": [fact.get("sha")]}
     for dimension in reconciliation.DIMENSIONS:
         if dimension == "committed":
             continue
-        if dimensions[dimension]["state"] == "observed":
+        if dimensions[dimension]["evidence_presence"] == "observed":
             dimensions[dimension]["scope"] = "witness lanes; separate exchanges"
     coverage = {name: _compact({key: value for key, value in item.items() if key != "gaps"})
                 for name, item in providers.coverage.items()}

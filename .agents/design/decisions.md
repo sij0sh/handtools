@@ -1,64 +1,118 @@
 # Goal
-Slim `references/{reader,runtime,graph,history}.md` to facts that change an agent's behavior, and remove legacy/deprecated code so one authoritative command surface remains.
+Deliver five evidence improvements to `remember` (source plan: `.agents/artifacts/remember-evidence-implementation-plan.md`):
+1. Separate task prose from embedded material, preserving provenance.
+2. Retrieve through paths, errors, commits, and task context as well as words.
+3. Link exchanges into inspectable failure and decision histories.
+4. Reconstruct file observations and changes with explicit attribution limits.
+5. Derive failure-after-fix and verification-gap signals from those foundations.
 
 ## Constraints
-- Python 3.11+ stdlib; optional tree-sitter. Stateless: no migration, no compatibility layer, no retained results.
-- Public command set stays 10 operations: `map`, `find`, `show`, `query`, `describe`, `activity`, `trace`, `signals`, `investigate`, `inspect`.
-- Envelope field set stays: `operation`, `status`, `results`, `scope`, `coverage`, `delivery`, `next`, `snapshots`, `views`.
-- Docs in scope: the four leaves only. README stays except for surfaces removed by D102. SKILL.md unchanged.
-- Suite green (270 tests, <20 s), VERSION +0.0.1 at commit.
+- Python 3.11+ stdlib; optional tree-sitter only. No new dependency, embedding service, background indexer.
+- Stateless: every derived row is rebuilt per invocation (`retention="transient"`); no persisted task status, memory statements, migration, or compatibility layer.
+- Public command set stays 10 operations; no new CLI flags. Envelope field set unchanged.
+- Never execute historical content. Unknown/ambiguous stays explicit; leads are not verdicts.
+- Suite green, < 20 s. References: size guard in `tests/test_layout.py`. VERSION +0.0.1 per commit.
+
+## Terms
+- Recording: one harness transcript (JSONL). Lane: one branch of a recording's message tree.
+- Lead: one ranked excerpt + ref in `investigate` output; evidence, not a rule.
+- Segment: one typed span of a message (prose vs embedded material).
+- Episode: one human request plus the events it caused. Link: typed, evidenced relation between episodes.
+- Witness: recorded evidence tying an event to a commit.
+
+## Baseline
+- Repo HEAD (VERSION 0.5.11) == `Archive.tar.gz` (SHA-256 `d7598ddb...9118`, matches plan). Plan targets this code.
+- Confirmed defect: `investigate.strip` removes only harness tags; Pi `<skill name=... location=...>...</skill>` blocks (seen in both supplied Pi recordings, 2-7 KB each) stay in "human" text and feed `REQUIRE`/`CHOICE`.
+- Existing pieces reused: `reader` sets `request_ref`, `lane`, `origin`, `request_origin` per event; `operation_facts.operations` pairs call/result; `edit_hunks.replay` applies hunks; `git_file_history.history(follow=)` resolves renames; `commit_rank` ranks commits; `recording_scan.schedule` has match/context lanes; `reconciliation` owns per-dimension observations.
 
 ## Condensed prior state
 Full history: `.agents/artifacts/decisions-archive-2026-11-02.md`, `.agents/artifacts/p0-*.md`.
-- D1-D16: one CLI, stdlib SQLite, DuckDB/session verbs retired.
-- D40-D53: one derived textless snapshot per repo; newest only; reports, `recall`, primer lanes retired; signed continuations.
-- D54-D76: `investigate`/`signals`/`orientation`; `inspect` order source > packet > relationships > history; `recall` -> `commit_rank`.
-- D77-D85: in-process test harness; 270 tests, 5.9 s; retirement guards kept.
+- D1-D53: one CLI, stdlib SQLite, one derived snapshot per repo, signed continuations, no retained reports.
+- D54-D85: `investigate`/`signals`/`orientation`/`inspect`; in-process tests.
+- D86-D104: refs slimmed (15 KB, leaf <= 6 KB, total <= 16 KB guard); legacy aliases removed; one owner for defaults/version/schema. Stateless breaks accepted without compat (O1 precedent).
 
 ## Decisions
 
-### Reference files
-- [x] D86: Keep rule per sentence? Delete unless the fact changes how a run interprets or acts on output. Delete anything already printed by `--help`, `describe`, `--plan`, an error message, or SKILL.md/README - reason: agent-instructions section 3, a sentence whose deletion changes nothing is a no-op.
-- [x] D87: Leaf ownership? `reader` = setup only. `runtime` = envelope/paging/continuations/budgets/SQL + operation contracts not in SKILL.md. `graph` = source capture, `map`/`find`, `inspect` relationships. `history` = `investigate`/`signals`/`activity`/`trace` + `inspect` history lane + recordings.
-- [x] D88: Shared facts? State the interpretation rule inline once in each leaf that needs it, one sentence, no cross-leaf pointer - leaves route nowhere; a pointer would be a dangling read.
-- [x] D89: Version language? Refs describe one current format with no `schema version 2`, `v2`, "retired", or "legacy" wording - stateless calls cannot meet another version; version talk only invites compatibility work.
-- [x] D90: Size guard? Add `tests/test_layout.py` case: each leaf <= 6 KB, total <= 16 KB (current 28 KB) - pins the slimming against regrowth; cheap and deterministic.
-- [x] D91: `reader.md` keeps: Python 3.11+, stdlib, optional tree-sitter grammars + "reported, not installed", macOS Xcode 3.9 gotcha, `scripts/profiles`/`settings.json` as the recording-source config. Deletes: envelope/omissions paragraph, `describe`/`--help` pointer, orientation paragraph, graph/history pointers.
-- [x] D92: `runtime.md` keeps: `investigate` goal-word rule and `--path` expansion cap 3, active-session/`archive_horizon` meaning; `inspect` recipe order, intents, ambiguity, `--plan`, "no root cause"; `trace` lane/dimension/commit-anchor rules; `show` accepted refs + `selected`; SQL one-SELECT/read-only/params/`--input`/`--type`/CTE/no-DDL + one example; standard vs deep budget table; coverage vs delivery vs next semantics, oversized-row recovery, `views` per page; continuation scope/pinning/stdin replay, token data-not-shell, PowerShell 5.1 quoting; exit 0/2/130 and partial-vs-truncated. Deletes: operations prose duplicated in SKILL.md/help, table-of-tables, 4 of 5 SQL examples, cache details, `--sql` alias line, `report:` line.
-- [x] D93: `graph.md` keeps: snapshot/cache lifecycle (one per workspace, rebuild on mismatch, superseded/expired/corrupt refs fail, 14-day idle, worktree isolation); `map` bare primer behavior and `--snapshot` omission; `inspect` intents/`reach` tiers/bounds; predicate table trimmed to consequence; traversal = `IMPORTS`+`CALLS_STATIC`, tests never bridge, potential not runtime; gaps = unknown not absent; manifest missing vs not-captured; generated/vendored/lockfile listing; capture exclusions + `.rememberignore`; `find` filter semantics (`*` crosses `/`, plain path covers descendants, filters do not change capture, `--count-by` after filtering); paging/`--verbose`/`--fields`. Deletes: per-language resolver rules, exit-code/status section (runtime owns), duplicate examples, `code_items` reference.
-- [x] D94: `history.md` keeps: four view semantics + state meanings; `prior_work` weights/generic-word drop/5 paths/2000-commit window; scheduled-scan allocation and suppression (policy not gap); active-session frontier; `signals` four kinds + pi-only checkpoints + "leads not verdicts"; `inspect` history order, ranking tiers, `possible_correction`, alias/no-widening matching, symbol-identity caveats, per-harness caps; `--no-sessions` marks the lane `not_searched`; the not-built list (failure-after-fix, unchanged-content rereads); cite tokens, JSON refs, human/agent/tool separation, copied-text caveat. Deletes: duplicated `investigate` prose from runtime, primer paragraph, PowerShell note (runtime owns), `describe events` pointer, "results are transient" duplicate.
-- [x] D95: Audit inventory below is exhaustive for this pass; any legacy item not listed stays. See table.
+### Delivery
+- [x] D105: Unit of delivery? One commit per milestone, order M0, M1, M2, M3, M4, M5, M6; each suite-green, VERSION +0.0.1 each (0.5.12 ... 0.5.18) - plan order; M4 could go earlier but order is reversible and reviewers expect plan order.
+- [x] D106: `Archive.tar.gz`? Leave untracked; never commit - it duplicates HEAD.
+- [x] D107: Evaluation scope (M0/M6)? Replace the plan's evaluation manifest, Recall@k metrics and cutoff-replay harness with: (a) baseline JSON of `investigate` for two goals per Pi recording, captured before M1 into `.agents/artifacts/baseline/` (git-ignored); (b) labeled expectations as unit tests on sanitized fixtures (D110); (c) a before/after table in the M6 commit message - two sessions give regression coverage only (plan says so); a metrics framework has no present consumer (defaults 1). (O3).
+- [x] D108: Derivation version? None per row. Continuation signatures include the skill `VERSION` string; rows carry `basis` (rule name) instead of `parser_version`/`derivation_version` - rows never outlive one invocation; only continuations cross invocations, and VERSION bumps every commit.
 
-### Legacy audit
-| Site | Current | Action |
-|---|---|---|
-| `envelope.load_rows` | accepts `rows[]`/`links[]`, grouped `harnesses[]`, any `schema_version <= 2` | current envelope only (D98) |
-| `delivery.py`, `runtime.py` errors, `target_history.py` | literal `2`, `2`, internal `schema_version: 1` | one `SCHEMA_VERSION`; drop internal field (D98) |
-| `catalog.py` | `CATALOG["rows"] = events`; `code_items` grain cites gone `sessions.py` | delete alias; delete `code_items` (D102) |
-| `operations.py` | `Operation.family`/`tier`, `names()`, `--sql` alias, optional `--regex`, ignored `--primer/--no-primer`, "legacy" help | remove (D96, D97) |
-| `graph_cli.py` | second `parser()`, duplicate `defaults()`, legacy `run()` dispatcher | fold into `runtime`/`operations` (D96) |
-| `graph_store.py` | `report:` guard, `report-` cleanup prefix | delete (D100) |
-| `graph_output.py` | "retained graph reports" docstring, `report` table fallback | reword/delete (D100) |
-| `reconciliation.py` | `command_kind()` backward-compatible single class | delete dead wrapper (D101) |
-| `graph_queries.py` | `inputs()` "compatibility SQL" docstring | reword (D101) |
+### Shared contracts
+- [x] D109: Outcome fields? `reconciliation.summarize` per dimension returns `evidence_presence` (`observed`/`claimed`/`unknown`, replaces `state`) and `outcome` (`succeeded`/`failed`/`mixed`/`unknown`/`not_applicable`) plus `latest` (observation_id of highest-order observation in the request's lane). `outcome`: all positive -> succeeded; all negative -> failed; both -> mixed; none -> not_applicable for `requested`, else unknown. Rename in place; update every consumer (`investigate`, `trace`, `signals`, tests, refs) - stateless, no compat (prior O1). (O2).
+- [x] D110: Fixtures? Two new synthetic JSONL fixtures `tests/fixtures/recordings/pi-skill.jsonl` and `pi-history.jsonl`: event structure, ancestry, call/result IDs, skill-block placement and Git payload shapes copied from the two supplied Pi recordings; all text rewritten, paths under `/work/demo`. Adversarial cases (forks, duplicates, missing results, stale checkpoints, compound shell, unrelated same-path work) built in-test with `tests/support.py` helpers - follows fixture README rule "synthetic only".
+- [x] D111: Row IDs? `<prefix>:` + first 16 hex of SHA-256 over JSON `[canonical recording path, event offset, item, extra...]`, same as `lead_id`. Prefixes `seg`, `ep`, `link`, `fobs`, `chg`. `extra` = span or partner IDs - deterministic, never from excerpt or rank.
+- [x] D112: New public SQL tables (catalog, transient, with grain)? Exactly five: `message_segments`, `episodes`, `episode_links`, `file_observations`, `change_observations`. Not public: evidence features, episode membership, signal evidence, verification projection - each has one consumer; signal rows already carry `refs` (MAX_REFS 5); verification reuses `reconciliation` `verified` observations (one owner).
+- [x] D113: Git fields on commit observations? `recorded_sha` (as written), `object_resolved` (`true`/`false`/`unknown` via `git cat-file -e`; `unknown` when Git unavailable), `reachable_from_head` (`true`/`false`/`unknown` via `merge-base --is-ancestor`). Only `object_resolved=true` makes `evidence_kind=git_fact`; otherwise `tool_observation` - HEAD only: recording branch identity is unreliable; simplest verifiable fact.
+- [x] D114: Counts? Every new count is distinct IDs (`operation_id`, `episode_id`, `chain_id`), never join rows.
 
-- [x] D96: Single command owner? `operations.py` declares operation, args, defaults, route, summary. `runtime.normalize` derives `limit`/`max_query_rows`/primer mode. `Operation.route` dispatches; `graph_cli` keeps only `get_graph`/`show`/map-find implementations. Delete `family`, `tier`, `names()`, `GRAPH`, `graph_cli.parser`, `graph_cli.defaults`, `run()` dispatch - one owner per defaults/dispatch (defaults §2).
-- [x] D97: CLI aliases? Remove `--sql`, optional-value `--regex` (TEXT form errors), and silent `--primer/--no-primer` acceptance outside `map`; update tests to positional SQL and `--regex PATTERN` - one authoritative invocation per operation.
-- [x] D98: Envelope input? Accept a JSON array, JSONL, or object with `schema_version == SCHEMA_VERSION` and `results[]`. Reject other versions, `rows[]`, `links[]`, grouped `harnesses[]`. Export `SCHEMA_VERSION` from `envelope.py`; `delivery`/`runtime` errors use it; drop `target_history` `schema_version: 1` - stateless: no producer emits old shapes.
-- [x] D99: Cache schema mismatch? `load_stored` raises `ValueError` when `body["schema"] != SCHEMA`; current-capture reuse catches it and rebuilds; a pinned `--snapshot` ref returns the error - user directive; rebuild is safe because the snapshot is derived.
-- [x] D100: Retired refs? Delete `report:` guard, `report-` supersede prefix, `graph_output` `report` fallback; a bad ref gets the generic invalid-reference error - no `report:` ref can exist in a stateless system.
-- [x] D101: Dead code? Delete `command_kind`, `ignored_primer`, `delivery.json_size`, `investigate.summary_text` (no caller). Keep `graph_output.COLUMNS` (used by table rendering). Reword stale docstrings in `catalog`, `operations`, `graph_queries` - each is a second, drifting description.
-- [x] D102: Public SQL tables (after: O1)? Drop `rows`; drop `code_items` and build the internal `items_by_path` map from graph symbol nodes. Update README table list, refs, `test_runtime` - `nodes` is the sole symbol identity; `code_items` is a derived second copy (defaults §2).
-- [x] D103: Tests? Update call sites for removed aliases; keep one retirement guard per removed surface (argparse error, unknown table) per D81; add cache-schema rebuild test and envelope-version rejection test - pins removals without restoring old paths.
-- [x] D104: Order? Code refactor -> tests green -> rewrite refs to post-refactor behavior -> size guard -> VERSION 0.5.2 (0.5.1 went to the design-record commit) -> one commit - docs must describe the shipped surface, not the old one.
+### M0 - Outcome semantics
+- [x] D115: Compound shell test outcome? A test command's operation outcome is attributable only when the test is the whole command or the last element of an `&&` chain. If followed by `;`, `||`, `|`, `&`, or wrapped in `if`/`$(...)`: verified observation value `test_run_unattributed`, outcome `unknown`, basis `compound_command`. Lives in `reconciliation.command_kinds` neighbour `test_attribution(command)` - aggregate exit status does not belong to the test.
+- [x] D116: Consumers of outcome? `Packet.unfinished`/`active_task`, `trace._reconciliation_summary`, checkpoint `compare` use `outcome`: a failed test or push is `failed`, never counts as verified/pushed. Acceptance from plan M0 kept as tests.
+
+### M1 - Request extraction
+- [x] D117: Module? New `scripts/helper/message_segments.py`, sole owner of "what part of a message is task prose". Public: `segments(event) -> list[Segment]`, `prose(event) -> str` (prose spans joined by single space, whitespace collapsed). Delete `investigate.strip` and `WRAPPER`; all callers use `prose` - one owner (defaults 2).
+- [x] D118: Which events? Every `user_message` and `assistant_message` in loaded recordings. Request projection = `prose` of events where `projection.human(e)`.
+- [x] D119: Segment kinds? `prose`, `reference`, `quote`, `code`, `harness_context`, `unknown` - `prose` replaces plan's `request` so one segmenter serves both speakers; speaker is a field.
+- [x] D120: Parser? Linear scan, no unrestricted regex. Order: (1) allowlisted tags: `<skill ...>` -> `reference`; existing harness tags (`system-reminder`, `command-*`, `local-command-*`, `user-prompt-submit-hook`, `task-notification`, `bash-*`) -> `harness_context`; open tag must be at line start; close = first matching `</name>`; nested same-name tag or no close -> rest of block `unknown`, coverage `unclosed_wrapper` +1. (2) In remaining text: ``` / ~~~ fences -> `code` (unclosed -> `code` to end, coverage `unclosed_fence`); consecutive lines starting `>` -> `quote`. (3) Rest -> `prose`.
+- [x] D121: Fields? `segment_id, recording_id, event_id, payload_pointer, start_char, end_char, kind, speaker_role, origin, basis, complete, name, ref`. Offsets = Python str indices (code points) into the event's stored text, shifted by `text_start`. `name` = skill/tag name. `complete=false` when event `text_omitted > 0`. No `text` column in SQL (derive via `show ref`); `certainty` dropped (kind `unknown` carries it) - text already in `events`; no second copy.
+- [x] D122: Truncated text? No hydration. Classify retained text; lead gets `partial: true`; coverage `segments_partial` count - text budget already auto-sizes; hydration adds a second read path.
+- [x] D123: Embedded material use? `reference`/`quote`/`code` segments feed retrieval features (D127) and excerpts for context, never `REQUIRE`/`CHOICE`/`CORRECTION` classification. `harness_context` feeds neither.
+- [x] D124: Adoption of referenced rules? No promotion. When prose and a `reference` segment share an event, the prose lead gets `relations.references: [segment_id...]` - naming a skill is not adopting each rule; the reading agent can follow the ref.
+- [x] D125: Excerpts? Every lead excerpt is a clip of one prose span (or one embedded span for context rows) and carries `segment_id` + `[start_char, end_char]` of the clip - excerpt resolves to original span (plan acceptance).
+- [x] D126: Short follow-ups? `noise` unchanged (still suppressed as standalone leads); used as responses by M3 (D139).
+
+### M2 - Candidate retrieval
+- [x] D127: Features? Internal `evidence_candidates.features(text, root) -> set[(kind, value)]`, kinds: `path` (tokens containing `/` or a `.ext` of 1-8 alnum chars, canonicalized to repo-relative when under root or a `--root-map`; others dropped), `sha` (7-40 hex, word-bounded, at least one letter), `error_exact`, `error_family` (D128). Not a public table (D112).
+- [x] D128: Error signatures? New `error_signatures.py`: `signature(text) -> list[(exact, family)]` over lines matching `\b\w+(Error|Exception)\b`, `^(error|fatal|FAILED)\b`, `Traceback` final line, `E\d{3,}`/`TS\d{4}`-style codes; max 3 per text. `exact` = whitespace-collapsed line, 200 chars. `family` = exact with hex `0x...`, `:\d+(:\d+)?` positions, UUIDs, ISO timestamps, temp dirs (`/tmp/...`, `/var/folders/...`) replaced by `<n>`/`<id>`/`<tmp>`; keeps type, module names, quoted names, codes - versioned by VERSION (D108).
+- [x] D129: Seeds? (a) `--path` canonical + renames via `history(follow=path)` capped 20 commits; (b) goal terms equal to a graph symbol name -> defining file paths, max 3 (existing cap), more = `ambiguous` and skipped; (c) `--error` exact + family; (d) SHAs of top 3 `prior_work` commits plus their changed paths (max 5 paths each); (e) paths/errors (not words) from the active request's prose. Each seed keeps `seed_basis`.
+- [x] D130: Probe? Only when seeds exist and total candidate bytes > `max_scan_bytes`; otherwise schedule as today. Probe = case-insensitive substring search over raw file bytes in 1 MiB chunks for seed needles (repo-relative path strings, error exact, SHA >= 7), newest file first, stopping at 50% of `max_scan_bytes`. Probe bytes charge the shared byte budget. Coverage `probe: {files_probed, files_hit, bytes_probed, files_unprobed}` - word needles over raw JSON are noise; exact needles are cheap.
+- [x] D131: Schedule? `recording_scan.schedule` gains `hits` (probe-hit files). Lanes: `match` = hits by hit count desc then newest, then remaining newest; `context` = age-diverse as today. Byte split: context reserves `EXPLORE_SHARE = 0.25` (constant in `options.py`, was 0.5) when probe ran, else 0.5 unchanged; unused lends forward. Allocation policy string updated - only change the split when probing gives the match lane real signal.
+- [x] D132: Expansion? One hop after classification: a lead gains basis `exchange` if its event's `request_ref` equals that of a seed-matched lead or of an operation on a seed path; `commit` if its exchange has a commit witness whose SHA is a seed. No further hops - one related-hop per plan; continuations widen.
+- [x] D133: Rank? `rank_key` tiers replace `exact/loose/goal_hits`: applicability, then best basis tier `exact` (path/error/sha seed in prose or op) < `resolved` (symbol/rename/prior-commit path, `path_activity`) < `exchange`/`commit` < `goal` (then `-goal_hits`) < `repo_context`; then evidence directness, flagged, timestamp, ref. Lead field `relevance` renamed `match_bases`; add `matched` (<= 3 values) and `via` (seed/lead ref for expansions). `evidence` stays separate. (O2).
+- [x] D134: Copied evidence? Leads whose prose span SHA-256 is equal across recordings collapse to the earliest by timestamp; others listed as `copies` (<= 3 refs) - forks/duplicated transcripts.
+- [x] D135: Vocabulary on unknown roots? Unchanged: applicability stays `scope_unknown`; never upgraded by words.
+
+### M3 - Episodes and links
+- [x] D136: Episode? One per human request (prose not noise): all events whose `request_ref` points at it in that recording. Fields `episode_id, recording_id, independent_session, lane, request_ref, start_order, end_order, events, operations, boundary` (`closed` next request on lane exists / `open` recording end / `truncated` scan limit). `ep` ID from (recording, request event_id). Built by new `episode_links.py`, provider `episodes` depending on `recordings`, `operations`, `links` - reuses reader's `request_ref`; no new branch logic.
+- [x] D137: Forked/duplicate episodes? Same `independent_session` + same request message id + equal prose hash -> one episode with `recordings: [...]`; counts use `episode_id`.
+- [x] D138: Link relations and rules? Candidate pairs only via shared feature index (D127); earlier -> later by ordering basis.
+  - `explicit_followup`: later prose names an earlier episode's commit SHA, or recording `parent_session` -> earlier recording's last episode. strength `explicit`.
+  - `possible_same_problem`: shared `error_family` AND shared path seed; `matched` lists both. strength `supported`.
+  - `possible_regression`: `possible_same_problem` pair where earlier episode has a failed op with the family and a later-in-order fix attempt (D145) before the later failure. strength `supported`.
+  - `proposal_response`: assistant prose matching `CHOICE` -> next human message on same lane; `response` = `accepted` (ACK yes-set or "go with"), `rejected` (`CORRECTION`), `unclear` (other). Within one episode allowed. strength `explicit`.
+  - `possible_revision`: later `CHOICE` prose (either speaker) in a later episode sharing a path feature with an earlier proposal. strength `weak`.
+  - `implementation_link`: proposal's episode -> its succeeded native edits / commit witnesses; `association=same_exchange`. strength `supported`.
+  - `related_context`: shared path only. strength `weak`; never causal.
+  Fields: `link_id, source, target, relation, strength, basis, matched, evidence_refs (<= 5), ordering_basis (same_lane_order / ancestry / timestamp_only / unknown), alternatives (other candidate targets, <= 3)`.
+- [x] D139: Ambiguous acknowledgment? An ack after several proposals in the same assistant turn links to each with `response=unclear` and `alternatives`; acceptance never inferred from silence or implementation alone; later proposal never marks earlier one superseded.
+- [x] D140: Bounds? Per episode <= 5 links per relation, one hop; overflow counted in coverage `links_omitted`.
+- [x] D141: Exposure? `investigate` lead gets `episode_id` and `related` (<= 3 `{relation, strength, target ref}`); `trace` emits `section: "link"` rows plus a `trace` continuation per target episode; `_related` uses the operation's own `request_ref`. Chronological order only where `ordering_basis` is not `unknown`; otherwise listed after, flagged.
+
+### M4 - File observations
+- [x] D142: Observation kinds? `read_result`, `write_payload`, `native_patch`, `planning_diff`, `reconstructed`. Dropped: `git_blob` (no consumer beyond reconstruction, which uses recorded bases), shell write-target grammar (optional in plan; parsed intent proves nothing) - defaults 1.
+- [x] D143: Hash/completeness? `content_sha256` over UTF-8 of decoded text, `hash_basis="utf8_text"` (raw bytes never in transcripts). `completeness`: `complete` only with positive evidence (harness metadata says full file, or no offset/limit args and no truncation marker), `range` (with returned `line_start/line_end`, distinct from requested args), `patch`, `truncated`, `unknown` (no hash). Per-harness read adapters in `profiles.py` strip line-number prefixes (Claude `cat -n`); unknown format -> `unknown`. `text_hash` keeps its current meaning. Git object IDs never stored as content hashes.
+- [x] D144: Changes? `change_observations` rows from: (a) succeeded native edit -> `attribution=direct`; (b) successive `planning_diff` for same path, lane, HEAD and diff kind that differ -> candidate ops between them: exactly one supported native edit = `direct`, shell commands = `associated`, none = `unknown`; HEAD change/staged-vs-unstaged/rename/binary/missing baseline -> `change_state=unknown` with `uncertainty_reason`; path missing from later partial snapshot -> `unknown`, never `deleted`; (c) two `complete` reads of same path/lane with different hashes and no direct edit between -> `changed_between_reads`, attribution `associated`/`unknown`. `reconstructed` only when a `complete` earlier observation + `edit_hunks.replay` applies exactly. `candidate_ops` <= 5.
+- [x] D145: Fix attempt (used by D138/D150)? An episode with a succeeded native edit or commit witness on a path sharing a feature with the failure, plus prose (either speaker) matching `FIX_CLAIM` (`\b(fix(ed|es)?|should (now )?work|resolved|patched)\b`). Passing test alone never counts.
+- [x] D146: Activity? `activity TARGET` appends `section: "file_observation"` and `section: "change"` rows for the target path after operation rows; coverage adds counts by completeness and attribution.
+- [x] D147: Repeated reads? `repeated_read` rows add `unchanged_pairs` (consecutive complete reads with equal hash) - closes the deferred `unchanged_content_reread`.
+
+### M5 - Signals
+- [x] D148: Kinds? `KINDS` adds `failure_after_fix` and `verification_gap` (6 total; existing 4 unchanged). `coverage.deferred` removed. Both scoped to the target's episodes like existing kinds.
+- [x] D149: Failure-after-fix chain? From `possible_regression` links: initial failure ref, fix refs (D145), later failure ref, exact+family, verification refs between. Subtype `possible_failure_after_fix` by default; `failure_after_fix` only when `exposure` is `same_lane_after_fix` (fix edit precedes later failure in the same lane, no later edit to that path between) or `content_identity` (a complete read after the fix matches the post-fix hash). Exclusions: duplicate outputs (D134), command or request prose matching `expect(ed|s)? (it )?to fail|xfail|negative test`, empty nonzero exit. Distinct chain count only; no rate.
+- [x] D150: Verification-gap subtypes? `claim_without_observed_check` (assistant prose `VERIFY_CLAIM` `\b(tests? pass(es|ed)?|all (tests )?green|verified|works now)\b` in an episode with no `verified` observation), `check_failed` (test outcome failed, no later success on lane), `check_predates_change` (success, then later succeeded edit to a target path on lane, no later success), `check_scope_unknown` (D115 unattributed), `publication_unconfirmed` (human prose `\b(push|publish|release|deploy)\b` imperative, no `push_succeeded` in episode). Dropped `live_confirmation_missing`: no producer of live-confirmation observations exists, so it would fire on every request - noise.
+- [x] D151: Signal row fields? Existing `_row` plus `subtype`, `scope` (episodes/lanes searched + completeness), `rules`, `exposure`/`basis`, `uncertainty`, `refs`; missing evidence reported as `not_observed_in_scope` with scope reason `complete`/`truncated`/`unsupported`/`unavailable`.
+- [x] D152: Decision revisions? Exposed only via M3 links in `investigate`/`trace`; no decision-state store.
+
+### M6 - Integration
+- [x] D153: Docs? Update `README.md` (tables, signal kinds), `references/history.md` (segments, episodes/links, observations, signals, attribution limits), `references/runtime.md` (new tables, field renames). Size guard raised: `history.md` <= 8 KB, total <= 18 KB - new behavior needs words; guard still pins regrowth.
+- [x] D154: Tests? New `test_message_segments.py`, `test_episode_links.py`, `test_file_observations.py`, `test_error_signatures.py`; extend existing per plan acceptance lists (except dropped items D142, D150). Determinism test: two runs, identical results. Stdlib-only run is the suite; tree-sitter tests skip as today.
+- [x] D155: Release check? M6 commit reruns D107 baseline goals; commit message carries before/after lead table; regression = any baseline exact-path/error lead lost.
 
 ## Open
-- [x] O1: Accept the breaking public surface (remove `--sql`, TEXT+`--regex`, `CATALOG["rows"]`, `code_items`)? Yes - operator confirmed all four; stateless and single-owner defaults outweigh any external SQL naming them.
-
-## Outcome
-- 274 tests OK in 5.8 s; refs 15.1 KB total (reader 0.5, runtime 4.0, graph 4.6, history 6.0 KB).
-- One owner each: `operations.derive` for defaults, `envelope.SCHEMA_VERSION` for version, `graph_store.SCHEMA` checked on load.
-- Removed all four surfaces plus `report:`/`report-` handling, `load_rows` legacy shapes, `command_kind`, `json_size`, `summary_text`, stale docstrings; guards added for each removed alias and table.
+- [x] O2: Breaking renames `state`->`evidence_presence` (D109), `relevance`->`match_bases` (D133), no compat field? Yes - operator confirmed; stateless precedent (O1).
+- [x] O3: Reduced evaluation (D107, D155) instead of manifest/Recall@k/cutoff replay? Yes - operator confirmed; two sessions give regression coverage only.
 
 ## Challenge
-Two implementers could still diverge on (a) which of the listed audit rows are public contract breaks - fixed by O1; (b) how much per-language graph detail survives - fixed by D93 keep/delete lists; (c) whether shared facts are duplicated inline - fixed by D88. No other material choice left once O1 is answered.
+Two implementers could still diverge on: segment boundaries (fixed D120), what counts as a seed/needle (D127, D129, D130), rank tiers (D133), link criteria (D138), fix attempt (D145), completeness evidence (D143), signal regexes (D145, D149, D150), field names (D109, D121, D133). Remaining latitude: per-harness read-adapter details (D143) are dictated by each harness's recorded payload shape, not choice. O2/O3 answered; no open material choice remains.

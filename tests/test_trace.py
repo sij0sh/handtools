@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,12 +84,12 @@ class TraceFixtureTests(unittest.TestCase):
         side = next(row for row in operations_rows if row["paths"] == ["src/config.py"])
         self.assertEqual(side["outcome"], "failed")
         dims = out["dimensions"]
-        self.assertEqual(dims["requested"]["state"], "observed")
-        self.assertEqual(dims["edited"]["state"], "observed")
-        self.assertEqual(dims["verified"]["state"], "observed")
-        self.assertEqual(dims["committed"]["state"], "observed")
-        self.assertEqual(dims["pushed"]["state"], "unknown")
-        self.assertEqual(dims["live_confirmed"]["state"], "unknown")
+        self.assertEqual(dims["requested"]["evidence_presence"], "observed")
+        self.assertEqual(dims["edited"]["evidence_presence"], "observed")
+        self.assertEqual(dims["verified"]["evidence_presence"], "observed")
+        self.assertEqual(dims["committed"]["evidence_presence"], "observed")
+        self.assertEqual(dims["pushed"]["evidence_presence"], "unknown")
+        self.assertEqual(dims["live_confirmed"]["evidence_presence"], "unknown")
 
     def test_table_and_fields_render_the_episode(self):
         result = invoke(["trace", self.refs["r-commit"], "--recordings", str(FIXTURE), "--format", "table",
@@ -107,8 +108,12 @@ class TraceFixtureTests(unittest.TestCase):
         self.assertTrue(any(row.get("selected") for row in shown["results"]))
         self.assertTrue(any(row.get("kind") == "user_message" for row in shown["results"]))
 
+    def verified(self):
+        return mock.patch("helper.git_resolve.GitResolver.verify", return_value=("true", "true"))
+
     def test_stale_checkpoint_is_a_later_observation_not_current_state(self):
-        out = self.trace("cp-late", "--max-bytes", "40000")
+        with self.verified():
+            out = self.trace("cp-late", "--max-bytes", "40000")
         reconciliation = out["reconciliation"]
         comparison = next(row for row in reconciliation["comparisons"]
                           if row["checkpoint_id"].endswith(event_id("cp-late"))
@@ -116,18 +121,29 @@ class TraceFixtureTests(unittest.TestCase):
         self.assertEqual(comparison["relation"], "later_observation")
         self.assertEqual(comparison["reason"], "observation_after_coverage_boundary")
         self.assertEqual(comparison["observation_value"], "b" * 40)
-        self.assertEqual(out["dimensions"]["committed"]["state"], "observed")
+        self.assertEqual(out["dimensions"]["committed"]["evidence_presence"], "observed")
         checkpoint = next(row for row in reconciliation["checkpoints"]
                           if row["checkpoint_id"].endswith(event_id("cp-late")))
         self.assertEqual(checkpoint["boundary_status"], "resolved")
         self.assertGreaterEqual(checkpoint["coverage_gap"]["operations"], 2)
         self.assertIn("b" * 40, checkpoint["coverage_gap"]["commits"])
         self.assertNotIn("completed", out["dimensions"])
-        self.assertTrue(all(value["state"] != "completed" for key, value in out["dimensions"].items()
+        self.assertTrue(all(value["evidence_presence"] != "completed" for key, value in out["dimensions"].items()
                             if key != "scope"))
 
-    def test_covered_commit_contradicts_an_uncommitted_claim(self):
+    def test_unverified_recorded_sha_never_contradicts_a_claim(self):
         out = self.trace("cp-contra", "--max-bytes", "40000")
+        self.assertFalse([row for row in out["reconciliation"]["comparisons"]
+                          if row["checkpoint_id"].endswith(event_id("cp-contra"))])
+        committed = [row for row in out["results"] if row.get("section") == "observation"
+                     and row.get("dimension") == "committed" and row.get("value") == "b" * 40]
+        self.assertTrue(committed)
+        self.assertEqual({row["evidence_kind"] for row in committed}, {"tool_observation"})
+        self.assertEqual({row["object_resolved"] for row in committed}, {"unknown"})
+
+    def test_covered_commit_contradicts_an_uncommitted_claim(self):
+        with self.verified():
+            out = self.trace("cp-contra", "--max-bytes", "40000")
         comparison = next(row for row in out["reconciliation"]["comparisons"]
                           if row["checkpoint_id"].endswith(event_id("cp-contra")))
         self.assertEqual(comparison["relation"], "contradicts")
@@ -149,7 +165,7 @@ class TraceFixtureTests(unittest.TestCase):
         request = next(row for row in out["results"] if row["section"] == "request")
         self.assertTrue(request["text"].startswith("No, revert that"))
         self.assertEqual({lane["lane"] for lane in out["lanes"]}, {"u2", "a2"})
-        self.assertEqual(out["dimensions"]["verified"]["state"], "observed")
+        self.assertEqual(out["dimensions"]["verified"]["evidence_presence"], "observed")
 
     def test_focused_scan_does_not_read_the_archive_or_build_the_graph(self):
         out = self.trace("r-commit", "--max-bytes", "40000")
@@ -324,7 +340,7 @@ class CommitTraceTests(unittest.TestCase):
         out = self.cli("trace", self.sha)
         self.assertEqual(out["anchor"]["kind"], "commit")
         self.assertEqual(out["anchor"]["subject"], "Keep lock ordering")
-        self.assertEqual(out["dimensions"]["committed"]["state"], "observed")
+        self.assertEqual(out["dimensions"]["committed"]["evidence_presence"], "observed")
         self.assertEqual({lane["lane_role"] for lane in out["lanes"]}, {"commit_witness"})
         related = [row for row in out["results"] if row["section"] == "related"]
         self.assertEqual(len(related), 1)

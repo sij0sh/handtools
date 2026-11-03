@@ -25,6 +25,7 @@ COLUMNS = {"witness_id": "VARCHAR", "operation_id": "VARCHAR", "relation": "VARC
            "sha": "VARCHAR", "recorded_sha": "VARCHAR", "subject": "VARCHAR", "command_subject": "VARCHAR",
            "command_offset": "BIGINT", "basis": "VARCHAR", "confidence": "VARCHAR", "failed": "BOOLEAN",
            "observation": "VARCHAR", "resolution": "VARCHAR",
+           "object_resolved": "VARCHAR", "reachable_from_head": "VARCHAR",
            "command": "VARCHAR", "output_excerpt": "VARCHAR", "ref": "JSON", "result_ref": "JSON"}
 
 
@@ -235,7 +236,9 @@ def _event_witnesses(event, recording, by_ref, cache, resolver, fallback):
 
 
 def witnesses(recordings, resolver, cache, fallback=None):
-    """Every witness in scanned recordings, before any event filter is applied."""
+    """Every witness in scanned recordings, before any event filter is applied.
+
+    A recorded SHA, its repository object resolution and HEAD reachability stay separate facts."""
     rows = []
     for recording in recordings:
         events = recording["events"]
@@ -243,4 +246,6 @@ def witnesses(recordings, resolver, cache, fallback=None):
         for event in events:
             if event["kind"] in ("tool_call", "command"):
                 rows.extend(_event_witnesses(event, recording, by_ref, cache, resolver, fallback))
+    for row in rows:
+        row["object_resolved"], row["reachable_from_head"] = resolver.verify(row.get("repo"), row.get("sha"))
     return rows

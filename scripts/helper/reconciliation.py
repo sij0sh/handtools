@@ -60,14 +60,46 @@ def command_kinds(command):
     return kinds
 
 
+# Observation values that settle a dimension's outcome; every other value leaves it unknown.
+SUCCEEDED = {"confirmed_edit", "observed_snapshot", "test_run_passed", "push_succeeded"}
+FAILED = {"edit_failed", "test_run_failed", "push_failed", "commit_failed"}
+NOT_APPLICABLE = ("requested", "blocked_remaining")
+# Any shell operator after the test (or a test inside a condition/substitution) owns the exit status;
+# redirections do not.
+_REDIRECT = re.compile(r"\d*(?:>>?|<)&?\s*(?:\d\b|\S+)|&>>?\s*\S+")
+_AFTER_TEST = re.compile(r"[;|&]")
+_WRAPPED = re.compile(r"\$\(|`|\bif\b|\bwhile\b|\buntil\b")
+
+
+def test_attribution(command):
+    """'attributable' when the test's own status is the operation's status, else 'compound_command'."""
+    text = command or ""
+    found = TEST_COMMAND.search(text)
+    if found is None:
+        return None
+    if _WRAPPED.search(text) or _AFTER_TEST.search(_REDIRECT.sub(" ", text[found.end():])):
+        return "compound_command"
+    return "attributable"
+
+
+def _polarity(dimension, value, evidence_kind):
+    if dimension in NOT_APPLICABLE:
+        return "not_applicable"
+    if dimension == "committed":
+        return "succeeded" if evidence_kind == "git_fact" else "failed" if value == "commit_failed" else "unknown"
+    return "succeeded" if value in SUCCEEDED else "failed" if value in FAILED else "unknown"
+
+
 def _obs(dimension, value, evidence_kind, basis, source, **extra):
     row = {"section": "observation", "observation_id": f"{source.get('recording_id')}#{source.get('operation_id') or source.get('witness_id') or source.get('ref')}",
            "dimension": dimension, "value": value, "evidence_kind": evidence_kind, "basis": basis,
+           "outcome": _polarity(dimension, value, evidence_kind),
            "recording_id": source.get("recording_id"), "lane": source.get("lane"),
            "branch": source.get("branch"), "order": source.get("order"),
            "timestamp": source.get("timestamp"),
            "ref": source.get("ref") or source.get("call_ref") or source.get("result_ref")}
-    for key in ("operation_id", "witness_id", "sha", "subject", "excerpt", "paths"):
+    for key in ("operation_id", "witness_id", "sha", "subject", "excerpt", "paths", "object_resolved",
+                "reachable_from_head"):
         if extra.get(key) is not None or source.get(key) is not None:
             row[key] = extra.get(key, source.get(key))
     return row
@@ -102,13 +134,18 @@ def observations(request_event, operations, witnesses, checkpoints=()):
         elif action == "plan_snapshot" and outcome == "succeeded":
             rows.append(_obs("edited", "observed_snapshot", "tool_observation", "planning_snapshot",
                              base, **common))
+        elif action == "file_edit" and outcome == "failed":
+            rows.append(_obs("edited", "edit_failed", "tool_observation", "failed_native_edit", base, **common))
         if outcome == "failed":
             rows.append(_obs("blocked_remaining", "failed_attempt", "tool_observation",
                              f"{base.get('tool') or action}_failed", base, **common))
         kinds = command_kinds(base.get("command")) if action == "command" else []
         if "test" in kinds and outcome in ("succeeded", "failed"):
-            rows.append(_obs("verified", f"test_run_{'passed' if outcome == 'succeeded' else 'failed'}",
-                             "tool_observation", "recorded_test_result", base,
+            if test_attribution(base.get("command")) == "compound_command":
+                value, basis = "test_run_unattributed", "compound_command"
+            else:
+                value, basis = f"test_run_{'passed' if outcome == 'succeeded' else 'failed'}", "recorded_test_result"
+            rows.append(_obs("verified", value, "tool_observation", basis, base,
                              excerpt=_excerpt(base.get("command"))))
         if "push" in kinds and outcome in ("succeeded", "failed"):
             rows.append(_obs("pushed", f"push_{'succeeded' if outcome == 'succeeded' else 'failed'}",
@@ -121,12 +158,16 @@ def observations(request_event, operations, witnesses, checkpoints=()):
         if witness.get("failed"):
             value, basis = "commit_failed", "recorded_commit_failure"
         elif witness.get("confidence") == "recorded" and witness.get("sha"):
-            value, kind, basis = witness["sha"], "git_fact", f"{witness.get('basis') or 'recorded'}_witness"
+            # Only a commit object resolved in the repository is a Git fact; a recorded SHA stays a tool observation.
+            verified = witness.get("object_resolved") == "true"
+            value, kind = witness["sha"], "git_fact" if verified else "tool_observation"
+            basis = f"{witness.get('basis') or 'recorded'}_witness" + ("" if verified else "_unverified")
         elif witness.get("confidence") == "inferred" and witness.get("sha"):
             value, kind, basis = "subject_inferred", "context", "repo_subject_inference"
         row = _obs("committed", value, kind, basis, witness,
                    witness_id=witness.get("witness_id"), sha=witness.get("sha") or witness.get("recorded_sha"),
-                   subject=witness.get("subject"))
+                   subject=witness.get("subject"), object_resolved=witness.get("object_resolved"),
+                   reachable_from_head=witness.get("reachable_from_head"))
         row["observation_id"] = f"{witness.get('recording_id')}#witness:{witness.get('witness_id')}"
         rows.append(row)
     for checkpoint in checkpoints:
@@ -184,14 +225,7 @@ def claims_for(checkpoint, include_commit_state=True):
 
 
 def _positive(observation, dimension):
-    if observation.get("dimension") != dimension:
-        return False
-    if dimension == "pushed":
-        return (observation.get("evidence_kind") == "tool_observation"
-                and observation.get("value") == "push_succeeded")
-    if observation.get("evidence_kind") not in ("git_fact",):
-        return False
-    return observation.get("value") not in ("commit_failed", "unresolved", "subject_inferred", None)
+    return observation.get("dimension") == dimension and observation.get("outcome") == "succeeded"
 
 
 def compare(checkpoint, claims, observations):
@@ -230,7 +264,10 @@ def compare(checkpoint, claims, observations):
 
 
 def summarize(observations, claims):
-    """Every dimension with its supported state; claims are not observations."""
+    """Per dimension: evidence presence, recorded outcome and the latest decisive observation.
+
+    Presence says whether evidence exists (claims are not observations); outcome says what the
+    observations show. A failed test never counts as verified."""
     summary = {}
     for dimension in DIMENSIONS:
         found = [item for item in observations if item.get("dimension") == dimension]
@@ -240,7 +277,23 @@ def summarize(observations, claims):
             value = item.get("value")
             if value is not None and value not in values:
                 values.append(value)
-        state = "observed" if found else "claimed" if said else "unknown"
-        summary[dimension] = {"state": state, "observations": len(found), "claims": len(said),
-                              "values": values[:2]}
+        presence = "observed" if found else "claimed" if said else "unknown"
+        outcomes = {item.get("outcome") for item in found}
+        if dimension in NOT_APPLICABLE:
+            outcome = "not_applicable"
+        elif {"succeeded", "failed"} <= outcomes:
+            outcome = "mixed"
+        else:
+            outcome = "succeeded" if "succeeded" in outcomes else "failed" if "failed" in outcomes else "unknown"
+        decisive = [item for item in found if item.get("outcome") in ("succeeded", "failed")]
+        latest = max(decisive, key=lambda item: item.get("order") or 0) if decisive else None
+        summary[dimension] = {"evidence_presence": presence, "outcome": outcome,
+                              "latest": {"observation_id": latest["observation_id"], "value": latest["value"],
+                                         "outcome": latest["outcome"]} if latest else None,
+                              "observations": len(found), "claims": len(said), "values": values[:2]}
     return summary
+
+
+def settled(dimension):
+    """True when the latest decisive observation of a summarized dimension succeeded."""
+    return bool(dimension.get("latest")) and dimension["latest"]["outcome"] == "succeeded"
