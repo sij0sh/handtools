@@ -55,7 +55,7 @@ def render_table(output, fields=None):
         wanted = ('section', 'categories', 'excerpt', 'count', 'tools', 'ref')
         columns = fields or [k for k in wanted if k in present] or present
     elif output.get('operation') == 'investigate':
-        wanted = ('section', 'categories', 'excerpt', 'subject', 'paths', 'relevance', 'ref')
+        wanted = ('section', 'categories', 'excerpt', 'subject', 'paths', 'match_bases', 'ref')
         columns = fields or [k for k in wanted if k in present]
     else:
         columns = fields or [k for k in COLUMNS if k in present] or present

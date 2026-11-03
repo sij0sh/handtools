@@ -121,14 +121,18 @@ def scan_project(args, root, scope):
     return kept, groups, keys, excluded, len(recordings)
 
 
-def schedule(groups, files, exclude=()):
+def schedule(groups, files, exclude=(), hits=None):
     """Invocation-wide read order over harness groups (each newest first).
 
-    First half: newest-first, harnesses rotated. Second half: the rest alternating
-    oldest/newest, harnesses rotated. Returns [(harness, path, lane)] and omitted count.
+    First half (match lane): probe-hit files by hit count, then newest-first, harnesses rotated.
+    Second half: the rest alternating oldest/newest, harnesses rotated.
+    Returns [(harness, path, lane)] and omitted count.
     """
     exclude = {canonical_path(p) for p in exclude}
+    hits = hits or {}
     queues = [(h, [f for f in fs if canonical_path(f) not in exclude]) for h, fs, _ in groups]
+    # Stable sort keeps newest-first order among equal hit counts and among non-hits.
+    queues = [(h, sorted(fs, key=lambda f: -hits.get(f, 0))) for h, fs in queues]
     queues = [(h, list(fs)) for h, fs in queues if fs]
     total = sum(len(fs) for _, fs in queues)
     newest_quota = (min(files, total) + 1) // 2
@@ -155,13 +159,33 @@ def schedule(groups, files, exclude=()):
     return order, total - len(order)
 
 
-def scan_scheduled(args, root, scope, exclude_files=()):
+def _probe(candidates, exclude_files, needles, budget):
+    """Probe hits when seeds exist and candidates exceed the byte budget (D130); else (None, None)."""
+    from .evidence_candidates import probe
+    exclude = {canonical_path(p) for p in exclude_files}
+    files = []
+    for _, paths, _ in candidates:
+        for path in paths:
+            if canonical_path(path) in exclude:
+                continue
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            files.append((path, stat.st_size, stat.st_mtime_ns))
+    if not needles or sum(f[1] for f in files) <= budget:
+        return None, None
+    return probe(files, needles, budget // 2)
+
+
+def scan_scheduled(args, root, scope, exclude_files=(), needles=()):
     """One discovery, one shared file/byte/event allowance across harnesses (investigate, inspect).
 
-    Half the byte allowance is reserved for the context lane; unused match bytes lend forward.
+    The context lane reserves half the byte allowance, or EXPLORE_SHARE after a seed probe whose
+    bytes are charged to the same allowance; unused match bytes lend forward.
     Returns (kept, groups, keys, excluded, scanned, allocation)."""
     from .discovery import candidate_files
-    from .options import DiscoveryOptions, ScanOptions
+    from .options import DiscoveryOptions, EXPLORE_SHARE, ScanOptions
     options = DiscoveryOptions(files=tuple(getattr(args, "recordings", [])), project=root,
                                also_roots=tuple(getattr(args, "project_root", [])),
                                max_files=args.max_candidates, max_candidates=args.max_candidates)
@@ -169,14 +193,19 @@ def scan_scheduled(args, root, scope, exclude_files=()):
         candidates = candidate_files(options, scope)
     except ValueError as error:
         raise DiscoveryUnavailable(str(error)) from None
-    order, omitted = schedule(candidates, args.max_recordings, exclude_files)
+    hits, probed = _probe(candidates, exclude_files, needles, args.max_scan_bytes)
+    order, omitted = schedule(candidates, args.max_recordings, exclude_files, hits)
     counters = {h: c for h, _, c in candidates}
     for c in counters.values():
         c["files_selected"], c["files_omitted_limit"] = 0, 0
     policy = SimpleNamespace(max_text_bytes=None, max_scan_bytes=args.max_scan_bytes)
     text = {h: text_budget(policy, [p for hh, p, _ in order if hh == h], counters[h]) for h in counters}
     total_bytes, total_events = args.max_scan_bytes, args.max_events
-    match_bytes = total_bytes - total_bytes // 2
+    if probed:
+        total_bytes = max(1, total_bytes - probed["bytes_probed"])
+        match_bytes = total_bytes - int(total_bytes * EXPLORE_SHARE)
+    else:
+        match_bytes = total_bytes - total_bytes // 2
     used_bytes = used_events = 0
     recordings, reads, lanes = [], [], {"match": 0, "context": 0}
     stopped = None
@@ -220,9 +249,13 @@ def scan_scheduled(args, root, scope, exclude_files=()):
         for event in recording["events"]:
             event["independent_session"] = keys[recording["file"]]
         kept.append(recording)
-    allocation = {"policy": "half newest-first match, half age-diverse context; totals across harnesses",
+    policy = (f"seed-probe hits then newest-first match, {EXPLORE_SHARE:.0%} age-diverse context; "
+              "probe bytes charged; totals across harnesses" if probed else
+              "half newest-first match, half age-diverse context; totals across harnesses")
+    allocation = {"policy": policy, **({"probe": probed} if probed else {}),
                   "files": {"allowed": args.max_recordings, "read": len(recordings), **lanes, "omitted": unread},
-                  "bytes": {"allowed": total_bytes, "match_reserved_max": match_bytes, "read": used_bytes},
+                  "bytes": {"allowed": args.max_scan_bytes, "match_reserved_max": match_bytes,
+                            "read": used_bytes + (probed["bytes_probed"] if probed else 0)},
                   "events": {"allowed": total_events, "read": used_events}, "stopped": stopped,
                   "age_horizon_ns": min(reads) if reads else None}
     return kept, groups, keys, excluded, len(recordings), allocation

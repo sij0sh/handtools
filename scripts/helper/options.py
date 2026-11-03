@@ -10,6 +10,8 @@ CANDIDATES_DEFAULT = 1000
 FILES_DEFAULT = 8
 TEXT_BYTES_DEFAULT = 8 * 1024 * 1024
 TEXT_BYTES_AUTO_CAP = 32 * 1024 * 1024
+# Context-lane byte share when a seed probe gave the match lane real signal (else half).
+EXPLORE_SHARE = 0.25
 
 
 def command_line(argv):

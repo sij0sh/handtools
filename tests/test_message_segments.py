@@ -120,12 +120,12 @@ class InvestigateTests(unittest.TestCase):
         self.assertEqual(len(lead["relations"]["references"]), 1)
         self.assertNotIn("partial", lead)
 
-    def test_embedded_paths_still_count_for_relevance(self):
+    def test_embedded_paths_still_count_for_matching(self):
         self.session(("user", "Fix this:\n```\nTraceback\n  File \"src/loader.py\"\nKeyError: 'name'\n```\n"
                               "We decided to go with a dict default instead."), ("assistant", "OK."))
         leads = self.investigate("unrelated", "--path", "src/loader.py")
         decision = next(l for l in leads if "decision" in l["categories"])
-        self.assertIn("path", decision["relevance"])
+        self.assertIn("path", decision["match_bases"])
         self.assertNotIn("Traceback", decision["excerpt"])
 
 

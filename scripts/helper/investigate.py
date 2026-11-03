@@ -9,7 +9,8 @@ import os
 import re
 from pathlib import Path
 
-from . import cite, commit_links, commit_rank, message_segments, operation_facts, reconciliation
+from . import (cite, commit_links, commit_rank, error_signatures, evidence_candidates, message_segments,
+               operation_facts, reconciliation)
 from .budget import check
 from .graph_store import canonical_path, digest
 from .options import ScanOptions
@@ -217,54 +218,95 @@ def read_active(identity, args):
 
 # Candidate extraction over loaded recordings.
 
+# Match-basis rank tiers (D133); lower is stronger.
+TIERS = {"path": 0, "error": 0, "sha": 0, "resolved": 1, "path_activity": 1, "exchange": 2, "commit": 2,
+         "goal": 3, "repo_context": 4}
+SEEDED = frozenset(b for b, tier in TIERS.items() if tier <= 1)
+MATCHED = 3
+COPIES = 3
+
+
+def tier(bases):
+    return min((TIERS[b] for b in bases), default=4)
+
+
 class Packet:
-    def __init__(self, providers, goal, paths, errors, active=None):
+    def __init__(self, providers, goal, paths, errors, active=None, seeds=None):
         self.providers = providers
-        self.goal, self.paths, self.errors = goal, paths, [e.lower() for e in errors]
+        self.goal, self.paths, self.errors = goal, paths, errors
         self.words = commit_rank.terms(goal) if goal else []
+        self.seeds = seeds if seeds is not None else evidence_candidates.unique(
+            [evidence_candidates.seed("path", p, "path") for p in paths] + evidence_candidates.error_seeds(errors))
         self.active = active
         self.suppressed = {}
         self.leads = {}
+        # Internal per-lead facts, never emitted: exchange key, prose digest, unmatched-outside-repo flag.
+        self.exchange, self.digests, self.pending = {}, {}, set()
+        self.prior, self.seed_coverage = [], {}
 
     def suppress(self, reason):
         self.suppressed[reason] = self.suppressed.get(reason, 0) + 1
 
-    def relevance(self, text, op_paths=()):
-        low = text.lower()
-        bases = []
-        if any(p in text for p in self.paths):
-            bases.append("path")
-        elif any(p in op_paths for p in self.paths):
-            bases.append("path_activity")
-        if any(e in low for e in self.errors):
-            bases.append("error")
+    def match(self, text, op_paths=()):
+        """(match_bases, matched values, goal hits) of one text against seeds and goal words."""
+        flat = " ".join(str(text or "").split())
+        low = flat.lower()
+        bases, matched = [], []
+        families = shas = None
+        for item in self.seeds:
+            kind, value = item["kind"], item["value"]
+            base = None
+            if kind == "path":
+                if value in flat:
+                    base = "path" if item["seed_basis"] in evidence_candidates.EXACT_BASES else "resolved"
+                elif value in op_paths:
+                    base = "path_activity"
+            elif kind == "error_exact":
+                base = "error" if value.lower() in low else None
+            elif kind == "error_family":
+                if families is None:
+                    families = {f for _, f in error_signatures.signature(flat)}
+                base = "error" if value in families else None
+            elif kind == "sha":
+                if shas is None:
+                    shas = {v for k, v in evidence_candidates.features(low) if k == "sha"}
+                base = "sha" if any(value.startswith(sha) for sha in shas) else None
+            if base is None:
+                continue
+            if base not in bases:
+                bases.append(base)
+            if value not in matched and len(matched) < MATCHED:
+                matched.append(value)
         hits = sum(w in low for w in self.words)
         if hits:
             bases.append("goal")
-        return bases, hits
+        return bases, matched, hits
 
     def add(self, event, category, kind, evidence, text, match=None, recording=None, op_paths=(),
             relations=None, extra=None, active=False, span=None, context=None):
         """One lead. ``span`` = (segment, raw text) the excerpt clips; ``context`` = text matched for relevance."""
         ref = event["ref"]
         key = _key(ref)
-        bases, hits = self.relevance(context if context is not None else text, op_paths)
+        bases, matched, hits = self.match(context if context is not None else text, op_paths)
         applicability = self.applicability(recording)
-        if not bases:
-            if applicability != "repository":
-                self.suppress("scope_unknown_unmatched")
-                return
+        unmatched = not bases
+        if unmatched:
             bases = ["repo_context"]
         lead = self.leads.get(key)
         if lead is None:
+            if unmatched and applicability != "repository":
+                self.pending.add(key)  # kept only if one-hop expansion reaches it (D132)
+            self.exchange[key] = ((recording or {}).get("file"), _key(event.get("request_ref") or ref))
             lead = self.leads[key] = {
                 "section": "lead", "id": lead_id(ref), "categories": [], "kinds": [], "excerpt": excerpt(text, match),
-                "evidence": evidence, "applicability": applicability, "relevance": bases, "goal_hits": hits,
+                "evidence": evidence, "applicability": applicability, "match_bases": bases, "matched": matched,
+                "goal_hits": hits,
                 "session": event.get("session") or (recording or {}).get("session"),
                 "lane": event.get("lane"), "timestamp": event.get("timestamp"), "ref": locator(ref),
                 "relations": {}}
             if span is not None:
                 segment, raw = span
+                self.digests[key] = hashlib.sha256(raw.encode()).hexdigest()
                 lead["excerpt"], start, end = clip_span(raw, match)
                 base = message_segments.offset(event) + segment.start
                 lead.update(segment_id=message_segments.segment_id(event, segment), span=[base + start, base + end])
@@ -373,7 +415,8 @@ class Packet:
             # Failure detail first: it is what the next attempt must avoid.
             text = f"{op.get('tool') or op.get('action')} failed: {detail[:160] or 'no output'} | {what[:120]}"
             self.add(event, "pitfall", "failed_operation", "tool_observation", text,
-                     recording=files.get(op.get("recording_id")), op_paths={op.get("path")}, active=active,
+                     recording=files.get(op.get("recording_id")), op_paths={op.get("repo_path"), op.get("path")},
+                     active=active,
                      extra={"path": op.get("path")} if op.get("path") else None)
         for checkpoint in checkpoints:
             event = by_ref.get(_key(checkpoint.get("publication_ref")))
@@ -387,6 +430,66 @@ class Packet:
         if not active:
             for recording in recordings:
                 self.unfinished(recording, operations, witnesses)
+            self.expand(operations, witnesses)
+
+    def expand(self, operations, witnesses):
+        """One hop (D132): leads in a seed-matched exchange gain `exchange`; with a seed commit, `commit`."""
+        seeded = {}
+        for key, lead in self.leads.items():
+            if SEEDED & set(lead["match_bases"]):
+                seeded.setdefault(self.exchange[key], lead["ref"])
+        paths = {s["value"] for s in self.seeds if s["kind"] == "path"}
+        for op in operations:
+            if paths & {op.get("repo_path"), op.get("path")} and op.get("request_ref"):
+                ref = op.get("call_ref") or op.get("result_ref")
+                seeded.setdefault((op.get("recording_id"), _key(op["request_ref"])), locator(ref) if ref else None)
+        shas = [s["value"] for s in self.seeds if s["kind"] == "sha"]
+        committed = {}
+        for link in witnesses:
+            sha = link.get("sha") or ""
+            if sha and link.get("request_ref") and any(sha.startswith(s) or s.startswith(sha) for s in shas):
+                committed.setdefault((link.get("recording_id"), _key(link["request_ref"])), sha)
+        for key, lead in self.leads.items():
+            if tier(lead["match_bases"]) <= 1:
+                continue
+            exchange = self.exchange[key]
+            base, via = (("commit", committed[exchange]) if exchange in committed else
+                         ("exchange", seeded[exchange]) if exchange in seeded else (None, None))
+            if base is None:
+                continue
+            lead["match_bases"] = [b for b in lead["match_bases"] if b != "repo_context"] + [base]
+            if via and via != lead["ref"]:
+                lead["via"] = via
+            self.pending.discard(key)
+
+    def finish(self):
+        """Drop unexpanded out-of-repo leads; collapse copied prose to the earliest recording (D134)."""
+        for key in self.pending:
+            self.leads.pop(key, None)
+            self.suppress("scope_unknown_unmatched")
+        self.pending.clear()
+        groups = {}
+        for key, lead in self.leads.items():
+            if key in self.digests:
+                groups.setdefault(self.digests[key], []).append(key)
+        for keys in groups.values():
+            if len({self.exchange[k][0] for k in keys}) < 2:
+                continue
+            keys.sort(key=lambda k: (self.leads[k].get("timestamp") or "", self.leads[k]["ref"]))
+            keeper = self.leads[keys[0]]
+            for key in keys[1:]:
+                copy = self.leads.pop(key)
+                if self.exchange[key][0] == self.exchange[keys[0]][0]:
+                    self.leads[key] = copy  # same recording: not a copy
+                    continue
+                for category, kind in zip(copy["categories"], copy["kinds"]):
+                    if category not in keeper["categories"]:
+                        keeper["categories"].append(category)
+                        keeper["kinds"].append(kind)
+                keeper.setdefault("copies", [])
+                if len(keeper["copies"]) < COPIES:
+                    keeper["copies"].append(copy["ref"])
+                self.suppress("copied_evidence")
 
     def unfinished(self, recording, operations, witnesses):
         """Last substantive request per lane whose own recorded work was edited but not verified or committed."""
@@ -448,13 +551,10 @@ def rank_key(lead):
     if current:
         return (-1,)
     applic = {"repository": 0, "historical_root": 1}.get(lead["applicability"], 2) + (3 if lead.get("active_context") else 0)
-    exact = any(b in ("path", "error") for b in lead["relevance"])
-    loose = "path_activity" in lead["relevance"]
-    context = lead["relevance"] == ["repo_context"]
     direct = 0 if lead["evidence"] in ("human", "tool_observation") else 1
     flagged = bool(lead["relations"].get("corrects") or lead["relations"].get("later_rejection")
                    or "unverified_request" in lead["kinds"])
-    return (applic, not exact, not loose, -lead["goal_hits"], context, direct, not flagged)
+    return (applic, tier(lead["match_bases"]), -lead["goal_hits"], direct, not flagged)
 
 
 def order(leads, prior):
@@ -489,8 +589,8 @@ def order(leads, prior):
                 taken.add(lead["id"])
                 seen.add(lead.get("session"))
                 round_rows.append(lead)
-        if first and not any(r["relevance"] == ["repo_context"] for r in round_rows):
-            extra = next((lead for lead in ranked if lead["id"] not in taken and lead["relevance"] == ["repo_context"]), None)
+        if first and not any(r["match_bases"] == ["repo_context"] for r in round_rows):
+            extra = next((lead for lead in ranked if lead["id"] not in taken and lead["match_bases"] == ["repo_context"]), None)
             if extra:
                 taken.add(extra["id"])
                 round_rows.append(extra)
@@ -543,9 +643,11 @@ def views(leads, providers, sessions):
 def plan():
     return [{"step": "frontier", "detail": "freeze active recording identity and last complete record"},
             {"step": "discover", "detail": "one project-matched discovery; investigate totals across harnesses"},
-            {"step": "schedule", "detail": "half newest-first match lane, half age-diverse context lane"},
+            {"step": "seed", "detail": "paths, renames, symbols, errors, prior-work commits, active request"},
+            {"step": "schedule", "detail": "probe seed needles when over budget; match lane hits first, context lane age-diverse"},
             {"step": "git", "detail": "commits/changes for prior work; HEAD and worktree status for scope"},
             {"step": "classify", "detail": "pitfall, invariant, task, decision recognizers; noise suppressed"},
+            {"step": "expand", "detail": "one hop: same exchange as a seed match, or a seed commit"},
             {"step": "order", "detail": "category rounds, repo-context slot, prior work after round one"}]
 
 
@@ -564,9 +666,39 @@ def validate_paths(paths):
     return [relative(p) for p in paths]
 
 
-def collect(args, providers, deadline, goal, paths, errors, sessions=True):
-    """Shared lifecycle: freeze the active frontier, one scheduled scan, classify. Returns (packet, active state)."""
+def seeds(providers, goal, paths, errors, prior, active=None, graph=None):
+    """Retrieval seeds (D129) and their coverage: flags, renames, symbols, prior work, active request."""
+    root = providers.resolver.repo(providers.store.root)
+    found = evidence_candidates.path_seeds(paths, providers.resolver, root)
+    found += evidence_candidates.error_seeds(errors)
+    symbols, ambiguous = evidence_candidates.symbol_seeds(goal, graph)
+    found += symbols + evidence_candidates.prior_seeds(prior)
+    if active is not None:
+        requests = [e for e in active["events"] if human(e) and noise(prose(e)) is None]
+        if requests:
+            found += evidence_candidates.text_seeds(prose(requests[-1]), providers.store.root)
+    found = evidence_candidates.unique(found)
+    by_basis = {}
+    for item in found:
+        by_basis[item["seed_basis"]] = by_basis.get(item["seed_basis"], 0) + 1
+    return found, {"by_basis": by_basis, "symbols_ambiguous": ambiguous,
+                   "symbols": "searched" if graph is not None else "not_searched"}
+
+
+def _graph(providers, goal):
+    """The repository graph for symbol seeds; None when no goal identifiers or no snapshot."""
+    if providers.graph is None and goal and evidence_candidates._IDENT.search(goal):
+        try:
+            providers.load_graph()
+        except (ValueError, OSError):
+            return None
+    return providers.graph
+
+
+def collect(args, providers, deadline, goal, paths, errors, sessions=True, graph=None):
+    """Shared lifecycle: freeze the active frontier, seed, one scheduled scan, classify. Returns (packet, active state)."""
     packet = Packet(providers, goal, paths, errors)
+    packet.prior = prior_work(goal, providers) if goal else []
     if not sessions:
         return packet, {"state": "not_searched"}
     identity = identify(args, providers)
@@ -578,6 +710,10 @@ def collect(args, providers, deadline, goal, paths, errors, sessions=True):
             # The active read is charged to the same total allowance.
             args.max_scan_bytes = max(1, args.max_scan_bytes - state["bytes_read"])
     packet.active = active
+    deadline.check()
+    packet.seeds, packet.seed_coverage = seeds(providers, goal, paths, errors, packet.prior, active,
+                                               graph if graph is not None else _graph(providers, goal))
+    providers.needles = evidence_candidates.needles(packet.seeds)
     providers.scheduled = True
     providers.load({"recordings", "operations", "checkpoints", "commit_links"})
     deadline.check()
@@ -587,6 +723,9 @@ def collect(args, providers, deadline, goal, paths, errors, sessions=True):
     if active is not None:
         deadline.check()
         packet.active_task(active, state, providers.cache)
+    packet.finish()
+    if goal:
+        packet.prior = prior_work(goal, providers)  # requests need the loaded commit links
     return packet, state
 
 

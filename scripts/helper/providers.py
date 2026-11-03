@@ -49,6 +49,8 @@ class Providers:
         self.recording_files = None
         # Scheduled scans (investigate, inspect): invocation-wide totals, active file excluded.
         self.scheduled, self.exclude_files, self.allocation = False, (), None
+        # Exact seed needles (paths, errors, SHAs) for the scheduled scan's probe.
+        self.needles = ()
 
     def load(self, names):
         for provider in catalog.providers_for(names):
@@ -155,7 +157,7 @@ class Providers:
                         event["independent_session"] = keys[recording["file"]]
             elif self.scheduled:
                 self.recordings, groups, _, excluded, self.scan_count, self.allocation = scan_scheduled(
-                    self.args, self.store.root, scope, self.exclude_files)
+                    self.args, self.store.root, scope, self.exclude_files, self.needles)
             else:
                 self.recordings, groups, _, excluded, self.scan_count = scan_project(self.args, self.store.root, scope)
         except DiscoveryUnavailable as error:

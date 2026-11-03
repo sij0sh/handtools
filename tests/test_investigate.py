@@ -127,7 +127,7 @@ class InvestigateTests(unittest.TestCase):
         kinds = {k for p in pitfalls for k in p["kinds"]}
         self.assertEqual(kinds, {"failed_operation", "correction"})
         failed = next(p for p in pitfalls if "failed_operation" in p["kinds"])
-        self.assertIn("error", failed["relevance"])
+        self.assertIn("error", failed["match_bases"])
         self.assertIn("blob is not a function", failed["excerpt"])
         correction = next(p for p in pitfalls if "correction" in p["kinds"])
         self.assertIn("corrects", correction["relations"])
@@ -248,6 +248,40 @@ class InvestigateTests(unittest.TestCase):
         self.assertEqual(out["views"]["invariant"]["delivered"], 1)
         self.assertEqual(set(out["results"][0]), {"excerpt"})
 
+    def test_error_seed_expands_its_exchange(self):
+        self.session("x", [("user", "Refactor the toolbar; sorting must stay stable for users."),
+                           ("fail", "npm test", "TypeError: blob is not a function"), ("assistant", "Done.")])
+        out = self.investigate("zebra", "--error", "blob is not a function")
+        lead = self.leads(out, "invariant")[0]
+        failed = self.leads(out, "pitfall")[0]
+        self.assertEqual(lead["match_bases"], ["exchange"])
+        self.assertEqual(lead["via"], failed["ref"])
+        self.assertEqual(out["coverage"]["seeds"]["by_basis"], {"error": 2})
+
+    def test_renamed_path_is_resolved_seed(self):
+        self.git("mv", "ui/table.tsx", "ui/grid.tsx")
+        self.git("commit", "-qm", "Rename table to grid")
+        self.session("r", [("user", "Keep ui/table.tsx exports stable; we must not rename Table."),
+                           ("assistant", "OK.")])
+        lead = self.leads(self.investigate("--path", "ui/grid.tsx"), "invariant")[0]
+        self.assertIn("resolved", lead["match_bases"])
+        self.assertEqual(lead["matched"], ["ui/table.tsx"])
+
+    def test_prior_work_sha_in_prose_is_exact(self):
+        self.session("s", [("user", f"Commit {self.export[:10]} must not ship to release."), ("assistant", "OK.")])
+        lead = self.leads(self.investigate("export", "button"), "invariant")[0]
+        self.assertIn("sha", lead["match_bases"])
+
+    def test_copied_prose_collapses_to_earliest(self):
+        text = "Exports must stay UTC; the billing team parses them."
+        self.session("a", [("user", text), ("assistant", "OK.")], mtime=1_000_000_000_000_000_000)
+        self.session("b", [("user", text), ("assistant", "OK.")])
+        out = self.investigate("exports", "billing")
+        invariants = self.leads(out, "invariant")
+        self.assertEqual(len(invariants), 1)
+        self.assertEqual(len(invariants[0]["copies"]), 1)
+        self.assertEqual(out["coverage"]["selection"]["suppressed"].get("copied_evidence"), 1)
+
     def test_invalid_path_plan_and_no_graph(self):
         failed = self.run_cli("investigate", "--path", "../etc/passwd", ok=False)
         self.assertIn("repository-relative", failed["error"])
@@ -255,7 +289,7 @@ class InvestigateTests(unittest.TestCase):
         self.assertEqual(plan["plan"]["graph"], "not used")
         self.session("p", [("user", "Exports must escape commas in ui/export-button.tsx.")])
         out = self.investigate("--path", "ui/export-button.tsx")
-        self.assertIn("path", self.leads(out, "invariant")[0]["relevance"])
+        self.assertIn("path", self.leads(out, "invariant")[0]["match_bases"])
         self.assertFalse(any(self.cache.rglob("snapshot-*.json")))
 
     def test_tiny_budget_keeps_views_and_one_delivery_ref(self):

@@ -266,7 +266,7 @@ class Runtime:
         providers = Providers(pinned, self.store, deadline)
         name = node.get('qualname') or ''
         packet, active_state = investigate.collect(pinned, providers, deadline, name.replace('.', ' '),
-                                                   [node['path']], [], sessions=not args.no_sessions)
+                                                   [node['path']], [], sessions=not args.no_sessions, graph=graph)
         scanned = None if args.no_sessions else (providers.recordings, providers.session_coverage())
         history = target_history.run(pinned, self.store, lambda store, options, pin=None: graph, scanned=scanned)
         compact = target_history.compact(history['results'])
@@ -490,12 +490,13 @@ class Runtime:
         active = packet.active
         deadline.check()
         leads = list(packet.leads.values())
-        prior = investigate.prior_work(goal, providers) if goal else []
+        prior = packet.prior
         rows = investigate.order(leads, prior)
         views = investigate.views(leads, providers, not args.no_sessions)
         recordings = providers.coverage.get("recordings", {})
         coverage = {name: {k: v for k, v in item.items() if k not in ("gaps", "signature")}
                     for name, item in providers.coverage.items()}
+        coverage["seeds"] = packet.seed_coverage
         coverage["selection"] = {"eligible": len(leads), "prior_work": len(prior), "suppressed": packet.suppressed,
                                  "meaning": "suppression is selection policy, not a scan gap"}
         active_scope = {k: v for k, v in active_state.items() if k not in ("sha256",)}
