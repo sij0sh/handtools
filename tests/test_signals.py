@@ -236,6 +236,22 @@ class FixAndVerificationTests(Fixture):
         self.assertEqual(self.rows(out, "failure_after_fix"), [])
         self.assertEqual(out["coverage"]["signals"]["chains_excluded"], 1)
 
+    def test_two_runs_give_identical_results(self):
+        self.fixture()
+        self.chain("s5", "The crash in a.py is back again, look at it")
+        for argv in (("a.py", "--max-bytes", "60000"),):
+            first, second = self.cli(*argv), self.cli(*argv)
+            self.assertEqual(first["results"], second["results"])
+            self.assertEqual(first["views"], second["views"])
+        env = self.env()
+        runs = [invoke([*argv, "--repo", str(self.repo), "--cache", str(self.cache)], env=env).json()
+                for argv in (["activity", "a.py"], ["activity", "a.py"],
+                             ["investigate", "crash parsing", "--path", "a.py"],
+                             ["investigate", "crash parsing", "--path", "a.py"])]
+        self.assertTrue(all(run["results"] for run in runs))
+        self.assertEqual(runs[0]["results"], runs[1]["results"])
+        self.assertEqual(runs[2]["results"], runs[3]["results"])
+
     def test_verification_gap_subtypes(self):
         self.session("s6", [
             user("u1", None, "Update a.py and push it to origin"),

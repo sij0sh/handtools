@@ -6,12 +6,20 @@
 - `prior_work` ranks non-merge commits against goal words: each term weighs log(1 + commits / commits containing it). Subject x3, body x1, best path x2, linked human request x2. Add 1 if a changed path still exists. Ties go to the newest.
 - Generic verbs (`add`, `new`, `ui`, `fix`, ...) and words under 3 letters are dropped; a goal with none left is an input error.
 - Rows show up to 5 paths with current state (`exists`, `old -> new`, `-> gone`), plus the request and cite when recorded.
+- `message_segments` splits task prose from pasted skills, logs, quotes and code; only prose becomes requirements.
+- Seeds: `--path`, `--error`, SHAs and paths named in the goal. `match_bases` tiers: exact `path`/`error`/`sha` < `resolved`/`path_activity` < `exchange`/`commit` (one hop) < `goal` < `repo_context`; `matched`, `via` say why. Copies across recordings collapse to the earliest.
+- Leads carry `episode_id` and up to 3 `related` links.
+
+## Episodes and links
+
+- Episode: one human request and what it governs; acks stay in it.
+- Links come only from shared paths, error families, SHAs or recorded structure, earlier to later: `explicit_followup`, `possible_regression`, `possible_same_problem`, `proposal_response` (`accepted`/`rejected`/`unclear`), `possible_revision`, `implementation_link`, `related_context`. Max 5 per relation per episode, one hop. Never causal; silence is never acceptance.
 
 ## Scanning
 
 - `--max-recordings`, `--max-scan-bytes`, `--max-events` are per-call totals.
 - Half the files are newest-first, harnesses rotated; half alternate oldest/newest per harness.
-- The match lane gets at most half the bytes; unused bytes lend forward.
+- The match lane gets at most half the bytes (three quarters when an exact-needle probe ranks files first); unused bytes lend forward.
 - `coverage.recordings.allocation` reports files read/omitted, bytes, events, age horizon.
 - The active session comes from `--session REF`, or the harness session env id when it validates against project recordings; else `scope.active.state` is `unknown` or `ambiguous`.
 - Only its tail to the last complete line is read; the invoking call is excluded.
@@ -29,11 +37,12 @@
 | `failed_exchange` | failed target ops per recording, lane and request | `count`, `tools`, first error, `last_outcome` (observation only); empty non-zero exits skipped |
 | `correction_candidate` | next human message after an exchange on the target | correction phrasing, noise filtered; `corrects` is the prior assistant ref |
 | `checkpoint_gap` | target ops between a checkpoint boundary and its publication, publication branch only | `ops_after`, up to 5 `refs`; `unavailable` without a checkpoint-capable adapter |
-| `repeated_read` | target reads beyond the first, per session | `reads`, `extra_reads`, `turns`; the file can change between reads |
+| `repeated_read` | target reads beyond the first, per session | `reads`, `extra_reads`, `turns`, `unchanged_pairs`/`changed_pairs` (complete reads, hash compared) |
+| `failure_after_fix` | same error family after a fix attempt (edit + fix claim) | `failure_after_fix` needs `exposure` (`same_lane_after_fix`, `content_identity`), else `possible_failure_after_fix` |
+| `verification_gap` | one per target episode and `subtype` | `claim_without_observed_check`, `check_failed`, `check_predates_change`, `check_scope_unknown`, `publication_unconfirmed`; `missing`, `scope.reason` |
 
 - Order is round-robin across kinds, newest first.
-- Leads, not verdicts: a reread is not waste, an error not a reusable pitfall.
-- Not built (no evidence yet): failure-after-fix causality, unchanged-content rereads.
+- Leads, not verdicts: a reread is not waste, an error not a reusable pitfall, a later failure not proof the fix failed, a gap only absence in scanned scope.
 
 ## History lane
 
@@ -57,11 +66,12 @@
 
 ## Activity
 
-- `activity TARGET` selects recorded operations for one exact file or symbol, in lane order.
+- `activity TARGET` selects recorded operations for one exact file or symbol, in lane order, then `file_observation` and `change` rows.
+- Observations: `read_result`, `write_payload`, `reconstructed`, `native_patch`, `planning_diff`; `content_sha256` over UTF-8 text. `complete` needs positive evidence; else `range`, `patch`, `truncated`, `unknown` (no hash).
+- Changes: `direct` (one native edit), `associated` (commands or several edits between), `unknown`; `candidate_ops` (max 5) are leads. A path missing from a later snapshot is never `deleted`.
 - Expand a ref with `show` to get the selected event whole (`selected: true`), its paired call and result, and its turn's human request.
-- Copy a `cite` token, or the JSON `ref` outside configured roots; a bare session id is refused.
+- Copy a `cite` token (JSON `ref` outside configured roots); a bare session id is refused.
 - Human requests, agent proposals and tool outcomes are different evidence.
-- Expanded `show` results supply `id@line#hash` tokens; previews and summaries are locators.
 - Historical source or test results do not establish today's state.
 - A zero row count describes only the scanned scope.
 - `independent_session` separates session counts; recordings may include forks and subagents.

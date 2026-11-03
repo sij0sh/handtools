@@ -331,7 +331,7 @@ def episode_for(lookup, recording_file, request_ref):
 
 
 def related(episode_id, link_rows, episodes_by_id, limit=3):
-    """<= limit {relation, strength, target} for one episode; target = the other episode's request ref."""
+    """<= limit {relation, strength, direction, target}; target = the other episode's full request ref."""
     out = []
     for row in link_rows:
         if episode_id not in (row["source"], row["target"]):
@@ -342,7 +342,7 @@ def related(episode_id, link_rows, episodes_by_id, limit=3):
             continue
         out.append({"relation": row["relation"], "strength": row["strength"],
                     "direction": "later" if row["source"] == episode_id else "earlier",
-                    "target": _locator(ep.request["ref"])})
+                    "target": ep.request["ref"]})
         if len(out) == limit:
             break
     return out

@@ -88,7 +88,7 @@ Full history: `.agents/artifacts/decisions-archive-2026-11-02.md`, `.agents/arti
   Fields: `link_id, source, target, relation, strength, basis, matched, evidence_refs (<= 5), ordering_basis (same_lane_order / ancestry / timestamp_only / unknown), alternatives (other candidate targets, <= 3)`.
 - [x] D139: Ambiguous acknowledgment? An ack after several proposals in the same assistant turn links to each with `response=unclear` and `alternatives`; acceptance never inferred from silence or implementation alone; later proposal never marks earlier one superseded.
 - [x] D140: Bounds? Per episode <= 5 links per relation, one hop; overflow counted in coverage `links_omitted` (selection bound; episodes coverage carries no `complete` flag).
-- [x] D141: Exposure? `investigate` lead gets `episode_id` and `related` (<= 3 `{relation, strength, target ref}`); `trace` emits `section: "link"` rows plus a `trace` continuation per target episode; `_related` uses the operation's own `request_ref`. Chronological order only where `ordering_basis` is not `unknown`; otherwise listed after, flagged.
+- [x] D141: Exposure? `investigate` lead gets `episode_id` and `related` (<= 3 `{relation, strength, target ref}`); `trace` emits `section: "link"` rows plus a `trace` continuation per target episode; `_related` uses the operation's own `request_ref`. Chronological order only where `ordering_basis` is not `unknown`; otherwise listed after, flagged. `related[].target` is a cite token like the lead `ref` (raw JSON refs doubled lead rows to ~1.6 KB).
 
 ### M4 - File observations
 - [x] D142: Observation kinds? `read_result`, `write_payload`, `native_patch`, `planning_diff`, `reconstructed`. Dropped: `git_blob` (no consumer beyond reconstruction, which uses recorded bases), shell write-target grammar (optional in plan; parsed intent proves nothing) - defaults 1.
@@ -107,7 +107,7 @@ Full history: `.agents/artifacts/decisions-archive-2026-11-02.md`, `.agents/arti
 
 ### M6 - Integration
 - [x] D153: Docs? Update `README.md` (tables, signal kinds), `references/history.md` (segments, episodes/links, observations, signals, attribution limits), `references/runtime.md` (new tables, field renames). Size guard raised: `history.md` <= 8 KB, total <= 18 KB - new behavior needs words; guard still pins regrowth.
-- [x] D154: Tests? New `test_message_segments.py`, `test_episode_links.py`, `test_file_observations.py`, `test_error_signatures.py`; extend existing per plan acceptance lists (except dropped items D142, D150). Determinism test: two runs, identical results. Stdlib-only run is the suite; tree-sitter tests skip as today.
+- [x] D154: Tests? New `test_message_segments.py`, `test_episode_links.py`, `test_file_observations.py`, `test_error_signatures.py`; extend existing per plan acceptance lists (except dropped items D142, D150). Determinism test: two runs, identical results. Stdlib-only run is the suite; tree-sitter tests skip as today. Determinism test lives in `test_signals.py` (signals, activity, investigate).
 - [x] D155: Release check? M6 commit reruns D107 baseline goals; commit message carries before/after lead table; regression = any baseline exact-path/error lead lost.
 
 ## Open

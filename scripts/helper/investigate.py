@@ -474,7 +474,8 @@ class Packet:
             lead["episode_id"] = episode
             related = episode_links.related(episode, rows, lookup["by_id"])
             if related:
-                lead["related"] = related
+                # Cite tokens like the lead's own ref: compact and accepted by show/trace.
+                lead["related"] = [{**item, "target": locator(item["target"])} for item in related]
 
     def finish(self):
         """Drop unexpanded out-of-repo leads; collapse copied prose to the earliest recording (D134)."""

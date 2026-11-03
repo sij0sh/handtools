@@ -21,6 +21,13 @@
 - These are different observations: test pass, commit, push, live confirmation. A checkpoint is only a claim with a known coverage limit.
 - The tool keeps unknown results and unsupported checkpoint shapes visible.
 
+- `section: "link"` rows: candidate episode links, each with a `trace` continuation.
+
+## Tables
+
+- Transient, per call: `message_segments`, `episodes`, `episode_links`, `file_observations`, `change_observations`.
+- Leads: `match_bases`, `matched`, `via` replace `relevance`. Commit observations add `object_resolved`, `reachable_from_head`; only a resolved object is `git_fact`.
+
 ## show
 
 - `show` accepts these refs: snapshot source, node or edge refs; cite tokens; event JSON refs; full commit SHAs (`git:` is optional); and `continue:` tokens.
@@ -30,13 +37,13 @@
 
 - One read-only `SELECT` or `WITH` for each call.
 - The tool rejects these: data changes, ATTACH, PRAGMA, extension load, and more than one statement.
-- The tool compiles dependencies before it loads providers. Thus a query reads only the tables it names.
+- A query loads only the tables it names.
 - `--plan` lists the tables and does not load providers. The tool still reads the `--input` files to get their schema.
 - `--param NAME=VALUE` binds `:NAME`, `$NAME` or `@NAME` as a string.
 - `--input NAME=FILE` adds object rows from a JSON array, a JSONL file, or a current result envelope (`-` is stdin). The built-in names are reserved.
 - `--type TABLE.COLUMN=TYPE` supplies the type for a column that is missing or all null.
 - Use CTEs for intermediate tables. DDL is unsupported.
-- SQL reads all bounded input before projection and paging. Thus `--limit` changes rows delivered, not aggregates.
+- SQL reads all bounded input before paging: `--limit` changes rows delivered, not aggregates.
 
 ## Budgets
 

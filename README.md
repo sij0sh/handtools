@@ -81,7 +81,7 @@ prior_work
 
 Each round takes one lead per view, then one `prior_work` commit (subject, SHA, paths, linked request). `partial` means the scan was bounded; `next` offers a deeper rescan. Add `--path PATH` or `--error TEXT` to anchor on files or a failure. `transient` means nothing was retained.
 
-`signals TARGET` lists, for one file or symbol: failed exchanges, correction candidates, checkpoint coverage gaps and repeated reads. Leads, not verdicts: a reread is not waste, an error is not a reusable pitfall.
+`signals TARGET` lists, for one file or symbol: failed exchanges, correction candidates, checkpoint coverage gaps, repeated reads (with unchanged-content pairs), failures after a fix and verification gaps. Leads, not verdicts: a reread is not waste, an error is not a reusable pitfall, a gap is only absence in the scanned scope.
 
 ## Use
 
@@ -94,7 +94,7 @@ python3 "$S/remember.py" query "SELECT text, cite FROM events WHERE role='user' 
 python3 "$S/remember.py" query 'SELECT path, count(*) AS n FROM changes GROUP BY path ORDER BY n DESC LIMIT 10'
 ```
 
-Tables: `nodes`, `edges`, `files`, `gaps`, `commits`, `changes`, `file_status`, `commit_links`, `events`, `sessions`, `operations`, `checkpoints`, `edit_hunks`, `edit_symbols`. SQL is read-only, built-in SQLite. See [runtime contracts](references/runtime.md).
+Tables: `nodes`, `edges`, `files`, `gaps`, `commits`, `changes`, `file_status`, `commit_links`, `events`, `sessions`, `operations`, `checkpoints`, `edit_hunks`, `edit_symbols`, `message_segments`, `episodes`, `episode_links`, `file_observations`, `change_observations`. SQL is read-only, built-in SQLite. See [runtime contracts](references/runtime.md).
 
 ### Built-in operations
 

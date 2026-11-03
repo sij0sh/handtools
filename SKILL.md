@@ -23,7 +23,7 @@ The output shows leads in four groups: `pitfall` (failed tries, corrections), `i
 | `find TEXT` | Find one path, name, error or contract. |
 | `inspect TARGET` | Show source, evidence leads, possible users, dependencies and history for one item. |
 | `activity TARGET` | Show recorded actions for one file or name: action, path, result, reason, witnesses. |
-| `signals TARGET` | Show failed exchanges, possible corrections, missing checkpoints and repeated reads for one file or name. |
+| `signals TARGET` | Show failed exchanges, possible corrections, missing checkpoints, repeated reads, failures after a fix and verification gaps for one file or name. |
 | `trace REF` |Show the sequence of events around a request, failure, checkpoint or commit. It shows time order, missing data, observations for each dimension, and refs to go deeper or wider. |
 | `show REF` | Show more source, session or commit evidence. Then run the continuation that the tool returns. |
 | `query 'SELECT ...'` |  Run SQLite on the built-in tables. `describe TABLE` shows the columns. |
