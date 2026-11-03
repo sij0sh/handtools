@@ -9,7 +9,7 @@ import os
 import re
 from pathlib import Path
 
-from . import cite, commit_links, commit_rank, operation_facts, reconciliation
+from . import cite, commit_links, commit_rank, message_segments, operation_facts, reconciliation
 from .budget import check
 from .graph_store import canonical_path, digest
 from .options import ScanOptions
@@ -30,14 +30,10 @@ CHOICE = re.compile(r"\b(decided|decision|we(?:'ll| will) (?:go with|use)|go wit
                     r"rather than|trade-?off|opted|in favou?r of|prefer(?:red)? (?:to|over))\b", re.I)
 ACK = re.compile(r"^\W*(ok(ay)?|yes|yep|yeah|y|no|nope|thanks?( you)?|ty|go( ahead)?|continue|proceed|sure|do it|"
                  r"lgtm|great|nice|done|perfect|cool|good)\W*$", re.I)
-WRAPPER = re.compile(r"<(system-reminder|command-[a-z-]+|local-command-[a-z-]+|user-prompt-submit-hook|"
-                     r"task-notification|bash-[a-z-]+)\b[^>]*>.*?</\1>", re.S | re.I)
 COPIED = re.compile(r'"schema_version"\s*:|"operation"\s*:\s*"(investigate|inspect|recall|signals|trace)"')
 
 
-def strip(text):
-    """Visible human/assistant prose: harness wrappers removed, whitespace collapsed."""
-    return " ".join(WRAPPER.sub(" ", str(text or "")).split())
+prose = message_segments.prose
 
 
 def noise(text):
@@ -58,6 +54,24 @@ def excerpt(text, match=None):
         return text[:EXCERPT]
     start = max(0, match.start() - EXCERPT // 3)
     return ("..." if start else "") + text[start:start + EXCERPT]
+
+
+def clip_span(raw, match=None):
+    """(display excerpt, start, end) of one raw span; start/end index the raw text before collapsing."""
+    start = 0 if match is None else max(0, match.start() - EXCERPT // 3)
+    while start < len(raw) and raw[start].isspace():
+        start += 1
+    shown, end, space = [], start, False
+    while end < len(raw) and len(shown) < EXCERPT:
+        if raw[end].isspace():
+            if shown and not space:
+                shown.append(" ")
+            space = True
+        else:
+            shown.append(raw[end])
+            space = False
+        end += 1
+    return ("..." if raw[:start].strip() else "") + "".join(shown).rstrip(), start, end
 
 
 def lead_id(ref):
@@ -191,7 +205,7 @@ def read_active(identity, args):
     recording["events"] = events
     lanes = {}
     for e in events:
-        if human(e) and noise(strip(e.get("text"))) is None:
+        if human(e) and noise(prose(e)) is None:
             lanes[e.get("lane")] = e
     state = {**identity, "boundary": boundary, "prefix": "tail" if start else "whole",
              "bytes_read": scope["bytes_scanned"], "state": "active"}
@@ -230,10 +244,11 @@ class Packet:
         return bases, hits
 
     def add(self, event, category, kind, evidence, text, match=None, recording=None, op_paths=(),
-            relations=None, extra=None, active=False):
+            relations=None, extra=None, active=False, span=None, context=None):
+        """One lead. ``span`` = (segment, raw text) the excerpt clips; ``context`` = text matched for relevance."""
         ref = event["ref"]
         key = _key(ref)
-        bases, hits = self.relevance(text, op_paths)
+        bases, hits = self.relevance(context if context is not None else text, op_paths)
         applicability = self.applicability(recording)
         if not bases:
             if applicability != "repository":
@@ -248,6 +263,13 @@ class Packet:
                 "session": event.get("session") or (recording or {}).get("session"),
                 "lane": event.get("lane"), "timestamp": event.get("timestamp"), "ref": locator(ref),
                 "relations": {}}
+            if span is not None:
+                segment, raw = span
+                lead["excerpt"], start, end = clip_span(raw, match)
+                base = message_segments.offset(event) + segment.start
+                lead.update(segment_id=message_segments.segment_id(event, segment), span=[base + start, base + end])
+                if not message_segments.complete(event):
+                    lead["partial"] = True
             if active:
                 lead["active_context"] = True
         if category not in lead["categories"]:
@@ -284,7 +306,16 @@ class Packet:
                 kind = event["kind"]
                 if kind not in ("user_message", "assistant_message"):
                     continue
-                text = strip(event.get("text"))
+                text = prose(event)
+                spans = message_segments.prose_spans(event)
+                context = message_segments.visible(event.get("text"))
+
+                def first(pattern, limit=None):
+                    for item in spans:
+                        found = pattern.search(item[1][:limit] if limit else item[1])
+                        if found:
+                            return item, found
+                    return None, None
                 if kind == "user_message":
                     if not human(event):
                         continue
@@ -296,28 +327,35 @@ class Packet:
                         continue  # active humans feed the task view only
                     paths = turn_paths.get((recording["file"], event.get("turn")), ())
                     prior = assistant_last.get(event.get("lane"))
+                    embedded = [message_segments.segment_id(event, s) for s in message_segments.parse(event.get("text"))
+                                if s.kind == "reference"]
+                    linked = {"references": embedded[:5]} if embedded else {}
                     if CORRECTION.search(text[:300]) and prior is not None:
                         self.add(event, "pitfall", "correction", "human", text, recording=recording, op_paths=paths,
-                                 relations={"corrects": locator(prior["ref"])})
-                    found = REQUIRE.search(text)
+                                 relations={"corrects": locator(prior["ref"]), **linked},
+                                 span=spans[0] if spans else None, context=context)
+                    span, found = first(REQUIRE)
                     if found:
-                        self.add(event, "invariant", "human_requirement", "human", text, found, recording, paths)
-                    found = CHOICE.search(text)
+                        self.add(event, "invariant", "human_requirement", "human", text, found, recording, paths,
+                                 relations=linked, span=span, context=context)
+                    span, found = first(CHOICE)
                     if found:
-                        self.add(event, "decision", "human_choice", "human", text, found, recording, paths)
+                        self.add(event, "decision", "human_choice", "human", text, found, recording, paths,
+                                 relations=linked, span=span, context=context)
                 else:
                     if not text:
                         continue
                     assistant_last[event.get("lane")] = event
-                    found = CHOICE.search(text)
+                    span, found = first(CHOICE)
                     if found and not active:
                         later = next((h for h in humans if h.get("lane") == event.get("lane")
                                       and h["order"] > event["order"]), None)
                         relations = {}
-                        if later is not None and CORRECTION.search(strip(later.get("text"))[:300]):
+                        if later is not None and CORRECTION.search(prose(later)[:300]):
                             relations["later_rejection"] = locator(later["ref"])
                         self.add(event, "decision", "assistant_proposal", "assistant_claim", text, found, recording,
-                                 turn_paths.get((recording["file"], event.get("turn")), ()), relations)
+                                 turn_paths.get((recording["file"], event.get("turn")), ()), relations,
+                                 span=span, context=context)
         seen_ops = set()
         for op in operations:
             if op.get("outcome") != "failed" or op.get("operation_id") in seen_ops:
@@ -327,7 +365,7 @@ class Packet:
             if event is None:
                 continue
             result = by_ref.get(_key(op.get("result_ref")))
-            detail = strip(result.get("text") if result else "")
+            detail = message_segments.visible(result.get("text") if result else "")
             if not detail and op.get("exit_code") == 1:
                 self.suppress("empty_nonzero_exit")  # grep/diff style "no match", not a failure lead
                 continue
@@ -342,7 +380,7 @@ class Packet:
             if event is None:
                 continue
             claims = reconciliation.claims_for(checkpoint)
-            text = "; ".join(c.get("excerpt") or str(c.get("value")) for c in claims[:3]) or strip(event.get("text"))
+            text = "; ".join(c.get("excerpt") or str(c.get("value")) for c in claims[:3]) or prose(event)
             self.add(event, "task", "checkpoint_claim", "checkpoint_claim", text,
                      recording=files.get(checkpoint.get("recording_id")), active=active,
                      extra={"boundary_status": checkpoint.get("boundary_status")})
@@ -354,7 +392,7 @@ class Packet:
         """Last substantive request per lane whose own recorded work was edited but not verified or committed."""
         last = {}
         for event in recording["events"]:
-            if human(event) and noise(strip(event.get("text"))) is None:
+            if human(event) and noise(prose(event)) is None:
                 last[event.get("lane")] = event
         for request in last.values():
             dims = self.dimensions(recording, request, operations, witnesses)
@@ -365,8 +403,9 @@ class Packet:
                    and _key(o.get("request_ref")) == key]
             ended_failed = bool(own) and max(own, key=lambda o: o.get("order") or 0).get("outcome") == "failed"
             if edited and open_ or ended_failed:
-                self.add(request, "task", "unverified_request", "human", strip(request.get("text")),
-                         recording=recording, extra={"dimensions": _dimension_view(dims)})
+                spans = message_segments.prose_spans(request)
+                self.add(request, "task", "unverified_request", "human", prose(request),
+                         span=spans[0] if spans else None, recording=recording, extra={"dimensions": _dimension_view(dims)})
 
     @staticmethod
     def dimensions(recording, request, operations, witnesses, checkpoints=()):
@@ -384,13 +423,15 @@ class Packet:
         resolver = self.providers.resolver
         witnesses = commit_links.witnesses([recording], resolver, cache, resolver.repo(self.providers.store.root))
         if state["state"] == "active":
-            requests = [e for e in recording["events"] if human(e) and noise(strip(e.get("text"))) is None]
+            requests = [e for e in recording["events"] if human(e) and noise(prose(e)) is None]
             if requests:
                 request = requests[-1]
                 lane = request.get("lane")
                 cps = [c for c in checkpoints if c.get("lane") == lane]
                 dims = self.dimensions(recording, request, ops, witnesses, cps)
-                self.add(request, "task", "active_request", "human", strip(request.get("text")), recording=recording,
+                spans = message_segments.prose_spans(request)
+                self.add(request, "task", "active_request", "human", prose(request), recording=recording,
+                         span=spans[0] if spans else None,
                          active=True, extra={"dimensions": _dimension_view(dims)})
         self.scan([recording], [o for o in ops if o.get("outcome") == "failed"], witnesses, checkpoints, active=True)
 
@@ -472,7 +513,7 @@ def prior_work(goal, providers):
     for link in tables.get("commit_links", []):
         request = events.get(_key(link.get("request_ref")))
         if link.get("sha") and request is not None and human(request):
-            item = {"request": strip(request.get("text"))[:200], "ref": locator(request["ref"]),
+            item = {"request": prose(request)[:200], "ref": locator(request["ref"]),
                     "basis": link.get("basis"), "confidence": link.get("confidence")}
             bucket = asks.setdefault(link["sha"], [])
             if item["ref"] not in {b["ref"] for b in bucket}:

@@ -1,6 +1,6 @@
 """Declarative public table catalog. Dependencies drive execution and schema help."""
 from dataclasses import dataclass
-from . import commit_links, edit_hunks, git_file_history, operation_facts, repo_files
+from . import commit_links, edit_hunks, git_file_history, message_segments, operation_facts, repo_files
 from .graph_queries import TABLES
 from .projection import FIELDS
 
@@ -40,12 +40,14 @@ CATALOG = {
     "file_status": Table(repo_files.FILE_COLUMNS, "status", "one live Git worktree path", ("path",)),
     "operations": Table(operation_facts.OPERATION_COLUMNS, "operations", operation_facts.OPERATION_GRAIN,
                         ("operation_id", "association_key"), "transient"),
+    "message_segments": Table(message_segments.COLUMNS, "segments", message_segments.GRAIN,
+                              ("segment_id",), "transient"),
     "checkpoints": Table(operation_facts.CHECKPOINT_COLUMNS, "checkpoints", operation_facts.CHECKPOINT_GRAIN,
                          ("checkpoint_id",), "transient"),
 }
 DEPENDENCIES = {"graph": (), "recordings": (), "git": (), "links": ("recordings",),
                 "edits": ("recordings", "graph"), "operations": ("recordings",),
-                "checkpoints": ("recordings",), "status": ()}
+                "checkpoints": ("recordings",), "segments": ("recordings",), "status": ()}
 
 
 def providers_for(names):

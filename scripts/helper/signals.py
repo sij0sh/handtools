@@ -8,7 +8,8 @@ reusable pitfalls; a correction is matched by phrasing only.
 import json
 
 from . import trace
-from .investigate import _key, locator, noise, strip
+from .investigate import _key, locator, noise
+from .message_segments import prose, visible
 from .profiles import PROFILES
 from .projection import human
 from .reader import message_graph
@@ -61,7 +62,7 @@ def failed_exchanges(ops, files, by_ref):
             if op.get("outcome") != "failed":
                 continue
             result = by_ref.get(_key(op.get("result_ref")))
-            detail = strip(result.get("text") if result else "")
+            detail = visible(result.get("text") if result else "")
             if not detail and op.get("exit_code") == 1:
                 skipped += 1  # grep/diff style "no match" (investigate rule)
                 continue
@@ -95,14 +96,14 @@ def corrections(ops, files, by_ref):
         for event in recording["events"]:
             if event.get("lane") != lane or (event.get("order") or 0) <= after:
                 continue
-            if event["kind"] == "assistant_message" and strip(event.get("text")):
+            if event["kind"] == "assistant_message" and prose(event):
                 prior = event
             elif human(event):
                 following = event
                 break
         if following is None:
             continue
-        text = strip(following.get("text"))
+        text = prose(following)
         if noise(text) or not CORRECTION.search(text[:300]):
             continue
         rows.append(_row("correction_candidate", following, text[:240], 1, {op.get("tool")},

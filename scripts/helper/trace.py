@@ -8,7 +8,7 @@ request, result or state. All projections are invocation-local.
 import json
 import re
 
-from . import cite, continuations, reconciliation
+from . import cite, continuations, message_segments, reconciliation
 from .graph_store import digest
 from .reader import message_graph
 
@@ -245,7 +245,7 @@ def episode(recording, target, operations, checkpoints, witnesses):
     if request is not None:
         rows.append({"section": "request", "lane": request.get("lane"), "branch": request.get("branch"),
                      "order": request.get("order"), "origin": request.get("request_origin"),
-                     "basis": request_basis, "text": (request.get("text") or "")[:500] or None,
+                     "basis": request_basis, "text": message_segments.prose(request)[:500] or None,
                      "ref": request.get("ref"), "cite": cite.token(request["ref"])})
     rows += _operation_rows(operations, witnesses)
     checkpoint_rows = []
@@ -583,7 +583,7 @@ def _related(providers, commit_sha, changed_paths, witness_recordings):
                      "operation_id": operation.get("operation_id"), "action": operation.get("action"),
                      "ref": operation.get("call_ref") or operation.get("result_ref"),
                      "request_ref": request.get("ref") if request else None,
-                     "request": (request.get("text") or "")[:300] if request else None,
+                     "request": message_segments.prose(request)[:300] if request else None,
                      "meaning": "shared path; not proof of authorship or contribution"})
     return rows, omitted
 

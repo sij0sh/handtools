@@ -9,6 +9,8 @@ dimension, lane, branch and time scope make it deterministic.
 import json
 import re
 
+from .message_segments import prose
+
 DIMENSIONS = ("requested", "edited", "verified", "committed", "pushed", "live_confirmed",
               "blocked_remaining")
 
@@ -116,8 +118,9 @@ def observations(request_event, operations, witnesses, checkpoints=()):
     """One observation per dimension/evidence item; operation/path rows never multiply it."""
     rows = []
     if request_event is not None:
-        row = _obs("requested", _excerpt(request_event.get("text"), 400), "human", "recorded_request",
-                   request_event, excerpt=_excerpt(request_event.get("text")))
+        text = prose(request_event)
+        row = _obs("requested", _excerpt(text, 400), "human", "recorded_request", request_event,
+                   excerpt=_excerpt(text))
         row["observation_id"] = f"{request_event.get('recording_id')}#request:{request_event.get('event_id')}"
         rows.append(row)
     for operation_id, group in _groups(operations).items():

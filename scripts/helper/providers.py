@@ -1,7 +1,7 @@
 """Invocation-local provider registry; shared source, Git and recording datasets."""
 import os
 from types import SimpleNamespace
-from . import (catalog, cite, commit_links, edit_hunks, git_file_history, graph_cli, graph_queries,
+from . import (catalog, cite, commit_links, edit_hunks, message_segments, git_file_history, graph_cli, graph_queries,
                 operation_facts, repo_files)
 from .engine import Input
 from .root_map import parse_root_map, remap
@@ -17,8 +17,7 @@ from .records import RecordCache
 def session_row(recording, rows):
     """One recording summarized from its event rows: span, activity and the request that opened it."""
     stamps = sorted(r["timestamp"] for r in rows if r.get("timestamp"))
-    request = next((r for r in rows if r.get("kind") == "user_message" and human(r)
-                    and (r.get("text") or "").strip()), None)
+    request = next((r for r in rows if r.get("kind") == "user_message" and human(r) and message_segments.prose(r)), None)
     return {"session": recording["session"], "parent_session": recording.get("parent_session"),
             "independent_session": next((r.get("independent_session") for r in rows), None),
             "harness": recording.get("harness"), "harness_version": recording.get("harness_version"),
@@ -29,7 +28,7 @@ def session_row(recording, rows):
             "tool_calls": sum(r.get("kind") == "tool_call" for r in rows),
             "failed_calls": sum(r.get("kind") == "tool_call" and r.get("outcome") == "failed" for r in rows),
             "repo_paths": len({r["repo_path"] for r in rows if r.get("repo_path")}),
-            "first_request": request["text"][:500] if request else None,
+            "first_request": message_segments.prose(request)[:500] if request else None,
             "first_request_cite": request.get("cite") if request else None}
 
 
@@ -243,6 +242,13 @@ class Providers:
         coverage["complete"] = coverage.get("complete", True) and self.coverage["recordings"]["complete"] \
             and self.coverage["recordings"].get("interpretation", {}).get("complete", True)
         self.coverage["operations"] = coverage
+
+    def load_segments(self):
+        rows, coverage = message_segments.rows(self.recordings)
+        self.tables["message_segments"] = rows
+        coverage["source"] = "stored message text; truncated messages are partial"
+        coverage["complete"] = coverage["complete"] and self.coverage["recordings"]["complete"]
+        self.coverage["segments"] = coverage
 
     def load_checkpoints(self):
         rows, coverage = operation_facts.checkpoints(self.recordings, self.cache)
