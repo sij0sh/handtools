@@ -9,59 +9,40 @@ Turn a goal into a decision record the user reviews before implementation.
 
 A question is **material** when its answer affects required outcomes, behavior, contracts, ownership, risks, or constraints.
 
-## Precedence
+## Run
 
-Settle each question from the first source that answers it:
+From the project root, drive the loop with `scripts/designflow.py` in this skill's directory:
 
-1. Requirements and adopted decisions.
-2. Existing project conventions that fit the goal. Replace one only through an explicit decision.
-3. `references/defaults.md` (read every run).
-4. The relevant reference below.
-5. The simplest adequate choice.
+1. Every time this skill runs: `python3 <skill-dir>/scripts/designflow.py start`. It replaces any unfinished workflow.
+2. Do the printed step, then run the printed `done` command.
+3. Repeat until the script prints `DONE`. Then stop for user review.
+4. Lost the current step (e.g. after compaction): `status`.
 
-Ask the user when essential intent, permissions, or a consequential tradeoff stays unanswered by all five.
+## Files
 
-## References
+All under `.agents/design/`:
 
-Read a reference when a decision turns on its topic:
-
-| Decision concerns | Read |
-|---|---|
-| Ownership, contracts, dependencies, boundaries, or failures | `references/contract.md` |
-| Language-specific design, types, errors, or concurrency | `languages/<language>.md` |
-| Skills, `AGENTS.md`, `CLAUDE.md`, or other agent instructions | `languages/agent-instructions.md` |
-
-## Loop
-
-**prerequisite** Rewrite `.agents/design/decisions.md` to briefly summarize its current state so prior work is condensed into a small historic record.
-
-1. **Ground:** Establish the goal, constraints, success criteria, and relevant existing decisions or code. Record to `.agents/design/decisions.md`.
-2. **Branch:** List open material questions. Link a dependency when one answer requires another. Update `.agents/design/decisions.md`.
-3. **Decide:** Resolve questions whose dependencies are settled, using Precedence. State the reason for each non-obvious choice. Add questions the answers raise; drop questions that became irrelevant. Update `.agents/design/decisions.md`.
-4. **Challenge:** Imagine two competent SWEs following every decision. If they could make materially different choices, add the missing questions. Update `.agents/design/decisions.md`.
-
-**loop** Repeat steps 2 through 4 until enough decisions are made that no two SWEs could implement a materially different solution following the decisions.
+- `decisions.json`: ongoing record; one set per goal. Schema: `references/decisions.schema.json`.
+- `workflow.json`: current run; script owns it. Removed when done.
+- `decisions.md`: plain-language view; removed and rewritten once at handoff.
 
 ## Format
 
-- `[x]` resolved; `[ ]` open.
-- `D#` stable ID.
-- `(after: D#)` dependency.
-- `- reason` after the answer for non-obvious choices; required on open rows.
+- `G#` goal set; `D#` stable ID within its goal.
+- `status`: `open` or `resolved`; `answer` required when resolved.
+- Optional: `after` (dependency D#s), `rationale` (reason for non-obvious choices).
 
-```md
-# Goal
-Ship an inventory UI matching the existing app.
-
-## Constraints
-Preserve existing API and visual language.
-
-## Decisions
-- [x] D1: State authority? Server.
-- [x] D2 (after: D1): Updates? Optimistic with rollback - instant UI; server stays authoritative.
-- [ ] D3 (after: D2): Conflict behavior? Open - goal sets no merge policy.
+```json
+{"goals": [{
+  "id": "G1",
+  "goal": "Ship an inventory UI matching the existing app.",
+  "constraints": ["Preserve existing API and visual language."],
+  "decisions": [
+    {"id": "D1", "question": "State authority?", "status": "resolved", "answer": "Server."},
+    {"id": "D2", "after": ["D1"], "question": "Updates?", "status": "resolved",
+     "answer": "Optimistic with rollback.", "rationale": "Instant UI; server stays authoritative."},
+    {"id": "D3", "after": ["D2"], "question": "Conflict behavior?", "status": "open",
+     "rationale": "Goal sets no merge policy."}
+  ]
+}]}
 ```
-
-## Handoff
-
-Do one edit pass over the final `.agents/design/decisions.md` so it is understandable to someone new and unfamiliar with code.

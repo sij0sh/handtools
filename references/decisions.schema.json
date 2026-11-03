@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "simple-by-design decision record",
+  "description": "Ongoing record at .agents/design/decisions.json. One set per goal; D# IDs are unique within a goal.",
+  "type": "object",
+  "required": ["goals"],
+  "additionalProperties": false,
+  "properties": {
+    "goals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/goal" }
+    }
+  },
+  "$defs": {
+    "goal": {
+      "type": "object",
+      "required": ["id", "goal", "decisions"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^G[0-9]+$" },
+        "goal": { "type": "string", "minLength": 1 },
+        "constraints": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "criteria": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "decisions": { "type": "array", "items": { "$ref": "#/$defs/decision" } }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["id", "question", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^D[0-9]+$" },
+        "question": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["open", "resolved"] },
+        "answer": { "type": "string", "minLength": 1 },
+        "after": { "type": "array", "items": { "type": "string", "pattern": "^D[0-9]+$" } },
+        "rationale": { "type": "string", "minLength": 1 }
+      },
+      "if": { "properties": { "status": { "const": "resolved" } } },
+      "then": { "required": ["answer"] }
+    }
+  }
+}

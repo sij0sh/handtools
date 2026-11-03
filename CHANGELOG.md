@@ -164,3 +164,13 @@ First release.
 ## 0.2.8 - 2026-11-02
 
 - README: lead with "Unslop your project"; credit Matt Pocock's grilling skill as loop inspiration; drop the sample record block.
+
+## 0.2.9 - 2026-11-03
+
+- Add `scripts/designflow.py` state machine to drive the loop; prompts carry precedence and absolute paths to defaults, contract, and language profiles.
+- Slim `SKILL.md` to purpose, run steps, and record format; loop text now owned by the script.
+- Record moves to `.agents/design/decisions.json`: one set per goal (G#), decisions keep D#, status, optional `after`/`rationale`. Schema at `references/decisions.schema.json`; script validates it.
+- `start` replaces any existing `workflow.json`; finishing deletes it. Drop `next`/`reset` and the condense step.
+- Handoff deletes `decisions.md` and has the agent rewrite it once from the JSON in ASD-STE100 Simplified Technical English.
+- Add `tests/test_designflow.py` (stdlib unittest).
+- README: Python 3.9+ requirement, script loop section, updated file table.

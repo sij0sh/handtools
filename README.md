@@ -17,6 +17,18 @@ For vibe coders that keep `accept` on hot key this skill also standardizes codin
 This skill's loop was inspired by Matt Pocock's popular [grilling](https://github.com/mattpocock/skills/tree/main) skill but it looks at the problem from the bottom up instead of top down. 
 It imagines two good developers following the finalized decision list. If they could still build it in a different way, a decision is missing and it will keep going.
 
+A small Python script, `scripts/designflow.py`, runs the loop. It prints one step at a
+time, refuses to advance until `.agents/design/decisions.json` changes and passes its
+schema, and repeats Branch, Decide, Challenge until no open questions remain. At each
+step it points the agent at the defaults, contract, and language profiles.
+
+Files in `.agents/design/`:
+
+- `decisions.json`: ongoing record, one set per goal. Kept across runs.
+- `workflow.json`: current run state. Survives context compaction; replaced on each
+  new run, deleted when done. Add it to `.gitignore` if you like.
+- `decisions.md`: plain-language summary, rewritten at the end of each run.
+
 ## Why decide first
 
 At this point writing code is cheap. Design decisions are a bottleneck. Sure your AI will make them for you, but there are many reasons why that will leave you with a solution that isn't quite what you intended. 
@@ -58,7 +70,8 @@ in what's left open.
 
 ## Install
 
-Nothing to install beyond the files. The skill is plain Markdown.
+Nothing to install beyond the files. The skill is Markdown plus one Python 3.9+
+script (standard library only).
 
 Put the folder where your coding agent looks for skills. Pi checks
 `~/.agents/skills/` and a project's `.agents/skills/`:
@@ -67,7 +80,7 @@ Put the folder where your coding agent looks for skills. Pi checks
 git clone https://github.com/sij0sh/simple-by-design.git ~/.agents/skills/simple-by-design
 ```
 
-Keep `SKILL.md`, `references/`, and `languages/` together. Other agents have
+Keep `SKILL.md`, `scripts/`, `references/`, and `languages/` together. Other agents have
 their own skill folder; check their docs.
 
 ## Quick start
@@ -75,7 +88,7 @@ their own skill folder; check their docs.
 Run it before you start building:
 
 ```text
-/skill:simple-by-design Design an inventory UI matching the existing app. Record material decisions in .agents/design/decisions.md and stop for review.
+/skill:simple-by-design Design an inventory UI matching the existing app. Stop for review.
 ```
 
 You get a decision list with settled and open items, a reason for anything
@@ -85,13 +98,15 @@ left open, and a short handoff. No implementation code.
 
 | File | What it covers | Why it helps |
 |---|---|---|
-| `SKILL.md` | Decision loop, source precedence, list format | Gets choices written down before code |
+| `SKILL.md` | How to run the loop, list format | Gets choices written down before code |
+| `scripts/designflow.py` | Step-by-step loop, source precedence, reference routing | Agent can't skip steps or forget the standards |
+| `references/decisions.schema.json` | Shape of `decisions.json` | Script can check the record |
 | `references/defaults.md` | Keep it simple, one owner per thing, local reasoning, clear boundaries | One starting point for every session |
 | `references/contract.md` | Ownership, dependencies, state, resources, failures, tradeoffs | Keeps a growing system easy to follow |
 | `languages/*.md` | Rules for 10 languages plus agent instructions | Consistent choices per language |
 
-The agent always reads the defaults. It opens the contract or a language file
-only when a decision needs it.
+The script prints the defaults every run. The agent opens the contract or a
+language file only when a decision needs it.
 
 ### Language profiles
 
@@ -117,11 +132,12 @@ Delete the folder:
 rm -rf ~/.agents/skills/simple-by-design
 ```
 
-Your decision records (`.agents/design/decisions.md`) and project code stay.
+Your decision records (`.agents/design/decisions.json`, `decisions.md`) and project code stay.
 
 ## More
 
 - [Skill entrypoint](SKILL.md)
+- [Loop script](scripts/designflow.py)
 - [Defaults](references/defaults.md)
 - [Contract](references/contract.md)
 - [Language profiles](languages/)
