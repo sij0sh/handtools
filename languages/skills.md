@@ -56,14 +56,17 @@ Rewrite the target in house style: active voice, one idea per sentence.
 
 - Requirement: a script owns state and step order; template
   `references/workflow.py`. The agent never edits the state file.
-- Requirement: `SKILL.md` says only: run `start`, do the printed step, run the
-  printed `done`, repeat until `DONE`, run `status` if the step is lost.
+- Requirement: `SKILL.md` says only: run `start` for new work, do the printed
+  step, run the printed `done`, repeat until `DONE`; run `status` to resume.
 - Requirement: each step prompt ends on a criterion the script checks before
   it advances; `done` refuses an unmet one.
 - Requirement: the agent reports a branch value through a `done` flag; the
   script picks the next step.
-- Default: `start` replaces any unfinished run; finishing removes the state
-  file and prints `DONE`.
+- Default: single run: `start` replaces any unfinished run; finishing removes
+  the state file and prints `DONE`.
+- Default: when runs can overlap, give each run a session ID, keep every session
+  record after close, and expose status, resume, and abandon. Never use `start`
+  to resume; list sessions first.
 - Default: state lives at `.agents/<skill>/workflow.json`; write it atomically.
 
 Example `SKILL.md` body:

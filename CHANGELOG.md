@@ -187,3 +187,7 @@ First release.
 
 - Windows support: docs give `python` alongside `python3`; printed `done` commands quote paths with double quotes on Windows so the full interpreter path is runnable there.
 - Tests cover printed command interpreter and Windows quoting.
+
+## 0.3.2 - 2026-11-03
+
+- Permanent design sessions in `workflow.json`: `s1`, `s2`, ...; `status`, `status --session`, `done --session`, and `abandon`; one active session per goal; atomic `workflow.lock`; migration from old single-run state. Remove the `handoff` phase and `decisions.md`; zero-gap challenge prints the session close summary. Update `SKILL.md`, `README.md`, `languages/skills.md`, and tests.

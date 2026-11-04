@@ -59,15 +59,24 @@ Keep `SKILL.md`, `scripts/`, `references/`, and `languages/` together.
 ```
 
 You get `.agents/design/decisions.json` (settled and open decisions with
-reasons) and a plain-language `decisions.md`. No implementation code.
+reasons) and a plain-language summary when the run closes. No implementation
+code.
+
+## Several runs
+
+Each `start` adds a short session ID and keeps every earlier session. Use
+`status` to list active runs, `status --all` to include closed ones, and
+`status --session s1` to show one. `done --session s1` advances it;
+`abandon --session s1` closes a stale run. Completed and abandoned sessions
+stay in `workflow.json` for review.
 
 ## Files it writes
 
 In `.agents/design/`:
 
 - `decisions.json`: ongoing record, one set per goal.
-- `workflow.json`: current run state; deleted when done.
-- `decisions.md`: plain-language summary, rewritten each run.
+- `workflow.json`: permanent `{version, sessions[]}` registry; owned by the script.
+- `workflow.lock`: short-lived lock directory around workflow writes.
 
 ## What's inside
 
