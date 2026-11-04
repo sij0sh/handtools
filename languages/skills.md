@@ -71,7 +71,8 @@ Example `SKILL.md` body:
 ```markdown
 From the project root, drive the run with `scripts/workflow.py`:
 
-1. `python3 <skill-dir>/scripts/workflow.py start`.
+1. `python3 <skill-dir>/scripts/workflow.py start` (Linux/macOS) or
+   `python <skill-dir>/scripts/workflow.py start` (Windows).
 2. Do the printed step, then run the printed `done` command.
 3. Repeat until the script prints `DONE`.
 4. Lost the current step: `status`.

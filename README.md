@@ -42,8 +42,9 @@ PHASE: BRANCH  |  LOOP: 2
 
 ## Install
 
-Needs Python 3.9+ (standard library only). Pi checks `~/.agents/skills/` and a
-project's `.agents/skills/`:
+Needs Python 3.9+ (standard library only). Use `python3` on Linux/macOS and
+`python` on Windows. Pi checks `~/.agents/skills/` and a project's
+`.agents/skills/`:
 
 ```bash
 git clone https://github.com/sij0sh/simple-by-design.git ~/.agents/skills/simple-by-design

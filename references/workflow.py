@@ -7,7 +7,9 @@ Run from the project root. Python 3.9+; standard library only.
 """
 import argparse
 import json
+import os
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -63,14 +65,21 @@ def load_state(root):
     return json.loads(path.read_text(encoding='utf-8'))
 
 
+def quote(text):
+    """Quote one argument for the shell that will run the printed command."""
+    if os.name == 'nt':
+        return subprocess.list2cmdline([text])
+    return shlex.quote(text)
+
+
 def show(root, state):
     phase = state['phase']
     print(f'STEP: {phase.upper()}')
     print(PROMPTS[phase])
     flag = ' --result R' if phase == 'y' else ''
-    launcher = f'{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))}'
+    launcher = f'{quote(sys.executable)} {quote(str(Path(__file__).resolve()))}'
     if root != Path.cwd().resolve():
-        launcher += f' --root {shlex.quote(str(root))}'
+        launcher += f' --root {quote(str(root))}'
     print(f'\nThen run: {launcher} done{flag}')
     print('Do NOT skip ahead or edit the state file.')
 

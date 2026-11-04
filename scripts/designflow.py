@@ -11,8 +11,10 @@ Files (under .agents/design/):
 import argparse
 import hashlib
 import json
+import os
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -202,13 +204,20 @@ def start(root):
     return state
 
 
+def quote(text):
+    """Quote one argument for the shell that will run the printed command."""
+    if os.name == 'nt':
+        return subprocess.list2cmdline([text])
+    return shlex.quote(text)
+
+
 def show(root, state):
     print(f'PHASE: {state["phase"].upper()}  |  LOOP: {state["cycle"]}')
     print(prompt(state))
     flag = {'ground': ' --goal G#', 'challenge': ' --gaps N'}.get(state['phase'], '')
-    launcher = f'{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))}'
+    launcher = f'{quote(sys.executable)} {quote(str(Path(__file__).resolve()))}'
     if root != Path.cwd().resolve():
-        launcher += f' --root {shlex.quote(str(root))}'
+        launcher += f' --root {quote(str(root))}'
     target = VIEW if state['phase'] == 'handoff' else RECORD
     print(f'\nEdit {root / target}; then run: {launcher} done{flag}')
     print('Do NOT jump to another phase or implement yet.')

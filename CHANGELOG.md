@@ -182,3 +182,8 @@ First release.
 ## 0.3.0 - 2026-11-03
 
 - README rewritten around intent, the script-driven loop, and honest open questions; trim install, quick start, and file table.
+
+## 0.3.1 - 2026-11-03
+
+- Windows support: docs give `python` alongside `python3`; printed `done` commands quote paths with double quotes on Windows so the full interpreter path is runnable there.
+- Tests cover printed command interpreter and Windows quoting.

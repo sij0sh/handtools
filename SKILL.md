@@ -13,7 +13,7 @@ A question is **material** when its answer affects required outcomes, behavior, 
 
 From the project root, drive the loop with `scripts/designflow.py` in this skill's directory:
 
-1. Every time this skill runs: `python3 <skill-dir>/scripts/designflow.py start`. It replaces any unfinished workflow.
+1. Every time this skill runs: `python3 <skill-dir>/scripts/designflow.py start` on Linux/macOS, `python <skill-dir>/scripts/designflow.py start` on Windows. It replaces any unfinished workflow.
 2. Do the printed step, then run the printed `done` command.
 3. Repeat until the script prints `DONE`. Then stop for user review.
 4. Lost the current step (e.g. after compaction): `status`.

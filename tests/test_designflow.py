@@ -1,12 +1,27 @@
+import importlib.util
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPT = SKILL_DIR / 'scripts' / 'designflow.py'
+
+
+def load_module(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def printed_command(output, marker='then run:'):
+    line = next(row for row in output.splitlines() if marker in row)
+    return shlex.split(line.split(marker, 1)[1])
 
 
 class DesignflowTest(unittest.TestCase):
@@ -61,6 +76,14 @@ class DesignflowTest(unittest.TestCase):
         self.assertIn(str(SKILL_DIR / 'references' / 'decisions.schema.json'), result.stdout)
         self.assertEqual(json.loads(self.record.read_text()), {'goals': []})
         self.assertEqual(self.phase(), ('ground', 1))
+
+    def test_printed_done_command_uses_running_interpreter(self):
+        command = printed_command(self.run_cmd('start').stdout)
+        self.assertEqual(command[:2], [sys.executable, str(SCRIPT)])
+        rest = command[2:]
+        if rest[:2] == ['--root', str(self.root)]:
+            rest = rest[2:]
+        self.assertEqual(rest, ['done', '--goal', 'G#'])
 
     def test_start_replaces_workflow_keeps_record(self):
         self.run_cmd('start')
@@ -185,6 +208,14 @@ class WorkflowTemplateTest(unittest.TestCase):
             capture_output=True, text=True,
         )
 
+    def test_printed_done_command_uses_running_interpreter(self):
+        command = printed_command(self.run_cmd('start').stdout, 'Then run:')
+        self.assertEqual(command[:2], [sys.executable, str(TEMPLATE)])
+        rest = command[2:]
+        if rest[:2] == ['--root', str(self.root)]:
+            rest = rest[2:]
+        self.assertEqual(rest, ['done'])
+
     def test_result_a_runs_z(self):
         self.assertIn('STEP: X', self.run_cmd('start').stdout)
         self.assertIn('STEP: Y', self.run_cmd('done').stdout)
@@ -202,6 +233,21 @@ class WorkflowTemplateTest(unittest.TestCase):
     def test_result_outside_y_fails(self):
         self.run_cmd('start')
         self.assertEqual(self.run_cmd('done', '--result', 'A').returncode, 1)
+
+
+class QuoteTest(unittest.TestCase):
+    def setUp(self):
+        self.designflow = load_module(SCRIPT, 'designflow_quote_test')
+
+    def test_posix_quoting(self):
+        self.assertEqual(self.designflow.quote('a b'), "'a b'")
+
+    def test_windows_quoting_uses_double_quotes(self):
+        with mock.patch('os.name', 'nt'):
+            self.assertEqual(
+                self.designflow.quote(r'C:\Program Files\Python\python.exe'),
+                r'"C:\Program Files\Python\python.exe"',
+            )
 
 
 if __name__ == '__main__':
