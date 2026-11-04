@@ -55,13 +55,15 @@ Rewrite the target in house style: active voice, one idea per sentence.
 ## 4 Workflow
 
 - Requirement: a script owns state and step order; template
-  `references/workflow.py`. The agent never edits the state file.
+  `references/workflow.py`. The agent never edits the state file or any
+  record the script owns.
 - Requirement: `SKILL.md` says only: run `start` for new work, do the printed
   step, run the printed `done`, repeat until `DONE`; run `status` to resume.
 - Requirement: each step prompt ends on a criterion the script checks before
   it advances; `done` refuses an unmet one.
-- Requirement: the agent reports a branch value through a `done` flag; the
-  script picks the next step.
+- Requirement: the agent reports step data through `done`: a flag for a
+  branch value, JSON on stdin for structured data. The script picks the next
+  step.
 - Default: single run: `start` replaces any unfinished run; finishing removes
   the state file and prints `DONE`.
 - Default: when runs can overlap, give each run a session ID, keep every session

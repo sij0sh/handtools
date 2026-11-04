@@ -191,3 +191,12 @@ First release.
 ## 0.3.2 - 2026-11-03
 
 - Permanent design sessions in `workflow.json`: `s1`, `s2`, ...; `status`, `status --session`, `done --session`, and `abandon`; one active session per goal; atomic `workflow.lock`; migration from old single-run state. Remove the `handoff` phase and `decisions.md`; zero-gap challenge prints the session close summary. Update `SKILL.md`, `README.md`, `languages/skills.md`, and tests.
+
+## 0.3.3 - 2026-11-04
+
+- Agent edits the record only through the CLI: `done` reads a JSON payload on stdin (goal fields plus `decisions` rows upserted by `id`; `null` removes a field; `drop` deletes; `status` derived from `answer`), applies it to the session's goal under the lock, and writes nothing on error. Each step prints the session goal as JSON and the next free D#. Remove `--goal` and `--gaps`: ground creates or reuses a goal from the payload. Challenge closes only on an unchanged goal; any change starts a fresh challenge, via decide when rows are open. `SKILL.md` drops its Files and Format sections; prompts no longer name `decisions.json` or the schema. Update `README.md`, `languages/skills.md`, and tests.
+
+## 0.3.4 - 2026-11-04
+
+- Split `scripts/designflow.py` into a CLI entry point plus `scripts/designlib/` (`flow`, `steps`, `sessions`, `record`, `storage`, `config`), one owner each; a test enforces one-way imports.
+- Challenge limit: optional `metadata.max-challenges` in `SKILL.md` frontmatter, default 3. At the limit the session closes; open gaps from the last challenge get one final decide; summary lists remaining open questions. Step header shows `LOOP: n/max`.

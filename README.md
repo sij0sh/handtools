@@ -66,24 +66,40 @@ code.
 
 Each `start` adds a short session ID and keeps every earlier session. Use
 `status` to list active runs, `status --all` to include closed ones, and
-`status --session s1` to show one. `done --session s1` advances it;
+`status --session s1` to show one. `done --session s1` advances it, reading
+that step's edits as JSON on stdin;
 `abandon --session s1` closes a stale run. Completed and abandoned sessions
 stay in `workflow.json` for review.
+
+## Settings
+
+Optional, in `SKILL.md` frontmatter:
+
+```yaml
+metadata:
+  max-challenges: 3   # challenge rounds per session; default 3
+```
+
+At the limit the session closes; gaps the last challenge leaves open get one
+final decide, and anything still open is listed in the summary.
 
 ## Files it writes
 
 In `.agents/design/`:
 
+All owned by the script; the agent edits them only through `done`.
+
 - `decisions.json`: ongoing record, one set per goal.
-- `workflow.json`: permanent `{version, sessions[]}` registry; owned by the script.
-- `workflow.lock`: short-lived lock directory around workflow writes.
+- `workflow.json`: permanent `{version, sessions[]}` registry.
+- `workflow.lock`: short-lived lock directory around writes.
 
 ## What's inside
 
 | File | Covers |
 |---|---|
-| `SKILL.md` | How to run the loop, record format |
-| `scripts/designflow.py` | Loop state machine, source precedence, reference routing |
+| `SKILL.md` | How to run the loop |
+| `scripts/designflow.py` | Command line: arguments, stdin payload, printed commands |
+| `scripts/designlib/` | Loop internals: `flow` (phases), `steps` (prompts, output), `sessions` (`workflow.json`), `record` (`decisions.json`), `storage` (paths, lock), `config` (`SKILL.md` settings) |
 | `references/decisions.schema.json` | Shape of `decisions.json` |
 | `references/defaults.md` | Defaults every run starts from |
 | `references/contract.md` | Ownership, dependencies, state, failures, tradeoffs |
