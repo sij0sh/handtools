@@ -29,7 +29,7 @@ PROMPTS = {
         '   - Ownership, contracts, dependencies, boundaries, or failures: {contract}\n'
         '   - Language-specific design, types, errors, or concurrency: '
         '{languages}/<language>.md (available: {language_list})\n'
-        '   - Skill design or structure: {skills}\n'
+        '   - Agent instructions (skills, prompts, AGENTS.md, CLAUDE.md, system prompts): {instructions}\n'
         '5. The simplest adequate choice.\n'
         'Ask the user when essential intent, permissions, or a consequential '
         'tradeoff stays unanswered by all five.\n'

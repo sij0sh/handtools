@@ -7,7 +7,7 @@ SKILL_MD = SKILL_DIR / 'SKILL.md'
 DEFAULTS = SKILL_DIR / 'references' / 'defaults.md'
 CONTRACT = SKILL_DIR / 'references' / 'contract.md'
 LANGUAGES = SKILL_DIR / 'languages'
-SKILLS = LANGUAGES / 'skills.md'
+INSTRUCTIONS = SKILL_DIR / 'references' / 'instructions.md'
 
 DEFAULT_MAX_CHALLENGES = 3
 _METADATA = re.compile(r'metadata:\s*(#.*)?')
@@ -50,6 +50,6 @@ def references():
         'defaults_text': DEFAULTS.read_text(encoding='utf-8').strip(),
         'contract': CONTRACT,
         'languages': LANGUAGES,
-        'language_list': ', '.join(sorted(p.stem for p in LANGUAGES.glob('*.md') if p != SKILLS)),
-        'skills': SKILLS,
+        'language_list': ', '.join(sorted(p.stem for p in LANGUAGES.glob('*.md'))),
+        'instructions': INSTRUCTIONS,
     }

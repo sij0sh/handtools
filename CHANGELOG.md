@@ -200,3 +200,8 @@ First release.
 
 - Split `scripts/designflow.py` into a CLI entry point plus `scripts/designlib/` (`flow`, `steps`, `sessions`, `record`, `storage`, `config`), one owner each; a test enforces one-way imports.
 - Challenge limit: optional `metadata.max-challenges` in `SKILL.md` frontmatter, default 3. At the limit the session closes; open gaps from the last challenge get one final decide; summary lists remaining open questions. Step header shows `LOOP: n/max`.
+
+## 0.3.5 - 2026-11-05
+
+- Replace `languages/skills.md` with `references/instructions.md`: semantic instruction design framework for any agent instructions (skills, prompts, `AGENTS.md`, `CLAUDE.md`). Decide routes agent-instruction questions there; language list no longer special-cases it.
+- Remove `references/workflow.py` and its tests; workflow-skill scaffolding now lives in a separate skill.

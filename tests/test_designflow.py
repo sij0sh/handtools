@@ -272,9 +272,9 @@ class DesignflowTest(unittest.TestCase):
         out = self.done(payload={'decisions': [{'id': 'D1', 'question': 'Q?'}]}).stdout
         self.assertIn('PHASE: DECIDE', out)
         self.assertIn(str(SKILL_DIR / 'references' / 'contract.md'), out)
-        self.assertIn(str(SKILL_DIR / 'languages' / 'skills.md'), out)
+        self.assertIn(str(SKILL_DIR / 'references' / 'instructions.md'), out)
         self.assertIn('python', out)
-        self.assertNotIn('skills,', out)
+        self.assertNotIn('instructions,', out)
 
     def test_challenge_open_rows_without_change_fails(self):
         self.to_challenge()
@@ -474,51 +474,6 @@ class DesignflowTest(unittest.TestCase):
         self.run_cmd('start')
         result = self.done('s9', payload={'goal': 'Ship.'}, ok=False)
         self.assertIn('s9', result.stderr)
-
-
-TEMPLATE = SKILL_DIR / 'references' / 'workflow.py'
-
-
-class WorkflowTemplateTest(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
-        self.state = self.root / '.agents' / 'workflow' / 'workflow.json'
-
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def run_cmd(self, *args):
-        return subprocess.run(
-            [sys.executable, str(TEMPLATE), '--root', str(self.root), *args],
-            capture_output=True, text=True,
-        )
-
-    def test_printed_done_command_uses_running_interpreter(self):
-        command = printed_command(self.run_cmd('start').stdout, 'Then run:')
-        self.assertEqual(command[:2], [sys.executable, str(TEMPLATE)])
-        rest = command[2:]
-        if rest[:2] == ['--root', str(self.root)]:
-            rest = rest[2:]
-        self.assertEqual(rest, ['done'])
-
-    def test_result_a_runs_z(self):
-        self.assertIn('STEP: X', self.run_cmd('start').stdout)
-        self.assertIn('STEP: Y', self.run_cmd('done').stdout)
-        self.assertEqual(self.run_cmd('done').returncode, 1)
-        self.assertIn('STEP: Z', self.run_cmd('done', '--result', 'A').stdout)
-        self.assertIn('DONE', self.run_cmd('done').stdout)
-        self.assertFalse(self.state.exists())
-
-    def test_other_result_finishes(self):
-        self.run_cmd('start')
-        self.run_cmd('done')
-        self.assertIn('DONE', self.run_cmd('done', '--result', 'B').stdout)
-        self.assertFalse(self.state.exists())
-
-    def test_result_outside_y_fails(self):
-        self.run_cmd('start')
-        self.assertEqual(self.run_cmd('done', '--result', 'A').returncode, 1)
 
 
 class QuoteTest(unittest.TestCase):

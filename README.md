@@ -103,8 +103,8 @@ All owned by the script; the agent edits them only through `done`.
 | `references/decisions.schema.json` | Shape of `decisions.json` |
 | `references/defaults.md` | Defaults every run starts from |
 | `references/contract.md` | Ownership, dependencies, state, failures, tradeoffs |
-| `references/workflow.py` | Template script for Workflow skills |
-| `languages/*.md` | TypeScript, JavaScript, Python, Go, Rust, Java, C#, C, C++, SQL, skills |
+| `references/instructions.md` | Semantic instructions: designing skills, prompts, `AGENTS.md` |
+| `languages/*.md` | TypeScript, JavaScript, Python, Go, Rust, Java, C#, C, C++, SQL |
 
 Profile rules are tagged **Requirement**, **Default**, or **Heuristic**.
 
