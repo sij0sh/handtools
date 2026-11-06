@@ -1,0 +1,22 @@
+# Pin exact runtimes; never "latest" for project tools. Commit mise.lock.
+[tools]
+# node = "24"
+# python = "3.13"
+
+[settings]
+lockfile = true
+
+[tasks.setup]
+run = "echo 'install dependencies here'"
+
+[tasks.dev]
+run = "echo 'start the app here'"
+
+[tasks.test]
+run = "echo 'run tests here'"
+
+[tasks.lint]
+run = "echo 'run linters here'"
+
+[tasks.build]
+run = "echo 'build here'"
