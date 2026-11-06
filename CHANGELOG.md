@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.9
+
+- Reframe a skill as a saved prompt: `SKILL.md` alone by default, one or two sentences; references only for text a typical run skips; scripts only for determinism, persistent state, or external actions. No stage engine or workflow template.
+- Fold `references/instructions.md` into `SKILL.md`; rewrite `references/execution.md` as the prompt/reference/script escalation rule.
+- Delete `scripts/`, `templates/`, `tests/`, and `state/`; saaw is now prompt-only. Remove `state/` from `.gitignore`.
+- User wording is written verbatim; drafted prompts are shown for approval. Revise shows a diff and writes only after approval.
+
 ## 0.0.8
 
 - Skills default to `disable-model-invocation: true`; DRAFT requires an explicit `true`/`false` (`false` only when clearly model-invoked or the user asks).
