@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.8
+
+- Skills default to `disable-model-invocation: true`; DRAFT requires an explicit `true`/`false` (`false` only when clearly model-invoked or the user asks).
+- `description` is one short line (max 100 characters), e.g. `description: Create or revise an agent skill.`; details belong in the skill.
+
 ## 0.0.7
 
 - `execution.md`: labeled yes/no criteria. Stages: `focus`, `gate`, `isolate`, `enforce`. Stateful: `resume`, `inspect`, `loop` (every loop sets `loop_limit`), `recover`. Router: `conditional`. Drops '80/20' and 'transforms throughout'.

@@ -2,8 +2,8 @@
 
 ## description
 
-- Model-invoked: what + when, in the user's trigger words; shortest that still triggers.
-- User-only: `disable-model-invocation: true`; one-line purpose.
+- User-only (default): `disable-model-invocation: true`; one-line purpose, e.g. `description: Create or revise an agent skill.` No details.
+- Model-invoked (only when clear or the user asks): `disable-model-invocation: false`; what + when, in the user's trigger words.
 
 ## SKILL.md body
 

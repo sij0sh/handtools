@@ -6,7 +6,7 @@ import re
 import shutil
 from pathlib import Path
 
-from .config import EXCLUDE_DIRS, TEMPLATE
+from .config import DESCRIPTION_MAX, EXCLUDE_DIRS, TEMPLATE
 
 FRONTMATTER = re.compile(r'\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)', re.S)
 
@@ -105,13 +105,15 @@ def install_engine(skill, model):
 
 
 def check_files(skill):
-    """Structural gates: frontmatter name and description; every leaf named in SKILL.md or scripts/."""
+    """Structural gates: frontmatter name, description, invocation; every leaf named in SKILL.md or scripts/."""
     meta, _ = split_skill(skill)
     if meta.get('name') != skill.name:
         raise ValueError(f'{skill}: frontmatter `name` must be `{skill.name}`.')
     description = meta.get('description', '')
-    if not description or len(description) > 1024:
-        raise ValueError(f'{skill}: frontmatter `description` must be 1-1024 characters.')
+    if not description or len(description) > DESCRIPTION_MAX:
+        raise ValueError(f'{skill}: frontmatter `description` must be 1-{DESCRIPTION_MAX} characters (one line).')
+    if meta.get('disable-model-invocation') not in ('true', 'false'):
+        raise ValueError(f'{skill}: frontmatter `disable-model-invocation` must be true or false (default true).')
     texts = [(skill / 'SKILL.md').read_text(encoding='utf-8')]
     texts += [p.read_text(encoding='utf-8', errors='ignore') for p in skill_files(skill)
               if p.relative_to(skill).parts[0] == 'scripts']

@@ -62,7 +62,8 @@ def draft_prompt(root, s):
         engine = (f" The engine is in scripts/ with MODE = '{d['model']}'. Edit only scripts/workflowlib/steps.py: "
                   f'ORDER = {order}, PROMPTS, CHECKS, advance. SKILL.md body:\n\n{RUN_STEPS[d["model"]]}')
     return (f'{header(s)}\nDesign: {d["artifact"]}\n\nWrite only what closes the gap, in {draft}, per the design '
-            f'and {ref("instructions.md")}: frontmatter `name: {Path(s["target"]).name}` and a `description`; name '
+            f'and {ref("instructions.md")}: frontmatter `name: {Path(s["target"]).name}`, a one-line `description`, '
+            f'and `disable-model-invocation: true` unless clearly model-invoked; name '
             f'every references/ leaf in SKILL.md or scripts/.{engine}\n\nDone when `done` passes the shape check.', {})
 
 

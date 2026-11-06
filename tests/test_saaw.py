@@ -82,7 +82,8 @@ class Base(unittest.TestCase):
             body += '\nSee references/more.md.'
             (path / 'references').mkdir(exist_ok=True)
             (path / 'references' / 'more.md').write_text('more')
-        (path / 'SKILL.md').write_text(f'---\nname: demo\ndescription: Use when testing.\n---\n\n{body}\n')
+        (path / 'SKILL.md').write_text(
+            f'---\nname: demo\ndescription: Use when testing.\ndisable-model-invocation: true\n---\n\n{body}\n')
         return path
 
     def staged(self, path, mode):
@@ -175,6 +176,17 @@ class Stages(Base):
         (path / 'references').mkdir()
         (path / 'references' / 'orphan.md').write_text('x')
         self.assertIn('orphan.md', self.done(ok=False))
+
+    def test_draft_checks_short_description_and_invocation(self):
+        self.start()
+        self.design()
+        path = self.write_skill(self.wdir())
+        skill = path / 'SKILL.md'
+        text = skill.read_text()
+        skill.write_text(text.replace('disable-model-invocation: true\n', ''))
+        self.assertIn('disable-model-invocation', self.done(ok=False))
+        skill.write_text(text.replace('Use when testing.', 'x' * 101))
+        self.assertIn('1-100', self.done(ok=False))
 
     def test_model_gate_and_engine_install(self):
         self.start()
