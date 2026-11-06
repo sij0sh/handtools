@@ -2,10 +2,8 @@
 
 ## 0.0.9
 
-- Reframe a skill as a saved prompt: `SKILL.md` alone by default, one or two sentences; references only for text a typical run skips; scripts only for determinism, persistent state, or external actions. No stage engine or workflow template.
-- Fold `references/instructions.md` into `SKILL.md`; rewrite `references/execution.md` as the prompt/reference/script escalation rule.
-- Delete `scripts/`, `templates/`, `tests/`, and `state/`; saaw is now prompt-only. Remove `state/` from `.gitignore`.
-- User wording is written verbatim; drafted prompts are shown for approval. Revise shows a diff and writes only after approval.
+- Restore the staged engine and the short `SKILL.md` entry; stage prompts and execution-model selection are unchanged.
+- Add `prompt`: `prompt --name ... --description ... --body ...` writes a saved-prompt skill with valid frontmatter, without opening a session.
 
 ## 0.0.8
 
