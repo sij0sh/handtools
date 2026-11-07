@@ -1,0 +1,10 @@
+# Keep the decision record (ADR log); ignore session state and scratch artifacts.
+.agents/*
+!.agents/design/
+.agents/design/*
+!.agents/design/decisions.json
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/

@@ -1,0 +1,279 @@
+{
+  "goals": [
+    {
+      "id": "G1",
+      "goal": "Make handtools the one place the user's agent skills (build-skills, untangle, foundation, simple-by-design, remember) are maintained and published, so that (1) pi, Claude Code and Codex install them from one source and flag or apply updates like a plugin/extension, and (2) architecture shared by several skills (untangle + simple-by-design best-practice rules; the meaning and format of an 'ADR' in simple-by-design and foundation) has one source of truth that skills point to instead of copying.",
+      "constraints": [
+        "Skills today live as separate folders under ~/Projects/pi-skills; simple-by-design, remember, foundation and build-skills are separate git repos (remember and simple-by-design have GitHub remotes under sij0sh), untangle has no repo.",
+        "Installs are currently hand-made symlinks: ~/.agents/skills (build-skills, foundation, remember, simple-by-design, readme) and ~/.claude/skills (remember, simple-by-design, readme, saaw). Codex has none. Nothing flags updates.",
+        "Node/npx is not installed on this machine, so the Vercel Skills CLI suggested in .agents/artifacts/concepts.md is not usable without adding a Node toolchain.",
+        "Each harness must load a standard SKILL.md folder with name/description frontmatter.",
+        "Use each harness's native packaging where it exists: Claude plugin marketplace, pi git package (pi 1.5.0: pi install/update <source>), and Codex's native plugins (codex plugin marketplace add/upgrade, codex plugin add). pi and Codex both load ~/.agents/skills, and pi keeps the first skill on a name collision, so no handtools skill may also be installed there.",
+        "untangle already depends on simple-by-design at run time: its inventory stage asks for an absolute 'policy_root' to an installed simple-by-design and loads references/defaults.md, contract.md, instructions.md and languages/*.md from it (untangle/scripts/workflowlib/ledger.py:13).",
+        "'ADR' means two different things today: foundation writes Markdown ADRs in docs/adr/NNNN-*.md from assets/adr-template.md; simple-by-design keeps .agents/design/decisions.json (schema in references/decisions.schema.json) and never uses the word ADR.",
+        "build-skills ships templates/workflow/scripts/workflowlib, which untangle and foundation copied; cli.py and storage.py have since drifted between them.",
+        "Installed skills may live in a harness cache whose path includes the version and is pruned, so nothing may store an absolute skill path across runs.",
+        "Keep it simple: no custom package manager; prefer each harness's native install/update mechanism."
+      ],
+      "criteria": [
+        "One command per harness installs all skills from handtools, and one command (or the harness's own prompt) shows an available update after a new version is pushed.",
+        "Each shared rule set (defaults, contracts, semantic instructions, language profiles, ADR format) exists in exactly one file in the repo; no second editable copy exists.",
+        "untangle finds simple-by-design's rules without the user typing an absolute path.",
+        "simple-by-design and foundation use one written definition of an ADR (fields, status values, location), and each skill's output conforms to it.",
+        "A check (test or CI) fails if a shared file is copied and edited, or if an installed skill references a shared file that is not present."
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "question": "Repository shape: one monorepo (handtools) holding all skills, or keep per-skill repos and add an index?",
+          "status": "resolved",
+          "answer": "One monorepo: handtools with skills/<name>/ for build-skills, untangle, foundation, simple-by-design, remember. Repo-level README, CHANGELOG, VERSION, tests/ and harness manifests sit at the root.",
+          "rationale": "The goal is literally one place; shared files and one release need one tree. An index over five repos would keep five release flows and cross-repo drift."
+        },
+        {
+          "id": "D2",
+          "question": "Distribution and update mechanism per harness (pi, Claude Code, Codex): native package/plugin systems, the Vercel Skills CLI, or a small local sync script?",
+          "after": [
+            "D1"
+          ],
+          "status": "resolved",
+          "answer": "Native per harness (user choice). The repo ships Claude, Codex and pi manifests that all point at skills/ (exact files and install commands in D19). Updates: Claude's /plugin UI flags them. pi is updated with `pi update git:github.com/sij0sh/handtools` (plain `pi update` only updates pi). Codex is updated with `codex plugin marketplace upgrade`. scripts/check.py (stdlib) is the update flag for pi, Codex and the dev checkout (D20): it git-fetches each installed handtools clone and prints 'update available: run <command>' for any that are behind origin. Nothing is symlinked into ~/.agents/skills or ~/.claude/skills.",
+          "rationale": "User choices: native installs, a Codex plugin manifest, and check.py as the flag where the harness has none. No symlinks, which avoids pi's duplicate-name collision."
+        },
+        {
+          "id": "D3",
+          "question": "Versioning: one version for the whole repo or per-skill VERSION files, and what triggers an 'update available'?",
+          "after": [
+            "D2"
+          ],
+          "status": "resolved",
+          "answer": "One version for the repo: root VERSION, with CHANGELOG.md headings '## [x.y.z] - YYYY-MM-DD' (format pi recognises). The Claude plugin, Codex plugin and package.json versions equal VERSION. Release = the maintainer bumps VERSION, adds one changelog entry, pushes. CI fails when files under skills/ change against the last release tag without a VERSION bump. Claude auto-update stays at Claude's default (off for third-party marketplaces): /plugin flags the update and the user applies it. Per-skill VERSION files are removed; any code that read a skill's VERSION reads the root VERSION instead (see D14).",
+          "rationale": "Claude only updates on a version change, so an unbumped release would be invisible; CI enforces it. 'Flag, then install' matches the user's plugin-like request."
+        },
+        {
+          "id": "D4",
+          "question": "Where do shared rule files live in the source tree, and who owns each one?",
+          "after": [
+            "D1"
+          ],
+          "status": "resolved",
+          "answer": "simple-by-design owns the shared rules: references/defaults.md, references/contract.md, references/instructions.md, languages/*.md (top level of the skill, not under references/), and references/decisions.schema.json (the ADR definition, see D6). Other skills read them; no top-level shared/ dir.",
+          "rationale": "One owner (defaults #2). simple-by-design is the design-rules skill and untangle already consumes these exact files from it (existing convention). Shared files inside the owning skill travel with every bundle install, with no extra folder to package."
+        },
+        {
+          "id": "D5",
+          "question": "How does an installed skill reach a shared file, given harnesses install single skill folders: build-time copy into each skill, symlink, or a runtime lookup of a sibling skill?",
+          "after": [
+            "D2",
+            "D4"
+          ],
+          "status": "resolved",
+          "answer": "Runtime sibling lookup. A consumer finds the owner at <own skill dir resolved through symlinks>/../simple-by-design. Scripts use Path(__file__).resolve(); SKILL.md prose cites paths relative to the skill dir (../simple-by-design/...). If the sibling is missing, fail fast with 'install the handtools bundle' instead of searching elsewhere. untangle's inventory drops the required policy_root; it is resolved automatically, with an optional override.",
+          "rationale": "Every D2 install ships the whole skills/ dir as one plugin or package, so the skills are always siblings. No copies are generated, so none can drift. It keeps untangle's existing contract and only removes the manual path."
+        },
+        {
+          "id": "D6",
+          "question": "What is the one ADR definition: Markdown files in docs/adr, the decisions.json record, or a canonical model with one rendering of the other?",
+          "after": [
+            "D4"
+          ],
+          "status": "resolved",
+          "answer": "An ADR is a decision row in the project's committed .agents/design/decisions.json (user choice). references/decisions.schema.json in simple-by-design is the one ADR definition: goal = decision context (goal, constraints, criteria), decision row = question, answer, rationale, after. foundation records, audits and validates ADRs in that file. foundation's assets/adr-template.md and the Markdown ADR wording are removed.",
+          "rationale": "User chose decisions.json as the ADR log. One schema file is the single source of truth for both skills."
+        },
+        {
+          "id": "D7",
+          "question": "Does the drifted workflowlib (build-skills template copied into untangle and foundation) become shared source too, or stay out of scope?",
+          "after": [
+            "D4",
+            "D5"
+          ],
+          "status": "resolved",
+          "answer": "Out of scope. The drifted workflowlib copies (build-skills template, untangle, foundation) stay as they are; the user will start a separate design session for them.",
+          "rationale": "User choice; the stateless/stateful drift may be deliberate and needs its own analysis."
+        },
+        {
+          "id": "D8",
+          "question": "Drift guard: what check enforces one source of truth and complete installs, and where does it run?",
+          "after": [
+            "D5"
+          ],
+          "status": "resolved",
+          "answer": "Stdlib unittest suite in handtools/tests, run locally (`python3 -m unittest`) and in GitHub Actions on push/PR. Checks: (a) every ../<skill>/... path cited in any SKILL.md, reference or script resolves inside skills/; (b) no file outside skills/simple-by-design has the same normalised content hash as a shared rule file (content only, never basename: build-skills/references/instructions.md is a different file with the same name); (c) VERSION equals all three manifest versions, and skills/ changes need a bump (D3); (d) the keys, required fields, enums and ID patterns in decisions.schema.json match what record.py validates (derived from the schema file in the test), and every committed decisions.json passes record.py's validation; (e) each skill's own test suite runs: stdlib skills on one OS; remember keeps its 3-OS matrix with `pip install -r skills/remember/requirements.txt`, moved into the root workflow.",
+          "rationale": "Reviewer findings: basename matching false-positives on day one; the schema and record.py are two sources unless a test ties them; remember's nested CI would stop running."
+        },
+        {
+          "id": "D9",
+          "question": "Migration: how do existing repos' history and the current hand-made symlinks move to handtools?",
+          "after": [
+            "D6"
+          ],
+          "status": "resolved",
+          "answer": "Import with history: `git subtree add --prefix=skills/<name>` from each local repo (simple-by-design, remember, foundation, build-skills); untangle is added as new files. Each skill's .agents/ working notes are not imported. Each skill's nested .github/ moves into the root workflow (D8e); per-skill tool configs (foundation's ruff.toml, mise.toml, .gitignore) stay inside their skill. foundation's docs/adr/0001-0002 become a goal in handtools' .agents/design/decisions.json via designflow.py record. Old symlinks are swapped out per harness as in D22. The old GitHub repos are left alone; the user archives them when ready.",
+          "rationale": "Keeps history at low cost and changes no installs before the new ones are verified. Archiving remote repos is an outward action for the user."
+        },
+        {
+          "id": "D10",
+          "question": "Does the decisions.json schema need ADR lifecycle fields that foundation's Markdown ADRs had (date, superseded, retroactive)?",
+          "after": [
+            "D6"
+          ],
+          "answer": "Add two optional fields to a decision: 'date' and 'superseded_by'. Add 'superseded' to the status enum. Status stays derived, never sent: open without an answer, resolved with an answer, superseded when superseded_by is set. apply_payload stamps 'date' (YYYY-MM-DD) the first time a row resolves, so both done and record set it. References to another goal use 'G#/D#' in both 'after' and 'superseded_by'; a bare D# means the same goal. open_rows treats superseded rows as closed, and the renderer shows them marked superseded. Each change goes into both decisions.schema.json and record.py, and the D8(d) test keeps them equal. Retroactive decisions need no extra field: foundation records them under a goal like 'Record decisions already in the code', with rationale left out when unknown.",
+          "rationale": "Only the fields foundation already uses; nothing speculative.",
+          "status": "resolved"
+        },
+        {
+          "id": "D11",
+          "question": "Who writes decisions.json when foundation records an ADR?",
+          "after": [
+            "D5",
+            "D6"
+          ],
+          "answer": "designflow.py is the only writer. A new command `designflow.py [--root DIR] record [--goal G#]` (--root is the existing global option and defaults to the cwd). It reads a payload shaped like `done`'s and upserts one goal (a new G# when --goal is left out). New rows get IDs from the existing next_id, and dates and status follow D10. It validates with record.py and writes under the existing lock. It loads sessions with allow_missing=True and refuses when an active session holds that goal. foundation's apply stage calls python3 S/../simple-by-design/scripts/designflow.py --root <project root> record. Nothing else edits the file directly.",
+          "rationale": "One owner for mutable state (defaults #2; contract.md access through the owner). It reuses the existing payload contract and lock.",
+          "status": "resolved"
+        },
+        {
+          "id": "D12",
+          "question": "decisions.json is currently gitignored in several repos (.agents/ in .gitignore). How does the ADR log get committed?",
+          "after": [
+            "D6"
+          ],
+          "answer": "decisions.json is committed; only .agents/design/workflow.json and .agents/artifacts/ are ignored. The .gitignore pattern that works is '.agents/*', '!.agents/design/', '.agents/design/*', '!.agents/design/decisions.json'. In handtools, also '!.agents/plugins/' if Codex needs its marketplace file there (D19). simple-by-design warns at close and on record when decisions.json is ignored or untracked, and prints the pattern; it never edits .gitignore. foundation lists the .gitignore fix as an item to approve in assess, applies it on approval, and validate.py fails while decisions.json is ignored or untracked.",
+          "rationale": "User choice. git cannot re-include a file under an ignored directory, so the exact pattern has to be written down.",
+          "status": "resolved"
+        },
+        {
+          "id": "D13",
+          "question": "What does foundation do in a target project that already has Markdown ADRs in docs/adr?",
+          "after": [
+            "D6",
+            "D11"
+          ],
+          "answer": "audit counts existing docs/adr/*.md or docs/decisions/*.md as having ADRs and reports it. foundation records new decisions only in decisions.json. It converts existing Markdown ADRs into decisions.json only when the user approves that item in assess.",
+          "rationale": "Changing a project convention needs an explicit decision. Converting by default would rewrite user documents.",
+          "status": "resolved"
+        },
+        {
+          "id": "D14",
+          "question": "How does untangle's stored policy (root path plus simple-by-design VERSION) survive plugin updates that move the cache path, and the removal of per-skill VERSION?",
+          "after": [
+            "D3",
+            "D5"
+          ],
+          "answer": "untangle resolves the simple-by-design sibling again on every run and resume; it never reuses a stored path, and an optional override applies only to that one run. Drift detection compares content hashes of the policy files only. The recorded version comes from the root VERSION, for information only, never as a drift trigger. A policy file that is missing at resume time is a hard error naming the file, not an empty policy.",
+          "rationale": "A cached plugin path includes the version and is pruned, so a stored absolute root goes stale. Hashes are what actually detect rule drift.",
+          "status": "resolved"
+        },
+        {
+          "id": "D15",
+          "question": "Codex ignores 'disable-model-invocation'. How do build-skills, untangle and foundation stay explicit-only in every harness?",
+          "after": [
+            "D2"
+          ],
+          "answer": "Keep 'disable-model-invocation: true' in their SKILL.md (Claude, pi) and add agents/openai.yaml with policy.allow_implicit_invocation: false to each (Codex), following remember's existing agents/openai.yaml. A D8 test checks that the two settings agree for every skill under skills/, including any skill build-skills creates later (D23). In Claude the commands become /handtools:<skill>; directory names are unchanged, so D5's ../ lookup still holds.",
+          "rationale": "Each harness reads its own flag; a test stops the two from drifting.",
+          "status": "resolved"
+        },
+        {
+          "id": "D16",
+          "question": "Which foundation files change for the ADR switch?",
+          "after": [
+            "D6",
+            "D10",
+            "D11",
+            "D12",
+            "D13"
+          ],
+          "answer": "SKILL.md and README stop mentioning Markdown ADRs. assets/adr-template.md is removed. greenfield.md: record the stack choice as a goal through designflow.py record. brownfield.md: record decisions already in the code with rationale left out when unknown, replacing 'Status: accepted (retroactive)'. audit.py: 'adrs' is present when .agents/design/decisions.json has at least one resolved decision, or when legacy docs/adr/*.md or docs/decisions/*.md exist (reported as legacy, D13). validate.py: validate decisions.json through simple-by-design's record.py, check that it is tracked (D12), and keep the title check only for legacy Markdown files. workflowlib/steps.py baseline text: 'Important decisions recorded in .agents/design/decisions.json'.",
+          "rationale": "Lists every reference found to the old format, so nothing is left half-migrated.",
+          "status": "resolved"
+        },
+        {
+          "id": "D17",
+          "question": "How do people read ADRs without the tools?",
+          "after": [
+            "D6"
+          ],
+          "answer": "Add a read-only `designflow.py [--root DIR] show [--goal G#]`. It prints every goal, or one goal, as Markdown: goal, constraints, criteria, then each decision with D# id, question, answer, rationale, after, date, and superseded_by when present. The goal renderer moves out of steps.summary into one function that both show and the close summary call. No generated file is committed.",
+          "rationale": "User choice. One source with a view on demand, so there is no copy to drift.",
+          "status": "resolved"
+        },
+        {
+          "id": "D18",
+          "question": "How does an agent resolve paths written in SKILL.md prose, both to the skill's own scripts and to sibling skills?",
+          "after": [
+            "D5"
+          ],
+          "answer": "Every SKILL.md begins its run steps the way remember does: 'Set S to this skill's absolute directory.' Own scripts are cited as S/scripts/..., the shared rules as S/../simple-by-design/... This replaces 'From the project root, drive the run with scripts/...' in foundation, untangle and build-skills; the project root stays the cwd. D8(a) checks the cited paths.",
+          "rationale": "Agents otherwise resolve relative paths from the project root.",
+          "status": "resolved"
+        },
+        {
+          "id": "D19",
+          "question": "Which marketplace and plugin manifests does the repo ship, and where does the plugin root sit?",
+          "after": [
+            "D2",
+            "D3"
+          ],
+          "answer": "The plugin root is the repo root: .claude-plugin/plugin.json (name 'handtools', version = VERSION) and .claude-plugin/marketplace.json (marketplace name 'handtools', one plugin with source './'), .codex-plugin/plugin.json ('skills': './skills/'), and package.json with the 'pi' manifest. Codex reuses .claude-plugin/marketplace.json if implementation testing shows it accepts that file; otherwise also add .agents/plugins/marketplace.json (and un-ignore it, D12). If either harness rejects a plugin source of './', move the plugin to plugins/handtools/ with skills/ inside it; sibling paths do not change. Install commands: Claude `/plugin marketplace add sij0sh/handtools` then `/plugin install handtools@handtools`; Codex `codex plugin marketplace add sij0sh/handtools` then `codex plugin add handtools@handtools`; pi `pi install git:github.com/sij0sh/handtools`. D8(c) checks every manifest version against VERSION.",
+          "rationale": "Pins the names that every install command depends on. The fallbacks cover the two Codex behaviours this session could not confirm, without reopening the design.",
+          "status": "resolved"
+        },
+        {
+          "id": "D20",
+          "question": "What is the update flag for Codex, which has no command that only checks?",
+          "after": [
+            "D2"
+          ],
+          "answer": "Same as pi (follows the user's pi choice): scripts/check.py also compares Codex's cached handtools marketplace clone with origin and prints 'update available: run codex plugin marketplace upgrade'. Codex auto-upgrade for the marketplace is left off, so updates are flagged and then applied by the user.",
+          "rationale": "Keeps one 'flag, then you apply' behaviour across all three harnesses, as the user chose for Claude and pi. The user can switch Codex auto-upgrade on at any time.",
+          "status": "resolved"
+        },
+        {
+          "id": "D21",
+          "question": "How does the maintainer test local edits in each harness without pushing?",
+          "after": [
+            "D2",
+            "D19"
+          ],
+          "answer": "The README documents local-source installs: `claude --plugin-dir /abs/handtools`, `pi install /abs/handtools` (a local path is live), and `codex plugin marketplace add /abs/handtools` (cached, so run upgrade or reinstall after edits). No symlinks.",
+          "rationale": "Replaces the live-edit loop the old symlinks gave, using each harness's own local-source support.",
+          "status": "resolved"
+        },
+        {
+          "id": "D22",
+          "question": "When are the old symlinks removed, given that old copies in ~/.agents/skills would hide the new install in pi (and Codex)?",
+          "after": [
+            "D9",
+            "D19"
+          ],
+          "answer": "Per harness, right before verifying that harness: remove the old symlinks for the five skills from the dirs that harness reads (~/.agents/skills for pi and Codex, ~/.claude/skills for Claude), install handtools, and confirm the five skills load from the new location. If verification fails, put the symlinks back. readme and saaw stay untouched. This step amends D9's 'after the installs work'.",
+          "rationale": "Verification is only meaningful once the old copies cannot shadow the new ones.",
+          "status": "resolved"
+        },
+        {
+          "id": "D23",
+          "question": "Does build-skills need to know the bundle conventions?",
+          "after": [
+            "D15",
+            "D18"
+          ],
+          "answer": "Yes. When build-skills creates or revises a skill, it writes agents/openai.yaml with allow_implicit_invocation equal to the inverse of disable-model-invocation, and it uses D18's 'Set S' path wording. It does not copy the shared rule files. Its prompts cite them through S/../simple-by-design/ when needed.",
+          "rationale": "Otherwise every skill build-skills produces fails the D15 and D8(a) tests.",
+          "status": "resolved"
+        },
+        {
+          "id": "D24",
+          "question": "What happens to per-skill CHANGELOG.md files?",
+          "after": [
+            "D3"
+          ],
+          "answer": "build-skills' and simple-by-design's CHANGELOG.md files fold into the root CHANGELOG.md, with their existing entries kept unchanged under a '### <skill> (pre-handtools)' heading below the first handtools release. The per-skill files are removed.",
+          "rationale": "One version needs one changelog (D3). Old entries are kept, not rewritten.",
+          "status": "resolved"
+        }
+      ]
+    }
+  ]
+}
