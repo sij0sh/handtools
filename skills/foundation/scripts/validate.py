@@ -13,6 +13,9 @@ import sys
 from pathlib import Path
 
 ENV_OK = ('.env.example', '.env.sample', '.env.template', '.envrc')
+ADR_LOG = '.agents/design/decisions.json'
+# simple-by-design owns the ADR definition; it ships beside foundation in the handtools bundle.
+DESIGN_SCRIPTS = Path(__file__).resolve().parents[2] / 'simple-by-design' / 'scripts'
 JSONC = ('tsconfig*.json', 'jsconfig*.json', '.vscode/*', 'devcontainer.json', '.devcontainer/*')
 
 
@@ -41,6 +44,30 @@ PARSERS = [
     (('*.toml',), parse_toml, 'tomllib (Python 3.11+)'),
     (('*.yml', '*.yaml'), parse_yaml, 'PyYAML'),
 ]
+
+
+def check_adr_log(root, tracked, record):
+    """Validate decisions.json with simple-by-design's own validator and require it to be committed."""
+    path = root / ADR_LOG
+    if not path.is_file():
+        return
+    try:
+        if str(DESIGN_SCRIPTS) not in sys.path:
+            sys.path.insert(0, str(DESIGN_SCRIPTS))
+        from designlib import record as adr  # sibling skill, resolved at run time
+    except ImportError:
+        record(f'{ADR_LOG} is valid', 'fail',
+               f'simple-by-design not found at {DESIGN_SCRIPTS.parent}; install the handtools bundle')
+    else:
+        try:
+            adr.validate(json.loads(path.read_text(encoding='utf-8')))
+            record(f'{ADR_LOG} is valid', 'pass')
+        except (OSError, ValueError) as error:
+            record(f'{ADR_LOG} is valid', 'fail', str(error)[:200])
+    if tracked is not None:
+        ok = ADR_LOG in tracked
+        record(f'{ADR_LOG} is committed', 'pass' if ok else 'fail',
+               '' if ok else 'untracked or ignored; use the .gitignore pattern in the simple-by-design README')
 
 
 def main():
@@ -74,12 +101,15 @@ def main():
                 record(name, 'skipped', f'needs {need}')
             except Exception as error:  # any read or parse error is a failure to report
                 record(name, 'fail', (str(error).splitlines() or [''])[0][:200])
-        if fnmatch.fnmatch(name, 'docs/adr/*.md') or fnmatch.fnmatch(name, 'docs/decisions/*.md'):
+        if fnmatch.fnmatch(name, 'docs/adr/*.md') or fnmatch.fnmatch(name, 'docs/decisions/*.md'):  # legacy ADRs
             try:
                 ok = any(line.startswith('# ') for line in path.read_text(encoding='utf-8').splitlines()[:20])
             except (OSError, UnicodeDecodeError):
                 ok = False
             record(f'{name} has a title', 'pass' if ok else 'fail')
+
+    git_ok = not any(c['name'] == 'git' for c in checks)
+    check_adr_log(root, tracked if git_ok else None, record)
 
     envs = [f for f in tracked + changed if Path(f).name.startswith('.env') and Path(f).name not in ENV_OK]
     record('no committed .env files', 'fail' if envs else 'pass', ', '.join(sorted(set(envs))))

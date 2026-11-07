@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 
 from . import storage
-from .ledger import ART
+from .ledger import ART, policy_root
 from .work import all_items, coverage_summary
 from .checks import PITCH
 
@@ -14,7 +14,7 @@ def out_dir(state):
 
 def render_current(state, phase):
     lines = [f'# untangle {state["audit_id"]}: rev {state["rev"]}', '', f'Phase: {phase.upper()}',
-             f'Root: {state["root"]}', f'Policy: {state["policy"]["root"]} ({state["policy"]["version"]})']
+             f'Root: {state["root"]}', f'Policy: {policy_root()} (handtools {state["policy"].get("version")})']
     if state.get('units'):
         c = coverage_summary(state)
         lines += [f'Coverage: {c["reviewed"]}/{c["in_scope"]} in-scope files reviewed; {c["discovered"]} '
@@ -45,7 +45,7 @@ def render_current(state, phase):
                 lines.append(f'Children reviewed: {", ".join(it["children"])}: send "interactions".')
             lines += ['Ranges (send exactly these in "reviewed"):'] + [f'- {p}' for p in it['paths']]
             langs = sorted({state['ledger'][s.partition(':')[0]]['lang'] or '' for s in it['paths']})
-            base = Path(state['policy']['root'])
+            base = policy_root()
             for lang in langs:
                 prof = f'languages/{lang}.md'
                 lines.append(f'Profile: {base / prof}' if lang and prof in state['policy']['files']
@@ -66,7 +66,7 @@ def render_report(state, complete, reasons):
     head = 'COMPLETE (static assessment of the approved scope)' if complete else 'INCOMPLETE: ' + '; '.join(reasons)
     out = [f'# Untangle audit {state["audit_id"]}', '', f'Status: **{head}**',
            f'Snapshot: `{state["root"]}`, validated {time.strftime("%Y-%m-%d %H:%M:%S %Z")}; state rev '
-           f'{state["rev"]}', f'Policy: simple-by-design {state["policy"]["version"]} at `{state["policy"]["root"]}`',
+           f'{state["rev"]}', f'Policy: simple-by-design from handtools {state["policy"].get("version")} at `{policy_root()}`',
            f'Reviewer: {state.get("reviewer", "none")}' + (' (self-review, not independent)'
                                                            if state.get('reviewer') == 'self' else ''),
            '', '## Coverage', '',

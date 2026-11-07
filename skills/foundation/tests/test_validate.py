@@ -79,6 +79,42 @@ class ValidateTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn('no committed .env files', json.loads(result.stdout)['failed'])
 
+    def write_adr_log(self, root, decision):
+        log = root / '.agents' / 'design' / 'decisions.json'
+        log.parent.mkdir(parents=True)
+        log.write_text(json.dumps({'goals': [{'id': 'G1', 'goal': 'Ship.', 'decisions': [decision]}]}),
+                       encoding='utf-8')
+        return log
+
+    def test_adr_log_committed_and_valid_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_repo(root)
+            self.write_adr_log(root, {'id': 'D1', 'question': 'Q?', 'status': 'resolved', 'answer': 'A.'})
+            git(root, 'add', '.')
+            git(root, 'commit', '-qm', 'adr')
+
+            result = run_validate(root)
+
+            self.assertEqual(result.returncode, 0, result.stdout)
+            names = [c['name'] for c in json.loads(result.stdout)['checks']]
+            self.assertIn('.agents/design/decisions.json is valid', names)
+            self.assertIn('.agents/design/decisions.json is committed', names)
+
+    def test_adr_log_invalid_or_ignored_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_repo(root)
+            (root / '.gitignore').write_text('.agents/\n', encoding='utf-8')
+            self.write_adr_log(root, {'id': 'D1', 'question': 'Q?', 'status': 'resolved'})
+
+            result = run_validate(root)
+
+            failed = json.loads(result.stdout)['failed']
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('.agents/design/decisions.json is valid', failed)
+            self.assertIn('.agents/design/decisions.json is committed', failed)
+
     def test_adr_needs_a_title(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

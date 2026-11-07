@@ -1,0 +1,24 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # tags and history for the version-bump check
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Bundle guards (shared rules, sibling paths, versions, schema, invocation policy)
+        run: python -m unittest discover -s tests -v < /dev/null
+      - name: simple-by-design
+        run: python -m unittest discover -s skills/simple-by-design/tests < /dev/null
+      - name: foundation
+        run: python -m unittest discover -s skills/foundation/tests < /dev/null
+      - name: build-skills
+        run: python -m unittest discover -s skills/build-skills/tests < /dev/null

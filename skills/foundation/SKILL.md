@@ -4,14 +4,16 @@ description: Audit, plan, and bootstrap a repository's project foundation (toolc
 disable-model-invocation: true
 ---
 
-From the project root, drive the run with `scripts/workflow.py` (`python3` on Linux/macOS, `python` on Windows):
+Set `S` to this skill's absolute directory. From the project root, drive the run with `S/scripts/workflow.py` (`python3` on Linux/macOS, `python` on Windows):
 
 1. `start`; run each printed stage as its own execution (fresh subagent when available), passing on the results it needs.
 2. Run the printed `done --stage S`, piping JSON when asked; repeat until `DONE`.
 
 `interview` and `assess` talk to the user; run them in the main context.
 
-Scripts in this skill's `scripts/` take `--root <project root>`. `audit.py` and `validate.py` are read-only.
+Scripts in `S/scripts/` take `--root <project root>`. `audit.py` and `validate.py` are read-only.
+
+ADRs are decision rows in the project's `.agents/design/decisions.json`, defined by `S/../simple-by-design/references/decisions.schema.json`. Write them only through `S/../simple-by-design/scripts/designflow.py --root <project root> record`.
 
 Pass each stage the user's request and the earlier stages' results.
 

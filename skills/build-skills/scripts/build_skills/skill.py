@@ -123,6 +123,27 @@ def check_files(skill):
         raise ValueError(f'{skill}: leaves not named in SKILL.md or scripts/: {", ".join(unreferenced)}.')
 
 
+def write_codex_policy(skill):
+    """Codex reads agents/openai.yaml, not `disable-model-invocation`; keep the two in step."""
+    meta, _ = split_skill(skill)
+    allow = 'false' if meta.get('disable-model-invocation') == 'true' else 'true'
+    path = skill / 'agents' / 'openai.yaml'
+    line = f'allow_implicit_invocation: {allow}'
+    if not path.is_file():
+        path.parent.mkdir(exist_ok=True)
+        text = f'policy:\n  {line}\n'
+    else:
+        text = path.read_text(encoding='utf-8')
+        if re.search(r'^\s+allow_implicit_invocation:', text, re.M):
+            text = re.sub(r'^(\s+)allow_implicit_invocation:.*$', lambda m: m.group(1) + line, text, count=1, flags=re.M)
+        elif re.search(r'^policy:[ \t]*$', text, re.M):
+            text = re.sub(r'^policy:[ \t]*$', f'policy:\n  {line}', text, count=1, flags=re.M)
+        else:
+            text = text.rstrip('\n') + f'\npolicy:\n  {line}\n'
+    path.write_text(text, encoding='utf-8')
+    return path
+
+
 def check_prompt(skill):
     """Saved prompt: SKILL.md only, user-invoked."""
     meta, _ = split_skill(skill)

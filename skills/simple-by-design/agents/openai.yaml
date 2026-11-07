@@ -1,0 +1,5 @@
+interface:
+  display_name: Simple by Design
+  short_description: Record design decisions before implementing features, refactors, or ambiguous changes
+policy:
+  allow_implicit_invocation: false

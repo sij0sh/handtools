@@ -1,8 +1,8 @@
 # foundation
 
-Audit, plan, and bootstrap a repository's project foundation: pinned toolchains, one-command setup, tests and lint, CI, dependency updates, migrations, infrastructure as code, ADRs, architecture docs, secrets hygiene, and onboarding.
+Audit, plan, and bootstrap a repository's project foundation: pinned toolchains, one-command setup, tests and lint, CI, dependency updates, migrations, infrastructure as code, ADRs (in simple-by-design's `.agents/design/decisions.json`), architecture docs, secrets hygiene, and onboarding.
 
-This repository is the skill itself. An agent reads `SKILL.md`; `scripts/workflow.py` owns the stage order.
+Part of the [handtools](../../README.md) bundle. An agent reads `SKILL.md`; `scripts/workflow.py` owns the stage order. ADRs use simple-by-design's decision record: `../simple-by-design/references/decisions.schema.json` defines them and `designflow.py record` writes them.
 
 ## Quick start
 
@@ -47,12 +47,11 @@ scripts/workflowlib/     stages, CLI helpers, optional state storage
 scripts/audit.py         read-only project scan (JSON)
 scripts/validate.py      read-only changed-file checks (JSON)
 references/              greenfield and brownfield rules
-assets/                  mise, CI, Renovate, and ADR templates
+assets/                  mise, CI, and Renovate templates
 docs/architecture.md     architecture overview
-docs/adr/                accepted decisions
 tests/                   unit and integration tests
 ```
 
 ## Status
 
-Local-only for now: no remote, CI, or dependency-update service is configured. `assets/ci.yml` and `assets/renovate.json` are ready to adopt once a remote exists. Project decisions are recorded in `.agents/foundation.json`.
+CI runs from the handtools root workflow. `assets/ci.yml` and `assets/renovate.json` are templates for target projects. foundation's own design decisions are goal G2 in the handtools `.agents/design/decisions.json`.

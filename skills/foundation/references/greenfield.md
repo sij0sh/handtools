@@ -8,7 +8,7 @@ Day one (propose when the gap is missing):
 - `compose.yaml` only when the app needs local services (Postgres, Redis).
 - CI workflow that installs via mise and runs the mise tasks on pull requests.
 - Migrations from the chosen framework's tool, only once a database is chosen.
-- `docs/architecture.md` with a Mermaid diagram; `docs/adr/0001-*.md` recording the stack choice.
+- `docs/architecture.md` with a Mermaid diagram; the stack choice recorded as a goal in `.agents/design/decisions.json` (the ADR log) through simple-by-design's `designflow.py record`, with the `.gitignore` lines that keep it committed.
 - `.gitignore` covering `.env*` except `.env.example`; `.env.example` lists variables without values.
 - `renovate.json` once there is a remote host and CI to validate update PRs.
 

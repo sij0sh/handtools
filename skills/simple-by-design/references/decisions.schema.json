@@ -1,43 +1,150 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "simple-by-design decision record",
-  "description": "Ongoing record at .agents/design/decisions.json. One set per goal; D# IDs are unique within a goal.",
+  "title": "simple-by-design decision record (ADR log)",
+  "description": "Architecture decision record for a project, committed at .agents/design/decisions.json. One set per goal: the goal, constraints and criteria are the decision context; each decision row is one ADR. D# IDs are unique within a goal; G#/D# refers to a decision in another goal. Status is derived: open (no answer), resolved (answer), superseded (superseded_by set). This file is the one ADR definition shared by simple-by-design and foundation.",
   "type": "object",
-  "required": ["goals"],
+  "required": [
+    "goals"
+  ],
   "additionalProperties": false,
   "properties": {
     "goals": {
       "type": "array",
-      "items": { "$ref": "#/$defs/goal" }
+      "items": {
+        "$ref": "#/$defs/goal"
+      }
     }
   },
   "$defs": {
     "goal": {
       "type": "object",
-      "required": ["id", "goal", "decisions"],
+      "required": [
+        "id",
+        "goal",
+        "decisions"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^G[0-9]+$" },
-        "goal": { "type": "string", "minLength": 1 },
-        "constraints": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "criteria": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "decisions": { "type": "array", "items": { "$ref": "#/$defs/decision" } }
+        "id": {
+          "type": "string",
+          "pattern": "^G[0-9]+$"
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/decision"
+          }
+        }
       }
     },
     "decision": {
       "type": "object",
-      "required": ["id", "question", "status"],
+      "required": [
+        "id",
+        "question",
+        "status"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "pattern": "^D[0-9]+$" },
-        "question": { "type": "string", "minLength": 1 },
-        "status": { "enum": ["open", "resolved"] },
-        "answer": { "type": "string", "minLength": 1 },
-        "after": { "type": "array", "items": { "type": "string", "pattern": "^D[0-9]+$" } },
-        "rationale": { "type": "string", "minLength": 1 }
+        "id": {
+          "type": "string",
+          "pattern": "^D[0-9]+$"
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "open",
+            "resolved",
+            "superseded"
+          ]
+        },
+        "answer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(G[0-9]+/)?D[0-9]+$"
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Set by designflow.py the first time the row resolves."
+        },
+        "superseded_by": {
+          "type": "string",
+          "pattern": "^(G[0-9]+/)?D[0-9]+$",
+          "description": "The decision that replaces this one."
+        }
       },
-      "if": { "properties": { "status": { "const": "resolved" } } },
-      "then": { "required": ["answer"] }
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "resolved",
+                  "superseded"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "answer"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "superseded"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "superseded_by"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "superseded_by"
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

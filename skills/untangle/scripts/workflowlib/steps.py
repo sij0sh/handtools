@@ -15,16 +15,15 @@ _CURRENT = 'First read current.md in the newest .agents/artifacts/untangle/audit
 PROMPTS = {
     'inventory': (
         'Agree the audit boundary with the user before reading any source: root (this project), '
-        'exclusions (vendored, generated, build output; each with a reason) and finite limits. Locate the '
-        'installed simple-by-design skill (try ~/.claude/skills/simple-by-design); if it is missing, ask the '
-        'user where it is. Never install or download it.\n'
+        'exclusions (vendored, generated, build output; each with a reason) and finite limits. The script '
+        'finds the simple-by-design rules beside this skill; if it reports them missing, tell the user to '
+        'install the handtools bundle. Never install or download it.\n'
         'Send {"approved_by_user": true, "limits": {"max_files": 5000, "max_bytes": 50000000}, '
-        '"exclude": [{"glob": "node_modules", "reason": "vendored dependencies"}], '
-        '"policy_root": "/abs/path/simple-by-design"}.\n'
+        '"exclude": [{"glob": "node_modules", "reason": "vendored dependencies"}]}.\n'
         'Done when the user has agreed the boundary and limits.'),
     'map': (
         f'{_CURRENT} The path ledger is in audit.json.\n'
-        'Read project instructions (AGENTS.md, CLAUDE.md, CONTRIBUTING, ADRs), build config, tests and '
+        'Read project instructions (AGENTS.md, CLAUDE.md, CONTRIBUTING, the decision record .agents/design/decisions.json or legacy ADRs), build config, tests and '
         'representative code. Record conventions: adopted (intended), accidental (repetition only) or '
         'conflict (competing). Group every pending path into capability units by responsibility, not by '
         'folder size. A unit lists directories, files or file:start-end. List every '
@@ -55,8 +54,9 @@ PROMPTS = {
     'dissect': (
         f'{_CURRENT} It names the item, its ranges, the rev, and the policy files to apply.\n'
         'Policy, where the first source that answers wins: 1) requirements and adopted decisions; '
-        '2) project conventions that fit the goal (listed in current.md); 3) simple-by-design references/defaults.md; '
-        '4) the relevant reference (contract.md, languages/<lang>.md, instructions.md); 5) the simplest '
+        '2) project conventions that fit the goal (listed in current.md); 3) references/defaults.md under the '
+        'Policy path in current.md; 4) the relevant reference there (references/contract.md, '
+        'languages/<lang>.md, references/instructions.md); 5) the simplest '
         'adequate choice. A project convention beats a conflicting default; cite the convention.\n'
         'Unit: read every line of its ranges and look for avoidable complexity the policy names, and for '
         'missing characterization tests. If a unit is too big for one careful pass or holds two responsibilities, '

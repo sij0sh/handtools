@@ -1,5 +1,5 @@
 """Commands and phase transitions. Owns the order of reads, checks, and writes."""
-from . import config, record, sessions, steps, storage
+from . import config, gitcheck, record, sessions, steps, storage
 
 
 def _step(state, rec, session, launcher, limit):
@@ -72,8 +72,52 @@ def done(root, sid, payload, launcher):
             record.save(root, rec)
         sessions.save(root, state)
     if session['status'] == 'complete':
-        return steps.done_message(rec, session)
+        return _with_warning(root, steps.done_message(rec, session))
     return _step(state, rec, session, launcher, limit)
+
+
+def _with_warning(root, text):
+    warning = gitcheck.warning(root)
+    return f'{text}\n\n{warning}' if warning else text
+
+
+def record_goal(root, gid, payload):
+    """Upsert one goal without a session (used by other skills, e.g. foundation's ADRs).
+
+    Rows without an `id` get the next D#. Refuses a goal an active session holds.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError('record needs a JSON object on stdin.')
+    if 'id' in payload:
+        raise ValueError('record: pass an existing goal with --goal G#, not `id` in the payload.')
+    with storage.lock(root):
+        rec = record.load_or_empty(root)
+        state = sessions.load(root, allow_missing=True)
+        if gid is not None:
+            goal = record.find_goal(rec, gid)
+            held = sessions.holders(state).get(gid)
+            if held:
+                raise ValueError(f'{gid} is held by active session {held}; finish or abandon it first.')
+            existing = list(goal['decisions'])
+        else:
+            existing = []
+        rows = payload.get('decisions', [])
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict) and 'id' not in row:
+                    row['id'] = record.next_id(existing, 'D')
+                if isinstance(row, dict):
+                    existing.append({'id': row['id']})
+        gid = record.apply_payload(rec, payload, gid, ground=gid is None)
+        record.save(root, rec)
+    goal = record.find_goal(rec, gid)
+    return _with_warning(root, f'Recorded {gid}: {len(goal["decisions"])} decision(s). '
+                               f'View with `show --goal {gid}`.')
+
+
+def show(root, gid):
+    """Read-only Markdown view of decisions.json."""
+    return steps.show(record.load_or_empty(root), gid)
 
 
 def abandon(root, sid):

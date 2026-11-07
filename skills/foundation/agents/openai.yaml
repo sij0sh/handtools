@@ -1,0 +1,5 @@
+interface:
+  display_name: Foundation
+  short_description: Audit, plan, and bootstrap a repository project foundation
+policy:
+  allow_implicit_invocation: false

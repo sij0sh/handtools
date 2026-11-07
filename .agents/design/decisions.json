@@ -274,6 +274,31 @@
           "status": "resolved"
         }
       ]
+    },
+    {
+      "id": "G2",
+      "goal": "foundation skill: decisions already in its code (converted from foundation docs/adr 0001-0002, accepted retroactively 2026-11-06).",
+      "constraints": [
+        "The skill is run by an agent inside other repositories; a run may span several agent executions."
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "question": "Should foundation's workflow keep per-project run state?",
+          "answer": "No. workflowlib/steps.py sets MODE = 'stateless'. start prints the first stage, and each `done --stage S` names the finished stage, validates its JSON payload, and prints the next. The orchestrator carries earlier results forward; no state is written. There is no resume, status, or abandon for a run; every stage must receive the user's request and the earlier stages' results.",
+          "rationale": "The target repository should not accumulate per-project workflow state; re-running a stage is safe because stages only read until apply. (Was docs/adr/0001-stateless-workflow.md.)",
+          "status": "resolved",
+          "date": "2026-11-06"
+        },
+        {
+          "id": "D2",
+          "question": "May foundation's scripts use third-party Python packages?",
+          "answer": "No. audit.py, validate.py, workflow.py and workflowlib/ import only the Python standard library (3.9+). Optional checks degrade to `skipped` when tomllib (3.11+) or PyYAML is unavailable. tests/test_imports.py enforces it; mise pins only the development toolchain.",
+          "rationale": "scripts/ ships with the skill and must run without an install step. (Was docs/adr/0002-stdlib-only-python.md.)",
+          "status": "resolved",
+          "date": "2026-11-06"
+        }
+      ]
     }
   ]
 }

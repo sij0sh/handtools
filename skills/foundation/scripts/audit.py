@@ -32,7 +32,7 @@ EVIDENCE = {
     'dependency-updates': ['renovate.json', 'renovate.json5', '.renovaterc*', '.github/renovate.json*',
                            '.github/dependabot.yml'],
     'architecture-doc': ['docs/architecture*', 'ARCHITECTURE.md', 'docs/**/*.mmd', '**/*.dsl', '**/*.puml'],
-    'adrs': ['docs/adr/*', 'docs/decisions/*', 'adr/*', 'doc/adr/*'],
+    'adrs': ['.agents/design/decisions.json'],
     'db-migrations': ['**/migrations/*', 'prisma/schema.prisma', 'atlas.hcl', 'flyway.conf', 'alembic.ini',
                       'db/migrate/*'],
     'secrets-excluded': ['.gitignore', '.env.example', '.env.sample', '.sops.yaml', '.gitleaks.toml'],
@@ -41,6 +41,8 @@ EVIDENCE = {
     'logging-health': [],
     'declarative-infra': ['**/*.tf', '**/*.tofu', 'Pulumi.yaml', 'cdk.json', '**/Chart.yaml', '**/kustomization.yaml'],
 }
+LEGACY_ADRS = ['docs/adr/*', 'docs/decisions/*', 'adr/*', 'doc/adr/*']
+ADR_LOG = '.agents/design/decisions.json'
 LIMIT = 10
 ENV_OK = ('.env.example', '.env.sample', '.env.template', '.envrc')
 
@@ -67,6 +69,23 @@ def matches(paths, pattern):
     """Paths matching a glob; `**/x` also matches `x` at the root."""
     pats = [pattern, pattern[3:]] if pattern.startswith('**/') else [pattern]
     return [p for p in paths if any(fnmatch.fnmatch(p, q) for q in pats)][:LIMIT]
+
+
+def adr_log(root, paths):
+    """The ADR log (simple-by-design's decisions.json) and any legacy Markdown ADRs."""
+    path = root / ADR_LOG
+    info = {'path': ADR_LOG, 'exists': path.is_file(), 'resolved': 0, 'committed': None, 'ignored': None,
+            'legacy_markdown': sorted({f for p in LEGACY_ADRS for f in matches(paths, p)})[:LIMIT]}
+    if info['exists']:
+        try:
+            goals = json.loads(path.read_text(encoding='utf-8')).get('goals', [])
+            info['resolved'] = sum(1 for g in goals for d in g.get('decisions', []) if d.get('status') == 'resolved')
+        except (OSError, ValueError, AttributeError):
+            info['resolved'] = None
+    if git(root, 'rev-parse', '--git-dir') is not None:
+        info['committed'] = git(root, 'ls-files', '--error-unmatch', ADR_LOG) is not None
+        info['ignored'] = git(root, 'check-ignore', '--no-index', ADR_LOG) is not None
+    return info
 
 
 def tracked_env_files(root):
@@ -97,10 +116,12 @@ def main():
         'files': source_files,
         'stacks': stacks,
         'decisions_record': (root / '.agents/foundation.json').is_file(),
+        'adr_log': adr_log(root, paths),
         'evidence': evidence,
         'warnings': [f'tracked env file: {f}' for f in tracked_env_files(root)],
         'note': 'Evidence is file presence only; read the files to judge present vs partial. '
-                'logging-health has no file signal; inspect source.',
+                'logging-health has no file signal; inspect source. ADRs live in adr_log.path; '
+                'adr_log.legacy_markdown ADRs count as present but legacy.',
     }
     print(json.dumps(report, indent=2))
     return 0

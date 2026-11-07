@@ -1,0 +1,5 @@
+interface:
+  display_name: Build Skills
+  short_description: Create or revise an agent skill
+policy:
+  allow_implicit_invocation: false

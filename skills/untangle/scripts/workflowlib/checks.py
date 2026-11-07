@@ -24,7 +24,6 @@ def check_inventory(state, payload):
         need(isinstance(r, dict), 'INVENTORY: each exclude is {"glob", "reason"}.')
         need_text(r, 'glob', 'INVENTORY exclude')
         need_text(r, 'reason', 'INVENTORY exclude')
-    need_text(payload, 'policy_root', 'INVENTORY')
 
 
 def check_map(state, payload):

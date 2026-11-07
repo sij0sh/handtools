@@ -12,6 +12,11 @@ MODE = 'stateless'
 ORDER = ['discover', 'interview', 'assess', 'apply', 'validate']
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+SKILL = SCRIPTS.parent
+# The ADR log and its one definition belong to simple-by-design, beside this skill in the handtools bundle.
+DESIGN = SKILL.parent / 'simple-by-design'
+ADR_LOG = '.agents/design/decisions.json'
+RECORD_CMD = f'python3 {DESIGN / "scripts" / "designflow.py"} --root . record'
 DECISIONS = '.agents/foundation.json'
 RECORD = 'decisions-record'
 STATUSES = ['present', 'partial', 'missing', 'n/a', 'unknown']
@@ -23,7 +28,7 @@ CAPABILITIES = {
     'ci-checks': 'CI runs the same checks on every pull request',
     'dependency-updates': 'Automated dependency and tool update PRs',
     'architecture-doc': 'Architecture overview documented (diagram as code)',
-    'adrs': 'Important decisions recorded as ADRs',
+    'adrs': f'Important decisions recorded in {ADR_LOG} (the ADR log) and committed',
     'db-migrations': 'Database schema changes versioned as migrations',
     'secrets-excluded': 'Secrets kept out of Git; .env.example documents variables',
     'deployment-doc': 'Deployment process documented and automated where it exists',
@@ -34,7 +39,7 @@ BASELINE = '\n'.join(f'- `{k}`: {v}' for k, v in CAPABILITIES.items())
 
 PROMPTS = {
     'discover': (
-        'Run `scripts/audit.py --root .` (read-only) and read the files it lists. Do not run project code. '
+        f'Run `python3 {SCRIPTS / "audit.py"} --root .` (read-only) and read the files it lists. Do not run project code. '
         'Classify the project: `kind` greenfield (little or no code/history) or brownfield; '
         '`maturity` prototype, mvp, or production; `mode` from the user\'s request (the orchestrator passes it): audit (report only) '
         'or plan (report, then offer to apply approved items; the default for bootstrap/reassess). '
@@ -50,7 +55,10 @@ PROMPTS = {
         'Send `{"questions_asked": N, "decisions": {"topic": "answer", ...}}` with every decision, recorded and new.'
     ),
     'assess': (
-        'Read `references/greenfield.md` or `references/brownfield.md` per `kind`. Classify every baseline capability as present, partial, missing, n/a, or unknown, each with '
+        f'Read `{SKILL / "references" / "greenfield.md"}` or `{SKILL / "references" / "brownfield.md"}` per `kind`. '
+        'For `adrs`, use the audit\'s `adr_log`: if it exists but `ignored` or not `committed`, the gap is the '
+        '.gitignore fix; legacy Markdown ADRs count as present, and converting them into the log is a separate '
+        'item to offer. Classify every baseline capability as present, partial, missing, n/a, or unknown, each with '
         'evidence (file path, or what was searched and not found):\n'
         f'{BASELINE}\n\n'
         'Report: current-state summary; the classification table; for each gap the smallest fix, its '
@@ -62,15 +70,19 @@ PROMPTS = {
         '"approved": ["<id>", ...], "run": ["command", ...]}`; `approved` lists only ids the user approved, else [].'
     ),
     'apply': (
-        'Read `references/greenfield.md` or `references/brownfield.md` per `kind`. Implement only the approved items, as small reviewable changes that keep existing conventions; '
-        'start from `assets/` templates where one fits and adapt it to the project. Do not touch unrelated '
-        f'config. Write `{DECISIONS}` with `kind`, `maturity`, `decisions`, `accepted` (approved ids), '
+        f'Read `{SKILL / "references" / "greenfield.md"}` or `{SKILL / "references" / "brownfield.md"}` per `kind`. '
+        'Implement only the approved items, as small reviewable changes that keep existing conventions; '
+        f'start from `{SKILL / "assets"}` templates where one fits and adapt it to the project. Do not touch unrelated '
+        f'config. ADRs (`adrs`): record decisions only by piping a payload into `{RECORD_CMD}` (shape: '
+        f'`{DESIGN / "references" / "decisions.schema.json"}`; send rows without `id` or `status`); never edit '
+        f'{ADR_LOG} directly and never write Markdown ADRs. Convert legacy Markdown ADRs only if the user approved '
+        'that conversion. Write `{DECISIONS}` with `kind`, `maturity`, `decisions`, `accepted` (approved ids), '
         '`declined` (proposed but not approved ids), and `updated` (ISO date), merging any existing record. '
         f'If `{RECORD}` is the only approved item, write only the record. '
         'Done when the files are written; send `{"changed": ["path", ...]}`.'
     ),
     'validate': (
-        'Run `scripts/validate.py --root .`, only the test/lint commands the user approved in assess, and review `git diff`. '
+        f'Run `python3 {SCRIPTS / "validate.py"} --root .`, only the test/lint commands the user approved in assess, and review `git diff`. '
         'Report what changed, what passed, and what remains (every failure, skipped check, and unapproved gap). '
         'Send `{"changed": [...], "passed": [...], "remaining": [...]}`.'
     ),

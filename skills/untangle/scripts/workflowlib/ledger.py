@@ -11,6 +11,9 @@ from . import storage
 
 ART = Path('.agents') / 'artifacts' / 'untangle'
 POLICY_FILES = ('references/defaults.md', 'references/contract.md', 'references/instructions.md')
+POLICY_ENV = 'UNTANGLE_POLICY_ROOT'
+# untangle and simple-by-design ship together in the handtools bundle: skills/untangle, skills/simple-by-design.
+SIBLING = Path(__file__).resolve().parents[3] / 'simple-by-design'
 LANG = {'.py': 'python', '.ts': 'typescript', '.tsx': 'typescript', '.mts': 'typescript', '.js': 'javascript',
         '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.go': 'go', '.rs': 'rust',
         '.java': 'java', '.cs': 'csharp', '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp',
@@ -107,15 +110,25 @@ def walk_tree(root, rules, limits):
     return ledger
 
 
-def load_policy(path):
-    base = Path(path).expanduser()
-    names = list(POLICY_FILES) + sorted(p.relative_to(base).as_posix() for p in (base / 'languages').glob('*.md'))
+def policy_root():
+    """simple-by-design beside this skill, resolved on every command (never stored).
+
+    UNTANGLE_POLICY_ROOT overrides it for the current command only.
+    """
+    override = os.environ.get(POLICY_ENV)
+    return Path(override).expanduser().resolve() if override else SIBLING
+
+
+def load_policy():
+    """Hashes of the shared rule files; the bundle VERSION is recorded for information only."""
+    base = policy_root()
     missing = [n for n in POLICY_FILES if not (base / n).is_file()]
     need(not missing and (base / 'languages').is_dir(),
-          f'INVENTORY: {base} is not simple-by-design (missing {", ".join(missing) or "languages/"}). '
-          'Ask the user for its location.')
-    version = base / 'VERSION'
-    return {'root': str(base.resolve()), 'version': version.read_text().strip() if version.is_file() else None,
+          f'{base} is not simple-by-design (missing {", ".join(missing) or "languages/"}). Install the '
+          f'handtools bundle so simple-by-design sits beside untangle, or set {POLICY_ENV} for this command.')
+    names = list(POLICY_FILES) + sorted(p.relative_to(base).as_posix() for p in (base / 'languages').glob('*.md'))
+    version = base.parent.parent / 'VERSION'
+    return {'version': version.read_text().strip() if version.is_file() else None,
             'files': {n: file_sha((base / n).read_bytes()) for n in names}}
 
 
@@ -181,9 +194,8 @@ def find_drift(state):
     diffs += [f'deleted: {p}' for p in sorted(set(state['ledger']) - set(now)) if not is_excluded(p, approved)]
     diffs += [f'changed: {p}' for p in sorted(in_scope_files(state) & set(now))
               if now[p].get('sha256') != state['ledger'][p]['sha256']]
-    try:
-        policy = load_policy(state['policy']['root'])['files']
-    except ValueError:
-        policy = {}
+    policy = load_policy()['files']
+    gone = [n for n in state['policy']['files'] if n not in policy]
+    need(not gone, f'Policy file(s) missing from {policy_root()}: {", ".join(gone)}. Reinstall the handtools bundle.')
     diffs += [f'policy changed: {n}' for n in state['policy']['files'] if policy.get(n) != state['policy']['files'][n]]
     return diffs

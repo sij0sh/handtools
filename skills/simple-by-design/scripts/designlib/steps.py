@@ -88,29 +88,57 @@ def render_step(session, rec, holders, launcher, limit, refs):
     return '\n'.join(lines)
 
 
-def summary(rec, session):
-    """Close summary for the user: goal, resolved decisions, open questions."""
-    goal = record.find_goal(rec, session['goal'])
-    lines = [f'# {goal["goal"]}', '', f'Session {session["id"]}.']
+def render_goal(goal, detail=False):
+    """One goal as Markdown. detail adds IDs, dependencies, dates and supersession (for `show`)."""
+    lines = [f'# {goal["id"]}. {goal["goal"]}' if detail else f'# {goal["goal"]}']
     if goal.get('constraints'):
         lines += ['', '## Constraints'] + [f'- {item}' for item in goal['constraints']]
     if goal.get('criteria'):
         lines += ['', '## Success criteria'] + [f'- {item}' for item in goal['criteria']]
-    resolved = [d for d in goal['decisions'] if d['status'] == 'resolved']
+    shown = [d for d in goal['decisions'] if d['status'] == 'resolved' or (detail and d['status'] == 'superseded')]
     unresolved = [d for d in goal['decisions'] if d['status'] == 'open']
-    if resolved:
+    if shown:
         lines += ['', '## Decisions']
-        for decision in resolved:
-            lines += ['', f'### {decision["question"]}', decision['answer']]
+        for decision in shown:
+            title = f'{decision["id"]}. {decision["question"]}' if detail else decision['question']
+            lines += ['', f'### {title}']
+            if detail:
+                meta = [f'Status: {decision["status"]}']
+                if decision.get('date'):
+                    meta.append(f'Date: {decision["date"]}')
+                if decision.get('after'):
+                    meta.append(f'After: {", ".join(decision["after"])}')
+                if decision.get('superseded_by'):
+                    meta.append(f'Superseded by: {decision["superseded_by"]}')
+                lines.append(' | '.join(meta))
+                lines.append('')
+            lines.append(decision['answer'])
             if decision.get('rationale'):
                 lines += ['', f'Reason: {decision["rationale"]}']
     if unresolved:
-        lines += ['', '## Open questions'] + [f'- {d["question"]}' for d in unresolved]
+        label = (lambda d: f'{d["id"]}. {d["question"]}') if detail else (lambda d: d['question'])
+        lines += ['', '## Open questions'] + [f'- {label(d)}' for d in unresolved]
+    return lines
+
+
+def summary(rec, session):
+    """Close summary for the user: goal, resolved decisions, open questions."""
+    goal = record.find_goal(rec, session['goal'])
+    lines = render_goal(goal)
+    lines[1:1] = ['', f'Session {session["id"]}.']
     index = next(i for i, item in enumerate(rec['goals']) if item['id'] == goal['id'])
     earlier = rec['goals'][:index]
     if earlier:
         lines += ['', '## Earlier goals'] + [f'- {item["goal"]}' for item in earlier]
     return '\n'.join(lines)
+
+
+def show(rec, gid=None):
+    """Read-only Markdown view of the whole record, or of one goal."""
+    goals = [record.find_goal(rec, gid)] if gid else rec['goals']
+    if not goals:
+        return 'No decisions recorded.'
+    return '\n\n'.join('\n'.join(render_goal(goal, detail=True)) for goal in goals)
 
 
 def done_message(rec, session):

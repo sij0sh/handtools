@@ -1,0 +1,5 @@
+interface:
+  display_name: Untangle
+  short_description: Audit a codebase for avoidable complexity and recommend simplifications
+policy:
+  allow_implicit_invocation: false

@@ -6,7 +6,8 @@ from .config import REFS, REVIEW_LIMIT
 from .sessions import work_dir
 
 
-LAUNCH = 'From the project root, drive the run with `scripts/workflow.py` (`python3` on Linux/macOS, `python` on Windows):'
+LAUNCH = ("Set `S` to this skill's absolute directory. From the project root, drive the run with "
+          '`S/scripts/workflow.py` (`python3` on Linux/macOS, `python` on Windows):')
 RUN_STEPS = {
     'stateful': f"""{LAUNCH}
 
@@ -77,7 +78,9 @@ def draft_prompt(root, s):
     return (f'{header(s)}\n{plan(s)}\n\nWrite only what closes the gap, in {draft}, per the design '
             f'and {ref("instructions.md")}: frontmatter `name: {name}`, a one-line `description`, '
             f'and `disable-model-invocation: true` unless clearly model-invoked; name '
-            f'every references/ leaf in SKILL.md or scripts/. {engine}\n\nDone when `done` passes the shape check.', {})
+            f'every references/ leaf in SKILL.md or scripts/. Cite shared design rules from '
+            f'`S/../simple-by-design/` (defaults, contracts, instructions, languages, decision schema) instead of '
+            f'copying them; the script writes agents/openai.yaml from the frontmatter. {engine}\n\nDone when `done` passes the shape check.', {})
 
 
 def review_task(root, s):

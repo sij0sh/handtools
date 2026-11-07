@@ -1,0 +1,17 @@
+{
+  "name": "handtools",
+  "owner": {
+    "name": "sij0sh"
+  },
+  "metadata": {
+    "description": "Agent skills for design decisions, codebase audits, project foundations, skill building and session memory."
+  },
+  "plugins": [
+    {
+      "name": "handtools",
+      "source": "./",
+      "version": "0.0.1",
+      "description": "Agent skills: simple-by-design, untangle, foundation, build-skills and remember, with one set of shared design rules."
+    }
+  ]
+}

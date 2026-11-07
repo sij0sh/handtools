@@ -42,15 +42,10 @@ PHASE: BRANCH  |  LOOP: 2
 
 ## Install
 
-Needs Python 3.9+ (standard library only). Use `python3` on Linux/macOS and
-`python` on Windows. Pi checks `~/.agents/skills/` and a project's
-`.agents/skills/`:
-
-```bash
-git clone https://github.com/sij0sh/simple-by-design.git ~/.agents/skills/simple-by-design
-```
-
-Keep `SKILL.md`, `scripts/`, `references/`, and `languages/` together.
+Part of the [handtools](../../README.md) bundle; install the bundle, not this
+folder alone. untangle and foundation read this skill's references and
+schema from the sibling folder. Needs Python 3.9+ (standard library only).
+Use `python3` on Linux/macOS and `python` on Windows.
 
 ## Quick start
 
@@ -61,6 +56,32 @@ Keep `SKILL.md`, `scripts/`, `references/`, and `languages/` together.
 You get `.agents/design/decisions.json` (settled and open decisions with
 reasons) and a plain-language summary when the run closes. No implementation
 code.
+
+## The decision record is the ADR log
+
+`decisions.json` is the project's architecture decision record, shared with
+the foundation skill. [`references/decisions.schema.json`](references/decisions.schema.json)
+is its one definition: each goal is the decision context (goal, constraints,
+criteria) and each decision row is one ADR (question, answer, rationale,
+`after`, `date`, `superseded_by`). Status is derived: `open`, `resolved`, or
+`superseded`. `G#/D#` cites a decision in another goal.
+
+Commit `decisions.json`. Keep session state out of git with:
+
+```gitignore
+.agents/*
+!.agents/design/
+.agents/design/*
+!.agents/design/decisions.json
+```
+
+The script warns, at close and on `record`, when the file is ignored or
+untracked. It never edits `.gitignore`.
+
+- `show [--goal G1]` prints the record as Markdown. It is read-only.
+- `record [--goal G1]` upserts one goal from a JSON payload on stdin, without
+  a session. Rows without an `id` get the next `D#`. Other skills use it, so
+  the script stays the only writer. It refuses a goal an active session holds.
 
 ## Several runs
 
@@ -89,7 +110,7 @@ In `.agents/design/`:
 
 All owned by the script; the agent edits them only through `done`.
 
-- `decisions.json`: ongoing record, one set per goal.
+- `decisions.json`: the decision record (ADR log), one set per goal. Commit it.
 - `workflow.json`: permanent `{version, sessions[]}` registry.
 - `workflow.lock`: short-lived lock directory around writes.
 
@@ -99,8 +120,8 @@ All owned by the script; the agent edits them only through `done`.
 |---|---|
 | `SKILL.md` | How to run the loop |
 | `scripts/designflow.py` | Command line: arguments, stdin payload, printed commands |
-| `scripts/designlib/` | Loop internals: `flow` (phases), `steps` (prompts, output), `sessions` (`workflow.json`), `record` (`decisions.json`), `storage` (paths, lock), `config` (`SKILL.md` settings) |
-| `references/decisions.schema.json` | Shape of `decisions.json` |
+| `scripts/designlib/` | Loop internals: `flow` (phases, `record`, `show`), `steps` (prompts, output), `sessions` (`workflow.json`), `record` (`decisions.json`), `storage` (paths, lock), `gitcheck` (is the record committed), `config` (`SKILL.md` settings) |
+| `references/decisions.schema.json` | The ADR definition: shape of `decisions.json` |
 | `references/defaults.md` | Defaults every run starts from |
 | `references/contract.md` | Ownership, dependencies, state, failures, tradeoffs |
 | `references/instructions.md` | Semantic instructions: designing skills, prompts, `AGENTS.md` |
@@ -110,14 +131,6 @@ Profile rules are tagged **Requirement**, **Default**, or **Heuristic**.
 
 The skill stops at decisions. It doesn't write, review, or test code.
 
-## Uninstall
-
-```bash
-rm -rf ~/.agents/skills/simple-by-design
-```
-
-Decision records and project code stay.
-
 ## More
 
 - [Skill entrypoint](SKILL.md)
@@ -125,4 +138,4 @@ Decision records and project code stay.
 - [Defaults](references/defaults.md)
 - [Contract](references/contract.md)
 - [Language profiles](languages/)
-- [Changelog](CHANGELOG.md)
+- [Changelog](../../CHANGELOG.md)

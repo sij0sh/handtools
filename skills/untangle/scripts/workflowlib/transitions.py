@@ -12,7 +12,7 @@ def on_inventory(state, payload):
     need(state.get('root', str(root)) == str(root), f'INVENTORY: this run belongs to {state.get("root")}.')
     state.setdefault('audit_id', time.strftime('audit-%Y%m%d-%H%M%S'))
     state.update(root=str(root), limits=payload['limits'], exclude=payload.get('exclude', []),
-                 policy=load_policy(payload['policy_root']))
+                 policy=load_policy())
     state['ledger'] = walk_tree(root, state['exclude'], state['limits'])
     state.setdefault('units', {})
     state.setdefault('flows', {})

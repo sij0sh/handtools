@@ -475,6 +475,82 @@ class DesignflowTest(unittest.TestCase):
         result = self.done('s9', payload={'goal': 'Ship.'}, ok=False)
         self.assertIn('s9', result.stderr)
 
+    def test_resolution_stamps_date(self):
+        self.to_challenge()
+        d1 = self.goals()[0]['decisions'][0]
+        self.assertRegex(d1['date'], r'^\d{4}-\d{2}-\d{2}$')
+
+    def test_record_adds_goal_without_session(self):
+        result = self.run_cmd('record', payload={
+            'goal': 'Record decisions already in the code.',
+            'decisions': [{'question': 'Which runtime?', 'answer': 'Python 3.11.'},
+                          {'question': 'Which tests?'}]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Recorded G1', result.stdout)
+        self.assertFalse(self.state.exists())
+        rows = self.goals()[0]['decisions']
+        self.assertEqual([d['id'] for d in rows], ['D1', 'D2'])
+        self.assertEqual([d['status'] for d in rows], ['resolved', 'open'])
+        self.assertIn('date', rows[0])
+        self.assertNotIn('date', rows[1])
+
+    def test_record_updates_goal_and_supersedes(self):
+        self.seed([{'id': 'G1', 'goal': 'Ship.', 'decisions': [
+            {'id': 'D1', 'question': 'Which db?', 'status': 'resolved', 'answer': 'SQLite.'}]}])
+        result = self.run_cmd('record', '--goal', 'G1', payload={'decisions': [
+            {'question': 'Which db now?', 'answer': 'Postgres.'},
+            {'id': 'D1', 'superseded_by': 'D2'}]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = {d['id']: d for d in self.goals()[0]['decisions']}
+        self.assertEqual(rows['D1']['status'], 'superseded')
+        self.assertEqual(rows['D2']['status'], 'resolved')
+        shown = self.run_cmd('show').stdout
+        self.assertIn('# G1. Ship.', shown)
+        self.assertIn('### D1. Which db?', shown)
+        self.assertIn('Superseded by: D2', shown)
+        self.assertIn('### D2. Which db now?', shown)
+
+    def test_record_refuses_held_goal_and_payload_id(self):
+        self.run_cmd('start')
+        self.done(payload={'goal': 'Ship.'})
+        held = self.run_cmd('record', '--goal', 'G1', payload={'decisions': [{'question': 'Q?'}]})
+        self.assertEqual(held.returncode, 1)
+        self.assertIn('held by active session s1', held.stderr)
+        with_id = self.run_cmd('record', payload={'id': 'G1'})
+        self.assertEqual(with_id.returncode, 1)
+
+    def test_cross_goal_references(self):
+        self.seed([{'id': 'G1', 'goal': 'Old.', 'decisions': [
+            {'id': 'D1', 'question': 'Q?', 'status': 'resolved', 'answer': 'A.'}]}])
+        ok = self.run_cmd('record', payload={'goal': 'New.', 'decisions': [
+            {'question': 'Q2?', 'answer': 'B.', 'after': ['G1/D1']}]})
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        bad = self.run_cmd('record', payload={'goal': 'Newer.', 'decisions': [
+            {'question': 'Q3?', 'after': ['G7/D1']}]})
+        self.assertEqual(bad.returncode, 1)
+        self.assertEqual(len(self.goals()), 2)
+
+    def test_superseded_needs_superseded_by(self):
+        self.seed([{'id': 'G1', 'goal': 'Ship.', 'decisions': [
+            {'id': 'D1', 'question': 'Q?', 'status': 'superseded', 'answer': 'A.'}]}])
+        self.assertEqual(self.run_cmd('show').returncode, 1)
+
+    def test_warns_when_record_is_ignored_by_git(self):
+        if subprocess.run(['git', '--version'], capture_output=True).returncode != 0:
+            self.skipTest('git unavailable')
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        (self.root / '.gitignore').write_text('.agents/\n', encoding='utf-8')
+        out = self.run_cmd('record', payload={'goal': 'Ship.'}).stdout
+        self.assertIn('is ignored by git', out)
+        self.assertIn('!.agents/design/decisions.json', out)
+        (self.root / '.gitignore').write_text('.agents/*\n!.agents/design/\n.agents/design/*\n'
+                                              '!.agents/design/decisions.json\n', encoding='utf-8')
+        out = self.run_cmd('record', '--goal', 'G1', payload={'criteria': ['Done.']}).stdout
+        self.assertIn('is not tracked by git yet', out)
+        subprocess.run(['git', '-C', str(self.root), 'add', '.agents/design/decisions.json'], check=True)
+        out = self.run_cmd('record', '--goal', 'G1', payload={'criteria': ['Done!']}).stdout
+        self.assertNotIn('WARNING', out)
+
 
 class QuoteTest(unittest.TestCase):
     def setUp(self):
@@ -529,7 +605,8 @@ class ConfigTest(unittest.TestCase):
 class ImportGraphTest(unittest.TestCase):
     ALLOWED = {
         'designflow': {'flow'},
-        'flow': {'storage', 'sessions', 'record', 'config', 'steps'},
+        'flow': {'storage', 'sessions', 'record', 'config', 'steps', 'gitcheck'},
+        'gitcheck': {'storage'},
         'steps': {'sessions', 'record'},
         'sessions': {'record', 'storage'},
         'record': {'storage'},

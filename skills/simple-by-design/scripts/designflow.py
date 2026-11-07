@@ -6,7 +6,7 @@ Run from the project root. Requires Python 3.9+; standard library only.
 Logic lives in designlib/; this file owns the command line only.
 
 Files (under .agents/design/), all owned by this script:
-  decisions.json  ongoing record, one set per goal (source of truth)
+  decisions.json  the project's decision record (ADR log), one set per goal; commit it
   workflow.json   permanent session registry
   workflow.lock   short-lived lock directory around writes
 """
@@ -69,6 +69,10 @@ def main():
     done_cmd.add_argument('--session', help='session to advance (s#); required when several are active')
     abandon_cmd = commands.add_parser('abandon', help='close an active session without a summary')
     abandon_cmd.add_argument('--session', required=True, help='session to close (s#)')
+    record_cmd = commands.add_parser('record', help='upsert one goal and its decisions from stdin, without a session')
+    record_cmd.add_argument('--goal', help='existing goal to update (G#); omit to add a new goal')
+    show_cmd = commands.add_parser('show', help='print the decision record (ADR log) as Markdown; read-only')
+    show_cmd.add_argument('--goal', help='show only this goal (G#)')
     args = parser.parse_args()
     root = args.root.resolve()
     try:
@@ -78,6 +82,10 @@ def main():
             print(flow.status(root, args.session, args.all, launcher(root)))
         elif args.command == 'abandon':
             print(flow.abandon(root, args.session))
+        elif args.command == 'record':
+            print(flow.record_goal(root, args.goal, read_payload()))
+        elif args.command == 'show':
+            print(flow.show(root, args.goal))
         else:
             print(flow.done(root, args.session, read_payload(), launcher(root)))
     except (ValueError, OSError) as error:

@@ -1,11 +1,25 @@
-"""decisions.json: validation, the agent's payload, goal hashes, and IDs."""
+"""decisions.json: validation, the agent's payload, goal hashes, and IDs.
+
+decisions.json is the project's ADR log; references/decisions.schema.json is its one
+definition. The constants below mirror that schema, and a test keeps them equal.
+"""
 import hashlib
 import json
 import re
+from datetime import date
 
 from . import storage
 
 GOAL_KEYS = ('goal', 'constraints', 'criteria')
+GOAL_REQUIRED = ['id', 'goal', 'decisions']
+GOAL_OPTIONAL = ['constraints', 'criteria']
+DECISION_REQUIRED = ['id', 'question', 'status']
+DECISION_OPTIONAL = ['answer', 'after', 'rationale', 'date', 'superseded_by']
+STATUSES = ('open', 'resolved', 'superseded')
+GOAL_ID = r'^G[0-9]+$'
+DECISION_ID = r'^D[0-9]+$'
+DECISION_REF = r'^(G[0-9]+/)?D[0-9]+$'
+DATE = r'^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
 
 
 def _strings(value, where):
@@ -29,9 +43,9 @@ def validate(record):
         raise ValueError('goals must be a list.')
     goal_ids = set()
     for g in record['goals']:
-        _keys(g, 'goal', ['id', 'goal', 'decisions'], ['constraints', 'criteria'])
+        _keys(g, 'goal', GOAL_REQUIRED, GOAL_OPTIONAL)
         gid = g['id']
-        if not isinstance(gid, str) or not re.fullmatch(r'G\d+', gid) or gid in goal_ids:
+        if not isinstance(gid, str) or not re.fullmatch(GOAL_ID, gid) or gid in goal_ids:
             raise ValueError(f'goal id {gid!r} must be unique G#.')
         goal_ids.add(gid)
         if not isinstance(g['goal'], str) or not g['goal']:
@@ -43,27 +57,40 @@ def validate(record):
             raise ValueError(f'{gid}.decisions must be a list.')
         ids = []
         for d in g['decisions']:
-            _keys(d, f'{gid} decision', ['id', 'question', 'status'], ['answer', 'after', 'rationale'])
+            _keys(d, f'{gid} decision', DECISION_REQUIRED, DECISION_OPTIONAL)
             did = d['id']
-            if not isinstance(did, str) or not re.fullmatch(r'D\d+', did) or did in ids:
+            if not isinstance(did, str) or not re.fullmatch(DECISION_ID, did) or did in ids:
                 raise ValueError(f'{gid}: decision id {did!r} must be unique D#.')
             ids.append(did)
             where = f'{gid}.{did}'
             if not isinstance(d['question'], str) or not d['question']:
                 raise ValueError(f'{where}.question must be a nonempty string.')
-            if d['status'] not in ('open', 'resolved'):
-                raise ValueError(f'{where}.status must be "open" or "resolved".')
-            if d['status'] == 'resolved' and not d.get('answer'):
-                raise ValueError(f'{where} is resolved but has no answer.')
+            if d['status'] not in STATUSES:
+                raise ValueError(f'{where}.status must be one of {", ".join(STATUSES)}.')
+            if d['status'] != 'open' and not d.get('answer'):
+                raise ValueError(f'{where} is {d["status"]} but has no answer.')
+            if (d['status'] == 'superseded') != ('superseded_by' in d):
+                raise ValueError(f'{where}: status "superseded" goes with superseded_by, and only with it.')
             for key in ('answer', 'rationale'):
                 if key in d and (not isinstance(d[key], str) or not d[key]):
                     raise ValueError(f'{where}.{key} must be a nonempty string.')
+            if 'date' in d and (not isinstance(d['date'], str) or not re.fullmatch(DATE, d['date'])):
+                raise ValueError(f'{where}.date must be YYYY-MM-DD.')
             if 'after' in d:
                 _strings(d['after'], f'{where}.after')
+            refs = d.get('after', []) + ([d['superseded_by']] if 'superseded_by' in d else [])
+            for ref in refs:
+                if not isinstance(ref, str) or not re.fullmatch(DECISION_REF, ref):
+                    raise ValueError(f'{where}: reference {ref!r} must be D# or G#/D#.')
+    by_goal = {g['id']: {d['id'] for d in g['decisions']} for g in record['goals']}
+    for g in record['goals']:
         for d in g['decisions']:
-            for dep in d.get('after', []):
-                if dep == d['id'] or dep not in ids:
-                    raise ValueError(f'{gid}.{d["id"]}.after: {dep} is not another decision in {gid}.')
+            refs = d.get('after', []) + ([d['superseded_by']] if 'superseded_by' in d else [])
+            for ref in refs:
+                ref_goal, _, ref_id = ref.rpartition('/')
+                ref_goal = ref_goal or g['id']
+                if (ref_goal, ref_id) == (g['id'], d['id']) or ref_id not in by_goal.get(ref_goal, ()):
+                    raise ValueError(f'{g["id"]}.{d["id"]}: {ref} is not another recorded decision.')
 
 
 def exists(root):
@@ -118,8 +145,23 @@ def public_goal(goal):
     return shown
 
 
-def apply_payload(record, payload, gid, ground):
+def derive_status(decision, today):
+    """Status follows the fields: superseded_by, then answer. Stamp the first resolution date."""
+    if 'superseded_by' in decision:
+        decision['status'] = 'superseded'
+    elif decision.get('answer'):
+        decision['status'] = 'resolved'
+    else:
+        decision['status'] = 'open'
+    if decision['status'] == 'open':
+        decision.pop('date', None)
+    else:
+        decision.setdefault('date', today)
+
+
+def apply_payload(record, payload, gid, ground, today=None):
     """Apply the agent's edits to one goal in record; return that goal's id."""
+    today = today or date.today().isoformat()
     if not isinstance(payload, dict):
         raise ValueError('Payload must be a JSON object.')
     extra = [k for k in payload if k not in ('id', 'decisions') + GOAL_KEYS]
@@ -155,7 +197,9 @@ def apply_payload(record, payload, gid, ground):
             raise ValueError('Each payload row needs an `id`.')
         did = row['id']
         if 'status' in row:
-            raise ValueError(f'{did}: `status` follows from `answer`; send `answer` or `"answer": null`.')
+            raise ValueError(f'{did}: `status` follows from `answer` and `superseded_by`; send those instead.')
+        if 'date' in row:
+            raise ValueError(f'{did}: `date` is set by the script when the row resolves.')
         if 'drop' in row:
             if row['drop'] is not True or set(row) != {'id', 'drop'}:
                 raise ValueError(f'{did}: drop a row with exactly {{"id": "{did}", "drop": true}}.')
@@ -176,6 +220,6 @@ def apply_payload(record, payload, gid, ground):
                 decision.pop(key, None)
             else:
                 decision[key] = value
-        decision['status'] = 'resolved' if decision.get('answer') else 'open'
+        derive_status(decision, today)
     validate(record)
     return goal['id']

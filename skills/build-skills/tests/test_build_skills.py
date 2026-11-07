@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1]
+if str(SOURCE / 'scripts') not in sys.path:
+    sys.path.insert(0, str(SOURCE / 'scripts'))
 
 
 class Base(unittest.TestCase):
@@ -372,6 +374,34 @@ class Structure(unittest.TestCase):
         for name in ('cli.py', 'storage.py'):
             self.assertEqual((self.PACKAGES[0] / name).read_bytes(), (self.PACKAGES[1] / name).read_bytes(), name)
 
+
+
+
+class CodexPolicyTest(unittest.TestCase):
+    def make(self, root, invocation, yaml=None):
+        skill = Path(root) / 'demo'
+        skill.mkdir()
+        (skill / 'SKILL.md').write_text(f'---\nname: demo\ndescription: Demo.\ndisable-model-invocation: {invocation}\n---\nBody\n',
+                                        encoding='utf-8')
+        if yaml is not None:
+            (skill / 'agents').mkdir()
+            (skill / 'agents' / 'openai.yaml').write_text(yaml, encoding='utf-8')
+        return skill
+
+    def test_writes_policy_from_frontmatter(self):
+        from build_skills.skill import write_codex_policy
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_codex_policy(self.make(tmp, 'true'))
+            self.assertEqual(path.read_text(), 'policy:\n  allow_implicit_invocation: false\n')
+
+    def test_updates_existing_yaml_in_place(self):
+        from build_skills.skill import write_codex_policy
+        with tempfile.TemporaryDirectory() as tmp:
+            yaml = 'interface:\n  display_name: Demo\npolicy:\n  allow_implicit_invocation: false\n'
+            text = write_codex_policy(self.make(tmp, 'false', yaml)).read_text()
+            self.assertIn('display_name: Demo', text)
+            self.assertIn('  allow_implicit_invocation: true', text)
+            self.assertNotIn('false', text)
 
 if __name__ == '__main__':
     unittest.main()

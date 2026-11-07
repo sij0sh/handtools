@@ -5,7 +5,8 @@ from pathlib import Path
 from .config import GROUND_FIELDS, KINDS, MODELS, REVIEW_LIMIT, ROUTER_LABELS, STAGE_LABELS, STATE_LABELS
 from .payload import text_field
 from .sessions import active, close, work_dir
-from .skill import check_files, check_model, check_prompt, copy_skill, install_engine, overlay, tree_hash
+from .skill import (check_files, check_model, check_prompt, copy_skill, install_engine, overlay, tree_hash,
+                    write_codex_policy)
 from .storage import base_dir
 
 ACTIONS = ('applied', 'rejected')
@@ -126,7 +127,7 @@ def check_draft(root, s):
 
 
 def done_draft(root, state, s, payload):
-    check_draft(root, s)
+    write_codex_policy(check_draft(root, s))
     s['phase'] = 'review'
 
 

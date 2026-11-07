@@ -46,15 +46,9 @@ Results are leads with evidence refs, not conclusions. The agent reads the sourc
 
 ## Install
 
-`remember` is a standard agent skill. Place it in your harness skill folder.
+`remember` ships in the [handtools](../../README.md) bundle; install the bundle for Claude Code, Codex or pi.
 
 The scripts require Python 3.11+. Git and recordings are optional; without them, source tools still work.
-
-```bash
-git clone https://github.com/sij0sh/remember.git ~/.agents/skills/remember
-```
-
-Use `~/.claude/skills/remember` for Claude Code, or your harness's configured skill location.
 
 ## Quick start
 
@@ -158,13 +152,15 @@ remember makes evidence easier to inspect. It does not certify a change as safe.
 
 Python syntax extraction is built in. For tree-sitter extraction of Rust, Go, TypeScript/JavaScript and shell:
 
+Keep the virtual environment outside the installed skill, because a bundle update replaces that folder.
+`R` is this skill's directory (the parent of `S`):
+
 ```bash
-cd ~/.agents/skills/remember
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+python3 -m venv ~/.venvs/remember
+~/.venvs/remember/bin/python -m pip install -r "$R/requirements.txt"
 ```
 
-Use `.venv/bin/python` for commands that need those packages.
+Use `~/.venvs/remember/bin/python` for commands that need those packages.
 
 ## Configuration
 
@@ -180,7 +176,7 @@ Use `--repo DIR` for another repository, `--cache DIR` to relocate the cache, `-
 ## Tests
 
 ```bash
-cd ~/.agents/skills/remember
+cd skills/remember   # in a handtools checkout
 python3 -m unittest discover -s tests
 ```
 
@@ -188,9 +184,10 @@ Standard library only. Tests use disposable repositories.
 
 ## Uninstall
 
+Uninstall the handtools bundle, then remove the cache and optional venv:
+
 ```bash
-rm -rf ~/.agents/skills/remember
-rm -rf ~/.cache/remember
+rm -rf ~/.cache/remember ~/.venvs/remember
 ```
 
 Adjust paths if you used another skill location, `XDG_CACHE_HOME` or `--cache`. With default settings, remember writes nothing into the repositories it reads.
