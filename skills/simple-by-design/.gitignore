@@ -1,0 +1,16 @@
+.agents/artifacts/
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+dist/
+build/
+coverage/
+*.log
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+.mypy_cache/
+*.egg-info/
+.agents/
