@@ -1,6 +1,6 @@
-"""saaw internals. Allowed imports (checked by tests):
+"""build-skills internals. Allowed imports (checked by tests):
 
-  flow     -> config, prompts, sessions, skill, stages, storage
+  flow     -> config, prompts, sessions, stages, storage
   stages   -> config, payload, sessions, skill, storage
   prompts  -> config, sessions
   sessions -> storage

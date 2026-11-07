@@ -1,4 +1,4 @@
-"""Command-line helpers. Shared verbatim by saaw and its workflow template; edit both copies together."""
+"""Command-line helpers. Shared verbatim by build-skills and its workflow template; edit both copies together."""
 import json
 import os
 import shlex

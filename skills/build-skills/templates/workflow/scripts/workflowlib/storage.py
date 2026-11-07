@@ -1,6 +1,6 @@
 """Project root and key, state paths, JSON files, and the lock around writes.
 
-Shared verbatim by saaw and its workflow template; edit both copies together.
+Shared verbatim by build-skills and its workflow template; edit both copies together.
 State lives in <skill>/state/<project-key>/, where <skill> is two levels above this package.
 """
 import hashlib

@@ -1,4 +1,4 @@
-"""End-to-end tests: copy the skill to a temp dir and drive scripts/saaw.py as the agent would."""
+"""End-to-end tests: copy the skill to a temp dir and drive scripts/build-skills.py as the agent would."""
 import ast
 import json
 import shutil
@@ -14,7 +14,7 @@ SOURCE = Path(__file__).resolve().parents[1]
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.skill = self.tmp / 'saaw'
+        self.skill = self.tmp / 'build-skills'
         for sub in ('scripts', 'references', 'templates'):
             shutil.copytree(SOURCE / sub, self.skill / sub, ignore=shutil.ignore_patterns('__pycache__'))
         self.project = self.tmp / 'project'
@@ -23,7 +23,7 @@ class Base(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp)
 
-    def run_cmd(self, *args, payload=None, root=None, ok=True, script='scripts/saaw.py'):
+    def run_cmd(self, *args, payload=None, root=None, ok=True, script='scripts/build-skills.py'):
         cmd = [sys.executable, str(self.skill / script), '--root', str(root or self.project), *args]
         data = json.dumps(payload) if payload is not None else ''
         proc = subprocess.run(cmd, input=data, capture_output=True, text=True)
@@ -48,7 +48,7 @@ class Base(unittest.TestCase):
         return next(s for s in self.registry()['sessions'] if s['id'] == sid)
 
     def ground_payload(self, **extra):
-        payload = {'mode': 'new', 'target': 'skills/demo', 'purpose': 'p', 'trigger': 't', 'gap': 'g',
+        payload = {'mode': 'new', 'kind': 'prompt', 'target': 'skills/demo', 'purpose': 'p', 'trigger': 't', 'gap': 'g',
                    'pass_condition': 'pc',
                    'confirmed': True}
         payload.update(extra)
@@ -58,12 +58,11 @@ class Base(unittest.TestCase):
         self.run_cmd('start')
         return self.done(self.ground_payload(**extra), sid)
 
-    def design(self, model='semantic', router=False, ok=True, **extra):
-        criteria = {'semantic': [], 'stateless': ['focus'], 'stateful': ['focus', 'resume']}.get(model, [])
+    def design(self, model='stateless', router=False, ok=True, **extra):
+        criteria = {'stateful': ['focus', 'resume']}.get(model, [])
         payload = {'model': model, 'router': router, 'why': 'w', 'confirmed': True,
-                   'criteria': criteria + (['conditional'] if router else [])}
-        if model in ('stateless', 'stateful'):
-            payload['stages'] = [{'name': n, 'output': 'o', 'check': 'c'} for n in 'xyz']
+                   'criteria': criteria + (['conditional'] if router else []),
+                   'stages': [{'name': n, 'output': 'o', 'check': 'c'} for n in 'xyz']}
         payload.update(extra)
         return self.done(payload, ok=ok)
 
@@ -91,48 +90,10 @@ class Base(unittest.TestCase):
         steps = path / 'scripts' / 'workflowlib' / 'steps.py'
         steps.write_text(steps.read_text().replace("MODE = 'stateful'", f"MODE = '{mode}'"))
 
-    def to_review(self, model='semantic', router=False):
-        self.start()
-        self.design(model, router)
-        self.write_skill(self.wdir(), ref=router)
+    def to_review(self, **extra):
+        self.start(**extra)
+        self.write_skill(self.wdir())
         return self.done()
-
-
-class Prompt(Base):
-    def test_writes_saved_prompt_with_frontmatter(self):
-        out = self.run_cmd('prompt', '--name', 'demo', '--description', 'Do the thing.', '--body', 'Do it.')
-        self.assertIn('Wrote', out)
-        path = self.project / 'skills' / 'demo' / 'SKILL.md'
-        text = path.read_text()
-        self.assertIn('name: demo\n', text)
-        self.assertIn('description: Do the thing.\n', text)
-        self.assertIn('disable-model-invocation: true\n', text)
-        self.assertTrue(text.endswith('\n\nDo it.\n'))
-        self.assertEqual(list((self.skill / 'state').glob('*/workflow.json')), [])
-
-    def test_target_and_invocation(self):
-        self.run_cmd('prompt', '--name', 'demo', '--description', 'd', '--body', 'b',
-                     '--target', 'custom/demo', '--disable-model-invocation', 'false')
-        path = self.project / 'custom' / 'demo' / 'SKILL.md'
-        self.assertTrue(path.is_file())
-        self.assertIn('disable-model-invocation: false\n', path.read_text())
-
-    def test_body_from_stdin(self):
-        cmd = [sys.executable, str(self.skill / 'scripts/saaw.py'), '--root', str(self.project),
-               'prompt', '--name', 'demo', '--description', 'd', '--body', '-']
-        proc = subprocess.run(cmd, input='From stdin.\n', capture_output=True, text=True)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn('From stdin.', (self.project / 'skills' / 'demo' / 'SKILL.md').read_text())
-
-    def test_rejects_bad_input(self):
-        self.assertIn('must match', self.run_cmd('prompt', '--name', 'Bad_Name', '--description', 'd', '--body', 'b', ok=False))
-        self.assertIn('1-100', self.run_cmd('prompt', '--name', 'demo', '--description', 'x' * 101, '--body', 'b', ok=False))
-        self.assertIn('one', self.run_cmd('prompt', '--name', 'demo', '--description', 'a\nb', '--body', 'b', ok=False))
-        self.assertIn('Body', self.run_cmd('prompt', '--name', 'demo', '--description', 'd', '--body', '  ', ok=False))
-        self.write_skill(self.project / 'skills' / 'demo')
-        self.assertIn('exists', self.run_cmd('prompt', '--name', 'demo', '--description', 'd', '--body', 'b', ok=False))
-        self.assertIn('match', self.run_cmd('prompt', '--name', 'demo', '--description', 'd', '--body', 'b',
-                                           '--target', 'custom/other', ok=False))
 
 
 class Sessions(Base):
@@ -160,24 +121,36 @@ class Sessions(Base):
     def test_ground_requires_confirmation(self):
         self.run_cmd('start')
         self.assertIn('confirmed', self.done(self.ground_payload(confirmed=False), ok=False))
-        self.assertIn('PHASE: DESIGN', self.done(self.ground_payload()))
+        self.assertIn('kind', self.done(self.ground_payload(kind='semantic'), ok=False))
+        self.assertIn('PHASE: DESIGN', self.done(self.ground_payload(kind='staged')))
 
 
 class Stages(Base):
+    def test_saved_prompt_skips_design(self):
+        out = self.start(wording='Summarize the diff.')
+        self.assertIn('PHASE: DRAFT', out)
+        self.assertIn('Kind: saved prompt', out)
+        self.assertIn('Summarize the diff.', out)
+        self.assertNotIn('design', self.session())
+        self.write_skill(self.wdir())
+        out = self.done()
+        self.assertIn('exactly this text', out)
+        self.assertIn("wording only if they agree", out)
+        self.assertIn('Kind: saved prompt.', self.review())
+
     def test_design_validates_and_writes_artifact(self):
-        self.start()
-        self.assertIn('model', self.design('levels', ok=False))
+        self.start(kind='staged')
+        self.assertIn('model', self.design('semantic', ok=False))
         self.assertIn('confirmed', self.design(confirmed=False, ok=False))
         self.assertIn('PHASE: DRAFT', self.design())
         text = Path(self.session()['design']['artifact']).read_text()
-        self.assertIn('Model: semantic', text)
+        self.assertIn('Model: stateless', text)
+        self.assertIn('Criteria: none', text)
 
     def test_design_criteria_and_stages(self):
-        self.start()
+        self.start(kind='staged')
         stages = [{'name': n, 'output': 'o', 'check': 'c'} for n in 'xyz']
         self.assertIn('labels', self.design(criteria=['nope'], ok=False))
-        self.assertIn('semantic carries', self.design(criteria=['focus'], ok=False))
-        self.assertIn('stateless needs', self.design('stateless', criteria=[], ok=False))
         self.assertIn('stateful needs', self.design('stateful', criteria=['focus'], ok=False))
         self.assertIn('requires stateful', self.design('stateless', criteria=['focus', 'loop'], ok=False))
         self.assertIn('conditional', self.design(router=True, criteria=[], ok=False))
@@ -194,7 +167,7 @@ class Stages(Base):
         self.assertIn('Criteria: gate, loop', text)
 
     def test_draft_checks_order_matches_stages(self):
-        self.start()
+        self.start(kind='staged')
         self.design('stateful', stages=[{'name': n, 'output': 'o', 'check': 'c'} for n in 'xy'])
         self.write_skill(self.wdir())
         self.assertIn('must match design stages', self.done(ok=False))
@@ -207,7 +180,6 @@ class Stages(Base):
 
     def test_draft_checks_files(self):
         self.start()
-        self.design()
         self.assertIn('SKILL.md', self.done(ok=False))
         path = self.write_skill(self.wdir())
         (path / 'references').mkdir()
@@ -216,7 +188,6 @@ class Stages(Base):
 
     def test_draft_checks_short_description_and_invocation(self):
         self.start()
-        self.design()
         path = self.write_skill(self.wdir())
         skill = path / 'SKILL.md'
         text = skill.read_text()
@@ -226,7 +197,7 @@ class Stages(Base):
         self.assertIn('1-100', self.done(ok=False))
 
     def test_model_gate_and_engine_install(self):
-        self.start()
+        self.start(kind='staged')
         out = self.design('stateless', router=True)
         self.assertIn('done --stage S', out)
         path = self.write_skill(self.wdir())
@@ -241,17 +212,22 @@ class Stages(Base):
         self.assertIn('PHASE: REVIEW', out)
         self.assertIn('steps.py', out)
 
-    def test_semantic_rejects_engine(self):
+    def test_prompt_rejects_engine_leaves_and_model_invocation(self):
         self.start()
-        self.design()
-        path = self.write_skill(self.wdir())
+        path = self.write_skill(self.wdir(), ref=True)
+        self.assertIn('remove references/', self.done(ok=False))
+        shutil.rmtree(path / 'references')
         self.staged(path, 'stateful')
-        self.assertIn('semantic', self.done(ok=False))
+        self.assertIn('remove scripts/', self.done(ok=False))
+        shutil.rmtree(path / 'scripts')
+        skill = path / 'SKILL.md'
+        skill.write_text(skill.read_text().replace('invocation: true', 'invocation: false'))
+        self.assertIn('user-invoked', self.done(ok=False))
 
     def test_review_gates_and_loop(self):
         out = self.to_review()
         self.assertIn('Loop: 1/3', out)
-        self.assertIn('least instruction', out)
+        self.assertIn('exactly this text', out)
         rejected = [{'file': 'f', 'finding': 'f', 'action': 'rejected', 'why': 'w'}]
         self.assertIn('none_found', self.review(findings=[], ok=False))
         self.assertIn('action', self.review(findings=[dict(rejected[0], action='x')], ok=False))
@@ -289,7 +265,6 @@ class Revise(Base):
     def test_backup_and_overlay(self):
         self.start(mode='revise')
         self.assertIn('Old.', (self.wdir('backup') / 'SKILL.md').read_text())
-        self.design()
         self.write_skill(self.wdir(), body='New.')
         self.done()
         out = self.review()
@@ -299,14 +274,22 @@ class Revise(Base):
 
     def test_model_change_sets_mode(self):
         self.staged(self.target, 'stateful')
-        self.start(mode='revise')
+        self.start(mode='revise', kind='staged')
         self.design('stateless')
         steps = self.wdir() / 'scripts' / 'workflowlib' / 'steps.py'
         self.assertIn("MODE = 'stateless'", steps.read_text())
 
+    def test_staged_to_saved_prompt_removes_scripts(self):
+        self.staged(self.target, 'stateful')
+        self.start(mode='revise')
+        self.assertIn('remove scripts/', self.done(ok=False))
+        shutil.rmtree(self.wdir() / 'scripts')
+        self.done()
+        self.review()
+        self.assertFalse((self.target / 'scripts').exists())
+
     def test_target_changed_blocks_finish(self):
         self.start(mode='revise')
-        self.design()
         self.done()
         (self.target / 'SKILL.md').write_text((self.target / 'SKILL.md').read_text() + 'edit\n')
         self.assertIn('changed since GROUND', self.review(ok=False))
@@ -361,7 +344,7 @@ class Template(Base):
 
 
 class Structure(unittest.TestCase):
-    PACKAGES = [SOURCE / 'scripts' / 'saawlib', SOURCE / 'templates' / 'workflow' / 'scripts' / 'workflowlib']
+    PACKAGES = [SOURCE / 'scripts' / 'build_skills', SOURCE / 'templates' / 'workflow' / 'scripts' / 'workflowlib']
 
     def allowed(self, package):
         """Parse `mod -> a, b` lines from the package docstring."""

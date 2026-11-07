@@ -1,10 +1,7 @@
-"""Commands: start, prompt, done, status, abandon."""
-from pathlib import Path
-
+"""Commands: start, done, status, abandon."""
 from .config import DONE_MSG
 from .prompts import render, summary
 from .sessions import active, close, find, load_registry, save_registry, select_active, timestamp
-from .skill import write_prompt_skill
 from .stages import PHASES
 from .storage import base_dir, lock
 
@@ -19,14 +16,6 @@ def cmd_start(root, launcher):
         state['sessions'].append(session)
         save_registry(root, state)
     return render(root, session, launcher)
-
-
-def cmd_prompt(root, name, description, body, target=None, invocation='true'):
-    """Write a saved-prompt skill directly; no session, design, or stage engine."""
-    target = Path(target) if target else Path('skills') / name
-    target = (target if target.is_absolute() else root / target).resolve()
-    path = write_prompt_skill(target, name, description, body, invocation)
-    return f'Wrote {path}.'
 
 
 def cmd_done(root, sid, payload, launcher):

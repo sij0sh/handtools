@@ -7,7 +7,7 @@
 
 ## SKILL.md body
 
-What every run needs. Numbered steps only when order matters.
+The body is the prompt itself, written as the user would type it to the agent.
 
 ## Leaf pointer
 

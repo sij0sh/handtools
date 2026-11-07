@@ -123,37 +123,14 @@ def check_files(skill):
         raise ValueError(f'{skill}: leaves not named in SKILL.md or scripts/: {", ".join(unreferenced)}.')
 
 
-def prompt_text(name, description, body, invocation='true'):
-    """Validate a saved-prompt skill and return its SKILL.md text."""
-    if not re.fullmatch(r'[a-z0-9-]{1,64}', name):
-        raise ValueError(f'Name `{name}` must match [a-z0-9-], 1-64 characters.')
-    description = description.strip()
-    if not description or '\n' in description or '\r' in description:
-        raise ValueError('Description must be one non-empty line.')
-    if len(description) > DESCRIPTION_MAX:
-        raise ValueError(f'Description must be 1-{DESCRIPTION_MAX} characters.')
-    if invocation not in ('true', 'false'):
-        raise ValueError('`disable-model-invocation` must be true or false.')
-    body = body.strip('\n')
-    if not body.strip():
-        raise ValueError('Body must not be empty.')
-    return (f'---\nname: {name}\ndescription: {description}\n'
-            f'disable-model-invocation: {invocation}\n---\n\n{body}\n')
-
-
-def write_prompt_skill(target, name, description, body, invocation='true'):
-    """Write a saved-prompt skill to target; no stage engine or session state."""
-    target = Path(target)
-    if target.name != name:
-        raise ValueError(f'Target directory `{target.name}` must match the skill name `{name}`.')
-    path = target / 'SKILL.md'
-    if path.exists():
-        raise ValueError(f'{path} exists; use the staged revise flow or choose another name.')
-    text = prompt_text(name, description, body, invocation)
-    target.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding='utf-8')
-    check_files(target)
-    return path
+def check_prompt(skill):
+    """Saved prompt: SKILL.md only, user-invoked."""
+    meta, _ = split_skill(skill)
+    if meta.get('disable-model-invocation') != 'true':
+        raise ValueError(f'{skill}: a saved prompt is user-invoked; set `disable-model-invocation: true`.')
+    extra = [d for d in ('scripts', 'references') if (skill / d).exists()]
+    if extra:
+        raise ValueError(f'{skill}: a saved prompt is SKILL.md only; remove {", ".join(extra)}/.')
 
 
 def engine_order(steps):
@@ -170,16 +147,12 @@ def engine_order(steps):
 def check_model(skill, model, router, stages=()):
     """Shape matches the declared execution model, router, and design stage names."""
     steps = skill / 'scripts' / 'workflowlib' / 'steps.py'
-    if model == 'semantic':
-        if steps.exists():
-            raise ValueError(f'{skill}: semantic model ships no stage engine; remove scripts/workflowlib/.')
-    else:
-        found = re.search(r"^MODE\s*=\s*['\"](\w+)['\"]", steps.read_text(encoding='utf-8'), re.M) \
-            if steps.is_file() else None
-        if not found or found.group(1) != model:
-            raise ValueError(f'{skill}: {model} model needs scripts/workflowlib/steps.py with MODE = \'{model}\'.')
-        order = engine_order(steps)
-        if stages and order != list(stages):
-            raise ValueError(f'{skill}: steps.py ORDER {order} must match design stages {list(stages)}.')
+    found = re.search(r"^MODE\s*=\s*['\"](\w+)['\"]", steps.read_text(encoding='utf-8'), re.M) \
+        if steps.is_file() else None
+    if not found or found.group(1) != model:
+        raise ValueError(f'{skill}: {model} model needs scripts/workflowlib/steps.py with MODE = \'{model}\'.')
+    order = engine_order(steps)
+    if stages and order != list(stages):
+        raise ValueError(f'{skill}: steps.py ORDER {order} must match design stages {list(stages)}.')
     if router and not leaves(skill):
         raise ValueError(f'{skill}: router needs at least one leaf under references/.')

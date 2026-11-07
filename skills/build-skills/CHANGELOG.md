@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.0.11
+
+- Rename the project and skill from `saaw` to `build-skills`: entry point `scripts/build-skills.py`, package `scripts/build_skills/`, tests `tests/test_build_skills.py`.
+
+## 0.0.10
+
+- `start` is the only entry point; the `prompt` command is removed.
+- GROUND sends `kind`: `prompt` (saved prompt: user-invoked, SKILL.md only) runs ground -> draft -> review; `staged` runs ground -> design -> draft -> review. Optional `wording` keeps the user's prompt text verbatim.
+- Saved prompts keep the fresh-subagent review: would an agent given exactly this text meet the pass condition?
+- `execution.md`: "saved prompt" replaces "semantic"; the default is stages, and stateless is the default staged model (no stage label required). DESIGN offers `stateless|stateful` only.
+- `instructions.md`: a saved prompt's body is the prompt itself.
+
 ## 0.0.9
 
 - Restore the staged engine and the short `SKILL.md` entry; stage prompts and execution-model selection are unchanged.
