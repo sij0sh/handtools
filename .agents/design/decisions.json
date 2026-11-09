@@ -795,6 +795,17 @@
           "answer": "Use build-skills revise sessions for foundation (S6) and untangle (S7). Edit remember's provider/catalog (S5) and build-skills' install_engine (S8) directly, with unit tests, and note the exception in the plan and CHANGELOG.",
           "rationale": "User decision 2026-11-09: build-skills only models staged and prompt skills. A prompt revise would reduce remember to SKILL.md, and extending build-skills now would pull M4 work into M1.",
           "date": "2026-11-09"
+        },
+        {
+          "id": "D18",
+          "question": "How are foundation (S6) and untangle (S7) changed, given build-skills only generates standalone skills (vendored _engine, template launcher, scripts/steps.py with PLANNING = True)?",
+          "answer": "Direct edits with tests, extending D17. A build-skills revise of a bundle skill would vendor the engine (bundle guards forbid it) and force PLANNING = True on foundation's discover step, an unapproved behavior change. Teaching build-skills a bundle mode is M4 work.",
+          "rationale": "User decision 2026-11-09 after a build-skills draft of foundation showed the layout conflict.",
+          "after": [
+            "D17"
+          ],
+          "status": "resolved",
+          "date": "2026-11-09"
         }
       ]
     }

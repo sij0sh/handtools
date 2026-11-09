@@ -119,5 +119,73 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn('STEP: APPLY', result.stdout)
 
 
+class ReconTests(unittest.TestCase):
+    """G5/D8: foundation reads a closed recon snapshot and reports external contract gaps."""
+
+    def setUp(self):
+        import shutil
+        from _engine.recon import store
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name) / 'orders'
+        shutil.copytree(ROOT.parents[1] / 'tests' / 'fixtures' / 'recon' / 'orders', self.root)
+        self.store = store
+        self.run_id = store.start(self.root, 'f-start')['run_id']
+        ev = lambda path, s: [{'source': '.', 'path': path, 'statement': s}]
+        store.record(self.root, self.run_id, {'records': [
+            {'id': 'contract:queue:orders.created', 'classification': 'observed', 'direction': 'outbound',
+             'consumers': [{'unresolved': 'consumer of contract:queue:orders.created'}],
+             'evidence': ev('app/events.py', 'publishes orders.created')},
+            {'id': 'contract:schema:order_created.v1', 'classification': 'declared', 'direction': 'both',
+             'owner': 'orders team', 'evidence': ev('schemas/order_created.v1.json', 'payload schema')},
+            {'id': 'contract:table:orders', 'classification': 'observed', 'direction': 'internal',
+             'evidence': ev('migrations/001_create_orders.sql', 'CREATE TABLE orders')}]}, 1, 'f-rec')
+
+    def close(self):
+        self.store.close(self.root, self.run_id, 2, 'f-close')
+
+    def assess(self, **extra):
+        return dict({'mode': 'audit', 'capabilities': CAPABILITIES, 'approved': [], 'run': [],
+                     'recon_snapshot': self.run_id}, **extra)
+
+    def test_discover_prints_the_recon_guide_and_needs_a_closed_snapshot(self):
+        start = run_workflow(self.root, 'start')
+        self.assertIn('recon/cli.py', start.stdout)
+        self.assertIn('unresolved', start.stdout)
+        self.assertIn('external-contracts', steps.CAPABILITIES)
+        discover = {'kind': 'brownfield', 'maturity': 'mvp', 'mode': 'audit', 'recon_snapshot': self.run_id}
+        result = run_workflow(self.root, 'done', '--stage', 'discover', payload=discover)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('still open', result.stderr)
+        self.close()
+        result = run_workflow(self.root, 'done', '--stage', 'discover', payload=discover)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('query gaps', result.stdout)
+
+    def test_assess_requires_a_gap_for_each_unknown_owner_or_compatibility(self):
+        self.close()
+        result = run_workflow(self.root, 'done', '--stage', 'assess', payload=self.assess())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('contract:queue:orders.created (compatibility, owner)', result.stderr)
+        self.assertIn('contract:schema:order_created.v1 (compatibility)', result.stderr)
+        self.assertNotIn('contract:table:orders', result.stderr)  # internal
+        gaps = [{'contract': 'contract:queue:orders.created', 'missing': ['owner', 'compatibility'],
+                 'recommendation': 'name the owning team and a versioning rule for orders.created'},
+                {'contract': 'contract:schema:order_created.v1', 'missing': ['compatibility'],
+                 'recommendation': 'state additive-only changes with a version bump'}]
+        result = run_workflow(self.root, 'done', '--stage', 'assess', payload=self.assess(contract_gaps=gaps))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        bogus = gaps + [{'contract': 'contract:queue:missing', 'missing': ['owner'], 'recommendation': 'x'}]
+        result = run_workflow(self.root, 'done', '--stage', 'assess', payload=self.assess(contract_gaps=bogus))
+        self.assertIn('not contracts in the snapshot', result.stderr)
+
+    def test_foundation_writes_no_recon_state(self):
+        self.close()
+        before = len(self.store.journal(self.root).history(self.run_id))
+        run_workflow(self.root, 'done', '--stage', 'assess', payload=self.assess(contract_gaps=[]))
+        self.assertEqual(len(self.store.journal(self.root).history(self.run_id)), before)
+        self.assertEqual(self.store.runs(self.root), [self.run_id])
+
+
 if __name__ == '__main__':
     unittest.main()

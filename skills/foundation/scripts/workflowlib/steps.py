@@ -2,6 +2,8 @@
 
 Stateless: nothing saved; `done --stage S` names the finished stage and the orchestrator carries results.
 Checks that run scripts use the cwd as the project root (run from the project root).
+External contracts come from a shared recon snapshot (skills/_engine/recon); foundation reads it and
+keeps no copy. The orchestrator passes its id (`recon_snapshot`) from discover to assess.
 """
 import json
 import subprocess
@@ -9,6 +11,7 @@ import sys
 from pathlib import Path
 
 from _engine import storage
+from _engine.recon import guide as recon_guide, store as recon_store
 
 MODE = 'stateless'
 AREA = 'decisions'  # shared with simple-by-design: <state root>/decisions/<project key>/
@@ -48,7 +51,12 @@ CAPABILITIES = {
     'deployment-doc': 'Deployment process documented and automated where it exists',
     'logging-health': 'Structured logging and a health check',
     'declarative-infra': 'Infrastructure managed declaratively where infrastructure exists',
+    'external-contracts': 'External contracts (APIs, queues, schedules, schemas, files, webhooks) have a known owner, '
+                          'a schema and a compatibility/versioning rule; unknown consumers are listed as gaps',
 }
+RECON_CMD = f'python3 {recon_guide.CLI} --root .'
+# A contract needs a finding in assess when one of these is unknown.
+CONTRACT_FIELDS = ('owner', 'compatibility')
 BASELINE = '\n'.join(f'- `{k}`: {v}' for k, v in CAPABILITIES.items())
 
 PROMPTS = {
@@ -57,8 +65,14 @@ PROMPTS = {
         'Classify the project: `kind` greenfield (little or no code/history) or brownfield; '
         '`maturity` prototype, mvp, or production; `mode` from the user\'s request (the orchestrator passes it): audit (report only) '
         'or plan (report, then offer to apply approved items; the default for bootstrap/reassess). '
-        'Pass the audit JSON and your classification to the next stages. '
-        'Send `{"kind": "...", "maturity": "...", "mode": "..."}`.'
+        'Pass the audit JSON and your classification to the next stages.\n'
+        'External contracts: everything the project serves or depends on outside itself. Follow the shared '
+        'recon guide below at map depth. Ask the user before `start`, and which related repositories (if any) '
+        'to add with `--related`; record contracts, their producers/consumers and gaps, then `close`. If the '
+        'user declines, skip it and say so in the report. Pass the snapshot id (snap-N) to the next stages.\n'
+        + recon_guide.prompt(RECON_CMD) + '\n'
+        'Send `{"kind": "...", "maturity": "...", "mode": "...", "recon_snapshot": "snap-N"}` '
+        '(omit `recon_snapshot` when recon was skipped).'
     ),
     'interview': _at(
         f'Run `@DECISIONS@` if bookkeeping exists; its `goal` is foundation\'s goal in the ADR log. Run `{DESIGNFLOW} show` '
@@ -67,6 +81,8 @@ PROMPTS = {
         'solo or team, cost/security/compliance limits, what must not change in a brownfield repo). '
         'Ask only the ones the repo and recorded decisions cannot answer, in one batch of at most 5. '
         'If recorded maturity is below what the audit now shows, ask whether to reassess. '
+        f'With a recon snapshot, run `{RECON_CMD} query gaps --run <snap-N>` and ask about a gap only when '
+        'its answer would change a recommendation (it counts toward the 5). '
         'Send `{"questions_asked": N, "decisions": {"topic": "answer", ...}}` with every decision, recorded and new.'
     ),
     'assess': _at(
@@ -76,13 +92,20 @@ PROMPTS = {
         'item to offer. Classify every baseline capability as present, partial, missing, n/a, or unknown, each with '
         'evidence (file path, or what was searched and not found):\n'
         f'{BASELINE}\n\n'
+        f'For `external-contracts`, use the recon snapshot (`{RECON_CMD} query contracts --run <snap-N>` and '
+        '`query gaps`): unknown fields stay unknown, never "none". For every contract that is not internal and '
+        'whose owner or compatibility is unknown, add a `contract_gaps` finding naming the contract id, the '
+        'missing fields and the smallest fix (e.g. record the owner and a versioning rule beside the schema). '
+        'Without a snapshot, classify it unknown and say discovery was skipped.\n'
         'Report: current-state summary; the classification table; for each gap the smallest fix, its '
         'impact and effort, ordered by priority; proposed file-level changes; risks and tradeoffs. '
         'Recommend nothing the decisions make unnecessary; do not re-propose ids in the record\'s `declined` unless the user asks to reassess. '
         'Ask the user which items to apply (plan mode) and, in any mode, whether to record the decisions '
         f'(`{RECORD}`: the interview answers into the ADR log, and `@DECISIONS@`), and which project tests/linters `validate` may run. '
         'Send `{"mode": "audit|plan", "capabilities": {"<id>": {"status": "...", "evidence": "..."}, ...}, '
-        '"approved": ["<id>", ...], "run": ["command", ...]}`; `approved` lists only ids the user approved, else [].'
+        '"approved": ["<id>", ...], "run": ["command", ...], "recon_snapshot": "snap-N", "contract_gaps": '
+        '[{"contract": "contract:...", "missing": ["owner", "compatibility"], "recommendation": "..."}]}`; '
+        '`approved` lists only ids the user approved, else []; omit the recon keys when recon was skipped.'
     ),
     'apply': _at(
         f'Read `{SKILL / "references" / "greenfield.md"}` or `{SKILL / "references" / "brownfield.md"}` per `kind`. '
@@ -121,6 +144,19 @@ def _run(script):
         raise ValueError(f'{script} did not print JSON: {out.stderr.strip() or out.stdout[:200]}') from None
 
 
+def _snapshot(state, payload):
+    """The closed recon snapshot named in the payload, read from the recon journal; None when skipped."""
+    run = payload.get('recon_snapshot')
+    if run is None:
+        return None
+    if not isinstance(run, str) or not run.startswith('snap-'):
+        raise ValueError('`recon_snapshot` is a snapshot id such as snap-1.')
+    snap, _, closed = recon_store.read(Path(state['root']), run)
+    if not closed:
+        raise ValueError(f'{run} is still open; `close` it before foundation uses it.')
+    return snap
+
+
 def check_discover(state, payload):
     code, _ = _run('audit.py')
     if code != 0:
@@ -128,6 +164,35 @@ def check_discover(state, payload):
     _enum(payload, 'kind', ['greenfield', 'brownfield'])
     _enum(payload, 'maturity', ['prototype', 'mvp', 'production'])
     _enum(payload, 'mode', ['audit', 'plan'])
+    _snapshot(state, payload)
+
+
+def check_contract_gaps(snapshot, payload):
+    """Every external contract with an unknown owner or compatibility needs a finding naming it."""
+    gaps = payload.get('contract_gaps', [])
+    if not isinstance(gaps, list) or not all(isinstance(g, dict) for g in gaps):
+        raise ValueError('`contract_gaps` must be a list of objects.')
+    found = {}
+    for g in gaps:
+        if not isinstance(g.get('contract'), str) or not str(g.get('recommendation', '')).strip():
+            raise ValueError('each contract gap needs `contract` (record id) and `recommendation`.')
+        if not isinstance(g.get('missing'), list) or not g['missing']:
+            raise ValueError(f'{g["contract"]}: `missing` lists the unknown fields.')
+        found[g['contract']] = set(g['missing'])
+    records = snapshot.get('records', {})
+    unknown = [g for g in found if g not in records or records[g]['type'] != 'contract']
+    if unknown:
+        raise ValueError(f'`contract_gaps` names ids that are not contracts in the snapshot: {", ".join(unknown)}.')
+    missing = []
+    for rid, rec in sorted(records.items()):
+        if rec['type'] != 'contract' or rec['status'] != 'current' or rec.get('direction') == 'internal':
+            continue
+        need = {k for k in CONTRACT_FIELDS if not rec.get(k)}
+        if need - found.get(rid, set()):
+            missing.append(f'{rid} ({", ".join(sorted(need - found.get(rid, set())))})')
+    if missing:
+        raise ValueError('Contracts with unknown owner/compatibility need a `contract_gaps` finding: '
+                         + '; '.join(missing) + '.')
 
 
 def check_interview(state, payload):
@@ -156,6 +221,11 @@ def check_assess(state, payload):
         raise ValueError(f'Audit mode writes only the record; `approved` may hold only `{RECORD}`.')
     if not isinstance(payload.get('run', []), list):
         raise ValueError('`run` must be a list of approved commands.')
+    snapshot = _snapshot(state, payload)
+    if snapshot is not None:
+        check_contract_gaps(snapshot, payload)
+    elif payload.get('contract_gaps'):
+        raise ValueError('`contract_gaps` needs the `recon_snapshot` they come from.')
 
 
 def check_apply(state, payload):

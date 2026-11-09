@@ -15,6 +15,8 @@ Scripts in `S/scripts/` take `--root <project root>`. `audit.py` and `validate.p
 
 ADRs are decision rows in the project's `.agents/design/decisions.json`, defined by `S/../_engine/policy/decisions.schema.json`. Write them only through `S/../simple-by-design/scripts/designflow.py --root <project root> record`.
 
+External contracts come from a shared recon snapshot recorded with `S/../_engine/recon/cli.py`; discover prints how. Pass its id (`recon_snapshot`) from discover to assess; foundation keeps no copy.
+
 Pass each stage the user's request and the earlier stages' results.
 
 ## Rules for every stage
