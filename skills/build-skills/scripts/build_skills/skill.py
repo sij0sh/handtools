@@ -109,7 +109,7 @@ def install_engine(skill, model):
     text = re.sub(r"^MODE\s*=\s*['\"]\w+['\"]", f"MODE = '{model}'", text, count=1, flags=re.M)
     text = re.sub(r"^AREA\s*=\s*['\"][\w.-]+['\"]", f"AREA = '{skill.name}'", text, count=1, flags=re.M)
     steps.write_text(text, encoding='utf-8')
-    # The engine's own distribution.json names what ships (engine_api, event_schema, policy, recon); add the backend.
+    # The engine's own distribution.json names what ships (engine_api, event_schema, policy, recon, audit); add the backend.
     meta = json.loads((ENGINE / 'distribution.json').read_text(encoding='utf-8'))
     meta['backend'] = 'journal' if model == 'stateful' else 'none'
     (scripts / '_engine' / 'distribution.json').write_text(json.dumps(meta) + '\n')

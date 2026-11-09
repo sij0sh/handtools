@@ -125,6 +125,16 @@ class FlowTest(TempState):
         self.assertEqual(flow.abandon(steps, self.root), 'Run abandoned.')
         self.assertIn('STEP: A', flow.start(steps, self.root, 'go'))
 
+    def test_abandon_hook_sees_state_before_close(self):
+        steps = make_steps('stateful')
+        seen = []
+        steps.on_abandon = lambda state, root: seen.append(state['phase']) or 'Report: cancelled.'
+        flow.start(steps, self.root, 'go')
+        self.assertEqual(flow.abandon(steps, self.root), 'Run abandoned. Report: cancelled.')
+        self.assertEqual(seen, ['a'])
+        with self.assertRaises(ValueError):
+            flow.status(steps, self.root, 'go')
+
 
 class SessionsTest(TempState):
     def test_add_find_select_close(self):

@@ -3,8 +3,8 @@
 `steps` is the skill's own module. It defines MODE ('stateful': one run per project, saved in
 <state root>/<AREA>/<project key>/workflow.json; 'stateless': nothing saved, `done --stage S`
 names the finished step), AREA, ORDER, PROMPTS (text, or a function of the project root),
-CHECKS, advance(state, payload) and DONE_MSG. Every state passed to a check or to advance
-carries 'phase' and 'root'.
+CHECKS, advance(state, payload) and DONE_MSG, and optionally on_abandon(state, root) -> note.
+Every state passed to a check, to advance or to on_abandon carries 'phase' and 'root'.
 """
 from . import storage, planning
 
@@ -86,6 +86,10 @@ def abandon(steps, root):
     if steps.MODE == 'stateless':
         raise ValueError('Stateless: nothing saved, nothing to abandon.')
     with storage.lock(_base(steps, root)):
-        _load(steps, root)
+        state = _load(steps, root)
+        state.setdefault('root', str(root))
+        # Optional hook: a skill records what the cancelled run covered before its state is closed.
+        hook = getattr(steps, 'on_abandon', None)
+        note = hook(state, root) if hook else None
         storage.delete_state(_path(steps, root))
-    return 'Run abandoned.'
+    return 'Run abandoned.' + (f' {note}' if note else '')

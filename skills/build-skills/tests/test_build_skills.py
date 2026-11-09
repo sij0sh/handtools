@@ -226,7 +226,7 @@ class Stages(Base):
         self.assertTrue((engine / 'recon' / 'cli.py').is_file())
         self.assertFalse((engine / 'recon' / 'SKILL.md').exists())
         self.assertEqual(json.loads((engine / 'distribution.json').read_text()),
-                         {'engine_api': 1, 'event_schema': 1, 'policy': 1, 'recon': 1, 'backend': 'none'})
+                         {'engine_api': 1, 'event_schema': 1, 'policy': 1, 'recon': 1, 'audit': 1, 'backend': 'none'})
         steps.write_text(steps.read_text().replace("ORDER = ['plan', 'work', 'verify']", "ORDER = ['x', 'y', 'z']"))
         self.assertIn('router', self.done(ok=False))
         self.staged(path, 'stateful')
