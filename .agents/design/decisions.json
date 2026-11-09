@@ -989,8 +989,8 @@
             "D13"
           ],
           "status": "resolved",
-          "answer": "Branch v011-m2-review from current HEAD. Slices, each with tests and all README test commands green: S0 fixture + expected classification + review manifest fixture (workflow-contract check_packs field made concrete). S1 _engine/audit (obligations, candidates, evidence, budgets) + check packs + catalog loader/validator. S2 _engine/recon/pin.py extraction; untangle switched, tests/exports unchanged. S3 review skeleton: SKILL.md, launcher, FRAME (modes, git baseline, fingerprints, commands) + RECON. S4 OBLIGATIONS + HUNT + budgets/checkpoint. S5 VALIDATE + verdicts + test gaps. S6 drift/resume. S7 CHALLENGE + REPORT + abandon-cancelled. S8 bundle guards, README/skill table, plugin description, CHANGELOG (extend unreleased 0.1.1 entry with M2), agent-driven evaluation report. VERSION stays 0.1.1: the spec releases 0.1.1 after all four milestone gates, matching M1 commits that did not bump.",
-          "rationale": "Library first, consumer after; one release per spec. Note: overrides the global per-commit bump; user can override.",
+          "answer": "Branch v011-m2-review from current HEAD. Slices, each with tests and all README test commands green: S0 fixture + expected classification + review manifest fixture (workflow-contract check_packs field made concrete). S1 _engine/audit (obligations, candidates, evidence, budgets) + check packs + catalog loader/validator. S2 _engine/recon/pin.py extraction; untangle switched, tests/exports unchanged. S3 review skeleton: SKILL.md, launcher, FRAME (modes, git baseline, fingerprints, commands) + RECON. S4 OBLIGATIONS + HUNT + budgets/checkpoint. S5 VALIDATE + verdicts + test gaps. S6 drift/resume. S7 CHALLENGE + REPORT + abandon-cancelled. S8 bundle guards, README/skill table, plugin description, agent-driven evaluation report. Release as 0.1.2 when M2 is done (VERSION, manifests, new CHANGELOG entry).",
+          "rationale": "Library first, consumer after. User decision 2026-11-09: bump to 0.1.2 when M2 is done (0.1.1 already released with M1).",
           "date": "2026-11-09"
         },
         {
