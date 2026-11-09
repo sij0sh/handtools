@@ -1,4 +1,5 @@
-"""Derived files under <state root>/untangle/<project key>/<audit-id>/: current.md, audit.json, report.md."""
+"""Views of the run state. Prompts render it from the journal (current_text); the files under
+<state root>/untangle/<project key>/<audit-id>/ (current.md, audit.json, report.md) are derived copies."""
 import time
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from _engine import storage
 from .ledger import AREA, find_root, policy_root
 from .work import all_items, coverage_summary
 from .checks import PITCH
+from . import reconview
 
 
 def audits_dir(root):
@@ -60,6 +62,8 @@ def render_current(state, phase):
                              else f'Profile: none for {lang or "unknown language"}; apply project and general '
                                   'rules and say so in findings.')
         lines.append(f'Queue after this: {", ".join(state["queue"][1:]) or "empty"}')
+    if phase != 'map':
+        lines += reconview.render(state)
     if phase == 'checkpoint':
         cp = state['checkpoint']
         lines += ['', f'## Checkpoint: {cp["reason"]}', f'Resumes at: {cp["resume"]}',
@@ -85,6 +89,9 @@ def render_report(state, complete, reasons):
            f'- Excluded: {len(c["excluded"])}']
     out += [f'  - `{p}`: {r}' for p, r in sorted(c['excluded'].items())]
     out += [f'  - unreviewed `{p}`' for p in c['unreviewed']]
+    recon = reconview.render(state)
+    if recon:
+        out += recon + ['', 'Recon completeness does not imply review coverage.']
     out += ['', 'Full coverage does not prove semantic correctness.'
             + (' The in-scope source and policy matched the approved snapshot when this was validated.'
                if complete else '')]
@@ -124,6 +131,13 @@ def render_report(state, complete, reasons):
             '- Track A items are static inference unless marked verified; no equivalence tests were run.',
             '- B pitches need the user\'s decision; approving one does not authorize implementation.']
     return '\n'.join(out) + '\n'
+
+
+def current_text(root):
+    """The current-state view, rendered from the journal (authoritative), for the printed step."""
+    state = storage.read_state(storage.state_dir(AREA, Path(root)) / 'workflow.json')
+    return ('Current state (from the journal; current.md is a derived copy):\n'
+            + render_current(state, state['phase']))
 
 
 def export(state, phase):

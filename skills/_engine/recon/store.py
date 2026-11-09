@@ -262,17 +262,33 @@ def successors(root, run):
     return out
 
 
-def stale_refs(root, run, ids):
-    """{id: reason} for cited ids that are stale or gone in the newest snapshot descended from `run`."""
-    latest = (successors(root, run) or [run])[-1]
-    state = read(root, latest)[0]
+BOOKKEEPING = ('accepted', 'supersedes', 'reused_from', 'status', 'stale_reason')
+
+
+def _content(rec):
+    """What a record claims, without the bookkeeping that changes when it is carried forward."""
+    return {k: v for k, v in rec.items() if k not in BOOKKEEPING}
+
+
+def changed_refs(root, old_run, new_run, ids):
+    """{id: reason} for ids a conclusion cited under snapshot `old_run` that are stale, gone, or
+    re-recorded with different content in snapshot `new_run`."""
+    pinned = read(root, old_run)[0].get('records', {}) if old_run else {}
+    state = read(root, new_run)[0]
     recs = state.get('records', {})
     out = {}
     for rid in ids:
         if rid in state.get('dropped', {}):
-            out[rid] = f'dropped in {latest}: {state["dropped"][rid]["reason"]}'
+            out[rid] = f'dropped in {new_run}: {state["dropped"][rid]["reason"]}'
         elif rid not in recs:
-            out[rid] = f'not recorded in {latest}'
+            out[rid] = f'not recorded in {new_run}'
         elif recs[rid]['status'] == 'stale':
-            out[rid] = f'stale in {latest}: {recs[rid].get("stale_reason", "")}'
+            out[rid] = f'stale in {new_run}: {recs[rid].get("stale_reason", "")}'
+        elif rid in pinned and _content(recs[rid]) != _content(pinned[rid]):
+            out[rid] = f're-recorded in {new_run} with different content'
     return out
+
+
+def stale_refs(root, run, ids):
+    """changed_refs against the newest snapshot descended from the pinned `run`."""
+    return changed_refs(root, run, (successors(root, run) or [run])[-1], ids)

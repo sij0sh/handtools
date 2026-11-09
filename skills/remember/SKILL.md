@@ -1,7 +1,9 @@
 ---
 name: remember
-description: Memory for coding agents - known pitfalls, invariants, task state, and decisions from past sessions and commits, plus code relationships. Use before building a feature or fix, on resume, and whenever a task depends on understanding the codebase.
+description: Use at the start of a session or task to orient and comprehensive context.
 ---
+
+Memory for coding agents - known pitfalls, invariants, task state, and decisions from past sessions and commits, plus code relationships. 
 
 # Remember
 

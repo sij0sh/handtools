@@ -5,6 +5,7 @@ from .ledger import (cover_lines, expand_specs, find_drift, find_root, in_scope_
     need, unit_fingerprint, walk_tree)
 from .work import all_items, budget, checkpoint_to, coverage_summary, next_work, reopen_items
 from .exports import publish
+from . import reconview
 
 
 def on_inventory(state, payload):
@@ -23,12 +24,18 @@ def on_inventory(state, payload):
 
 def on_map(state, payload):
     old, kept = state['units'], set()
+    chosen = reconview.pin(state, payload)
+    refs = {}
+    for f in state['findings'].values():
+        refs.setdefault(f['item'], set()).update(f.get('recon_refs', []))
     units = {}
     for u in payload['units']:
         u = dict(u, paths=expand_specs(state, u['paths'], payload.get('exclusions', [])))
         fp = unit_fingerprint(state, cover_lines(state, u['paths'], 'MAP'))
         prior = old.get(u['id'], {})
         keep = prior.get('fingerprint') == fp and prior.get('status') == 'reviewed' and not prior.get('children')
+        # A reviewed unit whose findings cite recon records that changed needs another pass.
+        keep = keep and reconview.fresh_refs(state, sorted(refs.get(u['id'], ())), chosen)
         if keep:
             kept.add(u['id'])
         units[u['id']] = {'kind': 'unit', 'responsibility': u['responsibility'], 'paths': u['paths'],
@@ -40,6 +47,7 @@ def on_map(state, payload):
     state['findings'] = {k: f for k, f in state['findings'].items() if f['item'] in kept}
     state['counters']['units'] = max(state['counters']['units'], len(units))
     state['map'] = {k: payload.get(k, []) for k in ('conventions', 'observables', 'entry_points', 'exclusions')}
+    state['recon'] = chosen
     state['map_rev'] = state['rev']
     state.pop('revise', None)
     return 'scope'
@@ -118,6 +126,10 @@ def on_challenge(state, payload):
     diffs = find_drift(state)
     need(not diffs, 'CHALLENGE: source or policy changed since INVENTORY; a complete report is blocked: '
                      + '; '.join(diffs[:20]) + '. Send {"checkpoint": "drift"}.')
+    gone = reconview.stale(state)
+    need(not gone, 'CHALLENGE: cited recon records changed since MAP; a complete report is blocked: '
+                   + '; '.join(f'{k}: {v}' for k, v in sorted(gone.items())[:20])
+                   + '. Send {"checkpoint": "recon stale"}, then reinventory and pin the refreshed snapshot.')
     c = coverage_summary(state)
     reasons = [f'blocked: {", ".join(c["blocked"])}'] if c['blocked'] else []
     reasons += [f'pending: {", ".join(c["pending"])}'] if c['pending'] else []

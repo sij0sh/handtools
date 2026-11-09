@@ -4,6 +4,7 @@ from pathlib import Path
 from .ledger import (cover_lines, expand_specs, file_sha, in_scope_files, is_excluded, need, need_approval,
     need_list, need_text, parse_spec)
 from .work import all_items, budget
+from . import reconview
 
 
 TIERS = ('requirement', 'convention', 'default', 'reference', 'simplest')
@@ -28,6 +29,7 @@ def check_inventory(state, payload):
 
 def check_map(state, payload):
     w = 'MAP'
+    snap = reconview.snapshot(state, reconview.pin(state, payload, w))
     for c in need_list(payload, 'conventions', w):
         need(isinstance(c, dict) and c.get('status') in ('adopted', 'accidental', 'conflict'),
               f'{w}: each convention needs status adopted|accidental|conflict.')
@@ -39,6 +41,7 @@ def check_map(state, payload):
         need(isinstance(o, dict) and o.get('status') in ('contractual', 'uncharacterized'),
               f'{w}: each observable needs status contractual|uncharacterized.')
         need_text(o, 'what', w)
+        reconview.check_refs(snap, o.get('recon_refs', []), f'{w} observable')
     eps = need_list(payload, 'entry_points', w)
     need(eps, f'{w}: list at least one entry point (exported API counts).')
     seen = set()
@@ -49,6 +52,7 @@ def check_map(state, payload):
         need_text(e, 'where', w)
         need(bool(e.get('flow')) != bool(e.get('excluded')),
               f'{w}: entry point {e["id"]} needs exactly one of `flow` or `excluded`.')
+        reconview.check_refs(snap, e.get('recon_refs', []), f'{w} {e["id"]}')
     proposed = need_list(payload, 'exclusions', w, required=False)
     for r in proposed:
         need_text(r, 'glob', w)
@@ -106,6 +110,7 @@ def _check_findings(state, payload, item):
         pol = f.get('policy')
         need(isinstance(pol, dict) and pol.get('tier') in TIERS, f'{w}: {fid} policy.tier is one of {TIERS}.')
         need_text(pol, 'source', f'{w} {fid} policy')
+        reconview.check_refs(reconview.snapshot(state), f.get('recon_refs', []), f'{w} {fid}')
 
 
 def check_dissect(state, payload):
@@ -113,7 +118,7 @@ def check_dissect(state, payload):
         return
     head = state['queue'][0]
     need(payload.get('item') == head and payload.get('rev') == state['rev'],
-          f'DISSECT: stale or duplicate; the current item is {head} at rev {state["rev"]} (see current.md).')
+          f'DISSECT: stale or duplicate; the current item is {head} at rev {state["rev"]} (see `status`).')
     allowed = set(state['scope']['allowed_commands'])
     bad = [c for c in need_list(payload, 'commands_run', 'DISSECT', required=False) if c not in allowed]
     need(not bad, f'DISSECT: not approved at SCOPE: {bad}. Ask the user; an approved command is added via '
