@@ -808,6 +808,150 @@
           "date": "2026-11-09"
         }
       ]
+    },
+    {
+      "id": "G6",
+      "goal": "v0.1.1 M2 (.agents/artifacts/v011.md): add an explicitly invoked skills/review/ workflow (diff review, subsystem review, reported-bug investigation as modes of one workflow; stages frame -> recon -> obligations -> hunt -> validate -> challenge -> report, with bounded hunt/validate loops and checkpoints), reusable audit bookkeeping in skills/_engine/audit (obligation queue, evidence refs, validation attempts, dedup links, bounded transitions) with review-owned verdict rules, and targeted test analysis as checks within review, so candidates are confirmed only with a repeatable counterexample or complete source argument, test gaps stay separate from bugs, and incomplete coverage is reported honestly.",
+      "constraints": [
+        "Python 3.9+, standard library only; no network; no graph DB; the script never runs project code itself; the agent runs only user-approved commands and records them.",
+        "Builds on M1 (G5 D1-D18) unchanged in contract: SQLite journal is the only authority; recon snapshots are pinned, never edited by review; recon completeness never implies review coverage; reports and exports are rebuildable views.",
+        "review is user-invoked only (disable-model-invocation, allow_implicit_invocation false); _engine/audit has no SKILL.md or trigger and never invokes a skill; review never invokes sibling skills.",
+        "Share only mechanics demonstrated by a consumer: _engine/audit is generic bookkeeping; verdict requirements live in review's domain adapter so M3 security can reuse bookkeeping without bug verdict rules. No upfront extraction of untangle logic.",
+        "Report-only: review never edits the target project; commands that may write run in an isolated worktree/temp dir; source drift of the target during a run blocks a complete report.",
+        "Coverage obligation statuses: planned, investigating, examined, blocked, deferred, not-applicable; 'examined' requires a recorded check and outcome and never means proven safe. Candidate states: proposed -> validating -> confirmed|rejected|unresolved|duplicate.",
+        "Missing tests are test gaps, not bug findings; coverage percentages are supporting evidence only; no blanket exclusion of migrations, startup, IPC or infrastructure; mutation testing only for a named uncertainty within budget.",
+        "Existing workflows (foundation, untangle, simple-by-design, build-skills, remember) keep behavior; untangle may switch to a shared recon-pin helper only if its tests and exports are unchanged.",
+        "No security workflow (M3) and no build-skills generation changes (M4); M2 may only extend the draft workflow contract (check_packs) and add a review manifest fixture.",
+        "Bundle skills are authored by direct edits with tests (precedent G5 D17/D18: build-skills cannot yet author bundle skills without vendoring _engine)."
+      ],
+      "criteria": [
+        "Fixture project with seeded: cross-module regression introduced by a diff, a pre-existing bug, an apparent bug neutralized by its callers, a missing test without a defect, and a test that executes code but asserts the wrong behavior, plus expected-classification.json.",
+        "Scripted runs classify each seed correctly: regression confirmed+introduced, pre-existing confirmed+pre-existing, neutralized candidate rejected with counterevidence, missing test recorded as a test gap (no finding), wrong-assertion test recorded as a test gap with evidence.",
+        "Gates refuse: confirmation without counterexample or complete source argument; 'examined' without check and outcome; rejection without counterevidence; duplicate without a target; commands not approved at frame; failed tooling counted as evidence against a claim.",
+        "Every run terminates within its budgets (hunt/validate loops, challenge rounds) via report or checkpoint; incomplete reports list blocked/deferred/excluded counts and reasons separately and are never labeled complete.",
+        "Resume after source drift reopens exactly the obligations/candidates whose cited evidence changed; stale recon citations block a complete report as in untangle.",
+        "Report regeneration from the journal is deterministic (same bytes on re-render and after replay).",
+        "All existing tests pass; review has its own unittest suite; bundle guards cover review (no vendored engine, no implicit invocation); review manifest validates against workflow-contract.schema.json.",
+        "Agent-driven evaluation on the fixture written to .agents/artifacts/v011-m2-report.md: classification vs expected, false positives, honest-uncertainty cases, and cost."
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "question": "How is skills/review/ laid out and run (engine mode, state area, run multiplicity)?",
+          "status": "open"
+        },
+        {
+          "id": "D2",
+          "question": "What goes into _engine/audit versus review's domain adapter, and does untangle migrate onto it in M2?",
+          "after": [
+            "D1"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D3",
+          "question": "How do the three modes (diff, subsystem, bug) frame scope, baseline and expected behavior?",
+          "after": [
+            "D1"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D4",
+          "question": "How does the RECON stage pin a snapshot, and is untangle's reconview pin logic shared?",
+          "after": [
+            "D2"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D5",
+          "question": "How are obligations shaped, kept finite, and selected without a file-by-check Cartesian product (check catalog and applicability)?",
+          "after": [
+            "D2"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D6",
+          "question": "How does HUNT advance through obligations, and how are hunt/validate loops bounded?",
+          "after": [
+            "D5"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D7",
+          "question": "What is a candidate, and what evidence gates each terminal state (confirmed, rejected, unresolved, duplicate), including diff-mode origin?",
+          "after": [
+            "D2",
+            "D3"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D8",
+          "question": "How are commands approved, recorded and isolated so the target is never edited and failed tooling is not counter-evidence?",
+          "after": [
+            "D3"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D9",
+          "question": "How is targeted test analysis represented (test gaps vs candidates) and which test checks ship?",
+          "after": [
+            "D5",
+            "D7"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D10",
+          "question": "How are source drift and resume handled (pinned fingerprints, reopening exactly affected items)?",
+          "after": [
+            "D4",
+            "D7"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D11",
+          "question": "How does CHALLENGE work and what does REPORT contain, with complete/incomplete/cancelled outcomes and deterministic rendering?",
+          "after": [
+            "D6",
+            "D7",
+            "D9"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D12",
+          "question": "Does remember need new projections for review, or does its generic workflow projection suffice?",
+          "after": [
+            "D1"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D13",
+          "question": "What fixtures and tests demonstrate the M2 gate, and what is agent-driven?",
+          "after": [
+            "D7",
+            "D9",
+            "D10"
+          ],
+          "status": "open"
+        },
+        {
+          "id": "D14",
+          "question": "How is M2 sliced and sequenced, and how is it released relative to 0.1.1 (branch, CHANGELOG, VERSION)?",
+          "after": [
+            "D13"
+          ],
+          "status": "open"
+        }
+      ]
     }
   ]
 }
