@@ -1,16 +1,23 @@
-"""workflow.json: the permanent session registry and the phase order."""
-import re
-from datetime import datetime, timezone
+"""workflow.json: simple-by-design's session fields and phase order on the engine's registry.
 
-from . import config, record, storage
+The generic registry (ids, active/find/select, timestamps, close) is handtools' _engine/sessions.py.
+This module adds goal, phase, cycle and baseline, their validation, and the old single-run migration.
+"""
+import re
+
+from _engine import sessions as registry
+from _engine import storage
+
+from . import config, record
 
 ORDER = ['ground', 'branch', 'decide', 'challenge']
 CLOSED_PHASE = 'done'
 FIELDS = ['id', 'goal', 'phase', 'cycle', 'status', 'baseline', 'created', 'updated', 'completed']
 
-
-def timestamp():
-    return datetime.now(timezone.utc).isoformat(timespec='seconds')
+timestamp = registry.timestamp
+find = registry.find
+active = registry.active
+select_active = registry.select_active
 
 
 def validate(state):
@@ -85,14 +92,14 @@ def _normalize(root, raw):
 
 def base(root):
     """Per-user dir for workflow.json and workflow.lock; decisions.json stays in the project."""
-    return storage.state_dir(config.AREA, root)
+    return registry.base(config.AREA, root)
 
 
 def load(root, allow_missing=False, persist_migration=False):
-    path = base(root) / 'workflow.json'
+    path = registry.path(config.AREA, root)
     if not path.exists():
         if allow_missing:
-            return {'version': 1, 'sessions': []}
+            return registry.empty()
         raise ValueError('No workflow found. Run `start`.')
     raw = storage.read_json(path)
     state = _normalize(root, raw)
@@ -104,37 +111,12 @@ def load(root, allow_missing=False, persist_migration=False):
 
 
 def save(root, state):
-    storage.write_json(base(root) / 'workflow.json', state)
+    registry.save(config.AREA, root, state)
 
 
 def add(state):
     """Append a fresh session in ground and return it."""
-    seen = [int(s['id'][1:]) for s in state['sessions'] if re.fullmatch(r's\d+', s['id'])]
-    now = timestamp()
-    session = {
-        'id': f's{max(seen, default=0) + 1}',
-        'goal': None,
-        'phase': 'ground',
-        'cycle': 1,
-        'status': 'active',
-        'baseline': None,
-        'created': now,
-        'updated': now,
-        'completed': None,
-    }
-    state['sessions'].append(session)
-    return session
-
-
-def find(state, sid):
-    for session in state['sessions']:
-        if session['id'] == sid:
-            return session
-    raise ValueError(f'Session {sid} not found.')
-
-
-def active(state):
-    return [s for s in state['sessions'] if s['status'] == 'active']
+    return registry.add(state, goal=None, phase='ground', cycle=1, baseline=None)
 
 
 def holders(state):
@@ -142,23 +124,5 @@ def holders(state):
     return {s['goal']: s['id'] for s in active(state) if s['goal']}
 
 
-def select_active(state, sid):
-    if sid is not None:
-        session = find(state, sid)
-        if session['status'] != 'active':
-            raise ValueError(f'Session {sid} is {session["status"]}; it cannot advance.')
-        return session
-    running = active(state)
-    if not running:
-        raise ValueError('No active session. Run `start`.')
-    if len(running) > 1:
-        names = ', '.join(s['id'] for s in running)
-        raise ValueError(f'Several active sessions ({names}); pass --session ID.')
-    return running[0]
-
-
-def close(session, status, now):
-    session['phase'] = CLOSED_PHASE
-    session['status'] = status
-    session['completed'] = now
-    session['updated'] = now
+def close(session, status):
+    registry.close(session, status, CLOSED_PHASE)

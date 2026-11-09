@@ -449,6 +449,138 @@
           "date": "2026-11-09"
         }
       ]
+    },
+    {
+      "id": "G4",
+      "goal": "Phase 2 of G3: give the workflow engine code shared by build-skills, foundation, simple-by-design, untangle and build-skills' workflow template one implementation (DRY), so a fix or new capability lands once and new workflow skills reuse it instead of copying.",
+      "constraints": [
+        "Byte-identical copies today (guarded by tests/test_bundle.py StateTest): storage.py x5 (template, build_skills, foundation, untangle, designlib), cli.py x4 (template, build_skills, foundation, untangle), flow.py x3 (template, foundation, untangle), launcher workflow.py x3 (template, foundation, untangle).",
+        "Near-duplicates that drifted: simple-by-design's designflow.py reimplements cli.py (quote, launcher, read_payload, error printing); multi-session registries in designlib/sessions.py (164 lines, with legacy-shape migration and goal holders) and build_skills/sessions.py (71 lines) share find/active/select_active/close/timestamp/load/save with small differences in messages and fields.",
+        "Two engine shapes exist: single-run flow (template/foundation/untangle: start/status/done/abandon, MODE stateful|stateless) and multi-session registry (simple-by-design, build-skills: s1..sN, --session, status --all).",
+        "The engine's flow.py does `from . import steps`: each skill's steps.py lives inside its copy of the workflowlib package, so the package cannot be shared as-is.",
+        "build-skills writes new skills to any target path, including outside handtools (e.g. ~/.agents/skills/readme); such a skill cannot assume a handtools sibling, so the template must still produce a self-contained engine (or explicitly require handtools installed).",
+        "Distribution (G1/D2, D5): every harness installs the whole repo (pi: package.json pi.skills ./skills; Claude and Codex plugins: skills ./skills/). Skills reach shared files as siblings at S/../<skill>/; G1/D4 put shared rules inside an owning skill and chose no top-level shared/ dir.",
+        "Installed plugin paths are versioned caches; nothing may store an absolute skill path across runs (G1/D14). Python 3.9+ stdlib only; Linux, macOS, Windows.",
+        "Out of scope: remember (separate engine), and changing the state layout fixed in G3 phase 1. Open from phase 1: designflow resolves the project root as cwd while the others use git top level (same key only when run from the repo root)."
+      ],
+      "criteria": [
+        "Each shared engine behavior (state paths/lock/JSON, CLI helpers, single-run flow, session registry) has exactly one editable implementation inside handtools; the byte-equality guard is replaced by imports, or kept only where a copy is unavoidable and justified.",
+        "Adding a new workflow skill inside handtools needs only its steps (prompts, checks, advance) plus a thin launcher.",
+        "build-skills can still generate a working workflow skill outside handtools.",
+        "All four skills resolve the project root the same way.",
+        "Every existing test suite still passes; behavior and state files are unchanged for users."
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "question": "Where does the one engine implementation live: inside an owning skill (build-skills' templates/workflow, since it already is the canonical engine), a new non-skill folder under skills/ (e.g. skills/_engine/), or a top-level lib/ beside skills/?",
+          "status": "resolved",
+          "answer": "skills/_engine/: a plain Python package (no SKILL.md) holding the one engine: storage.py, cli.py, flow.py (single run), sessions.py (multi-session registry), __init__.py. Imported as `_engine` (`from _engine import cli, flow, storage`). build-skills' templates/workflow/ keeps only the launcher and an example steps.py. Explicitly supersedes G1/D4's 'no top-level shared/ dir' for engine code only; shared design rules stay owned by simple-by-design.",
+          "rationale": "User choice: a neutral owner rather than making three skills depend on build-skills.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D2",
+          "question": "How does a skill import the shared engine at run time: insert the resolved sibling path into sys.path from its launcher (like untangle's policy lookup), or something else; and what happens when it is missing?",
+          "after": [
+            "D1"
+          ],
+          "status": "resolved",
+          "answer": "Each launcher (workflow.py, designflow.py, build-skills.py, the template's workflow.py) finds the engine by walking up from its own resolved path to the first ancestor that holds _engine/__init__.py, puts that ancestor on sys.path, then runs `from _engine import ...`. This finds a vendored <scripts>/_engine first (D6), else skills/_engine from any depth inside handtools (skill scripts and build-skills/templates/workflow/scripts alike). If none is found it prints 'ERROR: engine not found; install the handtools bundle' and exits 2. It's a ~4-line block per launcher, not a shared helper, because it has to run before the engine is importable.",
+          "rationale": "Same sibling-at-run-time rule as G1/D5, with one fail-fast message. Resolving from __file__ every run keeps it valid across versioned caches (G1/D14).",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D3",
+          "question": "How does the shared single-run flow reach each skill's steps (today `from . import steps` inside the package): pass the steps module into flow functions, or a registration call from the launcher?",
+          "after": [
+            "D1"
+          ],
+          "status": "resolved",
+          "answer": "Pass the steps module explicitly: flow.start(steps, root, launcher), status/done/abandon likewise; flow reads steps.MODE, steps.AREA, steps.ORDER, PROMPTS, CHECKS, advance, DONE_MSG. Each skill's steps live in its own package or module (untangle keeps workflowlib/ with steps, checks, ledger, work, transitions, exports; foundation keeps workflowlib/steps.py; the template ships scripts/steps.py).",
+          "rationale": "Local reasoning (defaults #3): the dependency is an argument a reader can see, not a relative import into another skill's package.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D4",
+          "question": "Do the two multi-session registries (simple-by-design, build-skills) merge into one shared sessions module, and how do skill-specific fields (simple-by-design's goal/cycle/baseline, legacy migration, holders) extend it?",
+          "after": [
+            "D1"
+          ],
+          "status": "resolved",
+          "answer": "One _engine/sessions.py with the generic registry both skills duplicate: path(area, root), load(area, root, allow_missing), save, add(state, **fields) (next sN id, status active, created/updated timestamps), find, active, select_active, close(session, status), timestamp. Skill-specific fields stay with the skill: simple-by-design's validate/_normalize legacy migration, goal holders and its phase field names; build-skills' root/target fields. One shared message wording ('pass --session sN').",
+          "rationale": "One owner per behavior; skill rules stay local so the shared module does not grow per-skill options.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D5",
+          "question": "Does designflow.py adopt the shared cli.py helpers and the shared project_root (git top level, else cwd), changing its --root default from cwd?",
+          "after": [
+            "D1"
+          ],
+          "status": "resolved",
+          "answer": "Yes. designflow.py uses _engine.cli (quote, launcher, read_payload, run) and _engine.storage.project_root, so --root defaults to the git top level, else cwd, like the other skills; foundation's steps resolve the root the same way instead of Path.cwd(). The help text and CHANGELOG note the changed default.",
+          "rationale": "Criterion: all four skills resolve the project root the same way; removes designflow's second CLI implementation.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D6",
+          "question": "What does build-skills give a skill generated outside handtools: a vendored copy of the engine (copied at generation time, never edited in place), or a dependency on an installed handtools?",
+          "after": [
+            "D1",
+            "D2"
+          ],
+          "status": "resolved",
+          "answer": "Vendored copy. When build-skills installs or revises a workflow skill, it copies skills/_engine/ (located as its own sibling) into <target>/scripts/_engine/, replacing any previous copy and never touching the skill's steps. The vendored copy is never edited in place; revising the skill refreshes it.",
+          "rationale": "User choice: skills outside handtools keep working without handtools installed.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D7",
+          "question": "Which guards replace the byte-equality test: an import-only check (no skill outside the owner defines storage/cli/flow), and how are generated vendored copies kept current?",
+          "after": [
+            "D1",
+            "D6"
+          ],
+          "status": "resolved",
+          "answer": "Replace StateTest's byte-equality with: (a) inside skills/, storage.py, cli.py, flow.py, sessions.py and a scripts/_engine/ folder exist only under skills/_engine/; (b) every launcher's engine lookup resolves to skills/_engine in the repo; (c) the _engine tests (moved from StateTest plus flow/sessions unit tests) run in CI. Vendored copies outside handtools are refreshed only by build-skills revise (D6); no version stamp.",
+          "rationale": "Import, not compare: no copy left to drift inside the repo.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D8",
+          "after": [
+            "D1"
+          ],
+          "question": "Do pi, Claude Code and Codex ignore skills/_engine/ (no SKILL.md) without errors or a phantom skill?",
+          "answer": "Verify before merging: install the branch locally in each harness (claude --plugin-dir, pi install <path>, codex plugin marketplace add <path>) and confirm exactly the five skills load with no warning about _engine. If one harness complains, stop and bring it back to the user (fallback: move _engine inside an owner skill).",
+          "rationale": "The one untested assumption behind D1.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D9",
+          "after": [
+            "D3",
+            "D5"
+          ],
+          "question": "How do a skill's prompts and checks learn the project root (foundation's foundation.json path is computed at import from cwd; untangle re-parses sys.argv)?",
+          "answer": "flow passes it in: every state dict flow hands to checks and advance carries 'root' (stateful runs already store it; stateless runs get {'phase': stage, 'root': str(root)}), and a PROMPTS value may be a function of root that flow calls when showing the step. foundation uses both and drops its import-time path. untangle keeps its working sys.argv lookup (out of scope).",
+          "rationale": "Removes the import-time side effect and keeps --root authoritative without a global.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D10",
+          "after": [
+            "D7"
+          ],
+          "question": "Where do the engine's tests live and run?",
+          "answer": "skills/_engine/tests/ (storage tests moved from tests/test_bundle.py StateTest, plus flow and sessions unit tests). Added to the README check list and the CI workflow next to the other skill suites. The bundle test keeps only the D7 structure guards, and its sibling-path regex learns _engine.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        }
+      ]
     }
   ]
 }

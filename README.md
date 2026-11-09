@@ -69,8 +69,26 @@ skill's folder):
 
 The project key is `<folder name>-<8-hex hash of its absolute path>`, and each key folder has a
 `project.json` naming its project. Moving a repo leaves its state behind; `mv` the key folder to follow it.
-Each skill names its folder in one `AREA` constant. `storage.py` owns this layout, and its copies stay
-byte-identical until they share one home (checked by `tests/test_bundle.py`).
+Each skill names its folder in one `AREA` constant; `skills/_engine/storage.py` owns the layout.
+
+## One workflow engine
+
+`skills/_engine/` is the one implementation of what the workflow skills share. It is a Python package, not a
+skill (no `SKILL.md`):
+
+| Module | Owns | Used by |
+|---|---|---|
+| `storage` | state root, project root and key, state dirs, atomic JSON, lock | all four |
+| `cli` | quoting, the printed rerun command, the stdin payload, error printing | all four |
+| `flow` | single-run `start`/`status`/`done`/`abandon`, given the skill's `steps` module | foundation, untangle, template |
+| `sessions` | the multi-session registry (`s1`, `s2`, ...) | simple-by-design, build-skills |
+
+A skill keeps only its own steps (prompts, checks, `advance`) and a thin launcher. The launcher walks up from
+its own path to the first folder holding `_engine/`, so the same `from _engine import ...` works inside
+handtools and in a skill build-skills generated elsewhere, which gets a vendored `scripts/_engine/` copy
+refreshed on every revision. A new workflow skill inside handtools starts from
+`skills/build-skills/templates/workflow/scripts/` (`workflow.py` + `steps.py`). `tests/test_bundle.py` fails if
+an engine module is copied or edited into a skill, or a launcher stops resolving `skills/_engine/`.
 
 ## Release
 
@@ -82,13 +100,15 @@ byte-identical until they share one home (checked by `tests/test_bundle.py`).
 
 ```bash
 python3 -m unittest discover -s tests                       # bundle guards
+python3 -m unittest discover -s skills/_engine/tests
 python3 -m unittest discover -s skills/simple-by-design/tests
 python3 -m unittest discover -s skills/foundation/tests
 python3 -m unittest discover -s skills/build-skills/tests
 python3 -m unittest discover -s skills/remember/tests       # optional tree-sitter deps: skills/remember/requirements.txt
 ```
 
-The bundle guards fail when a shared rule file is copied (even if edited), a cited sibling path is missing,
+The bundle guards fail when a shared rule file or engine module is copied (even if edited), a launcher no longer
+resolves `skills/_engine/`, a package breaks its declared import graph, a cited sibling path is missing,
 a manifest version differs from `VERSION`, `skills/` changed since the last tag without a version bump,
 the ADR schema and its validator disagree, or a skill's Codex invocation policy differs from its
 `disable-model-invocation` flag. CI runs them on every push ([.github/workflows](.github/workflows/)).

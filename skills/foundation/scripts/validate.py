@@ -52,8 +52,9 @@ def check_adr_log(root, tracked, record):
     if not path.is_file():
         return
     try:
-        if str(DESIGN_SCRIPTS) not in sys.path:
-            sys.path.insert(0, str(DESIGN_SCRIPTS))
+        for lookup in (str(DESIGN_SCRIPTS), str(DESIGN_SCRIPTS.parents[1])):  # designlib; handtools' _engine
+            if lookup not in sys.path:
+                sys.path.insert(0, lookup)
         from designlib import record as adr  # sibling skill, resolved at run time
     except ImportError:
         record(f'{ADR_LOG} is valid', 'fail',

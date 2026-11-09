@@ -6,7 +6,8 @@ One entry per release. A release bumps `VERSION` (and the manifests that copy it
 
 - Per-user state moves to `~/.agents/state/<area>/<project key>/` (`$HANDTOOLS_STATE` overrides it), out of installed skill folders (a plugin update replaced them) and out of projects: build-skills and untangle runs, untangle's `current.md`/`audit.json`/`report.md`, simple-by-design's `workflow.json`, and foundation's `foundation.json`. The ADR log stays committed at `.agents/design/decisions.json`.
 - foundation records its interview answers, including project kind and maturity, as ADR rows under one goal. `foundation.json` keeps only `goal`, `accepted`, `declined` and `updated`.
-- One `storage.py` contract across the four workflow skills and build-skills' template (`state_root`, `project_root`, `project_key`, `state_dir`, `lock`). The bundle tests fail if any copy of `storage.py`, `cli.py` or `flow.py` differs from the template's.
+- One workflow engine, `skills/_engine/` (`storage`, `cli`, `flow`, `sessions`; not a skill), replaces the copies in build-skills, foundation, simple-by-design, untangle and build-skills' template. Skills keep only their steps and a launcher that finds `_engine/` by walking up from itself. build-skills vendors a copy into the workflow skills it writes and refreshes it on every revision. The bundle tests fail if an engine module is copied into a skill.
+- `designflow.py --root` now defaults to the git top level, else the current directory, like the other skills.
 - Upgrading: move each project's `.agents/design/workflow.json` to `~/.agents/state/decisions/<project key>/` to keep its sessions (run any `designflow.py status` once to create the folder and its `project.json`). Unfinished build-skills or untangle runs and old `.agents/artifacts/untangle/` exports are not carried over.
 
 ## [0.0.2] - 2026-11-09

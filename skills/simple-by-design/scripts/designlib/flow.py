@@ -1,5 +1,7 @@
 """Commands and phase transitions. Owns the order of reads, checks, and writes."""
-from . import config, gitcheck, record, sessions, steps, storage
+from _engine import storage
+
+from . import config, gitcheck, record, sessions, steps
 
 
 def _step(state, rec, session, launcher, limit):
@@ -48,7 +50,7 @@ def done(root, sid, payload, launcher):
             session['goal'] = gid
             session['phase'] = 'branch'
         elif phase == 'decide' and session['cycle'] > limit:
-            sessions.close(session, 'complete', now)
+            sessions.close(session, 'complete')
         elif phase in ('branch', 'decide'):
             if not changed:
                 raise ValueError(f'{phase} requires a change to goal {gid}; send it as the payload.')
@@ -64,7 +66,7 @@ def done(root, sid, payload, launcher):
                 raise ValueError(f'{len(unresolved)} open decision(s) remain: {", ".join(unresolved)}; '
                                  'resolve them or send new gaps as the payload.')
             else:
-                sessions.close(session, 'complete', now)
+                sessions.close(session, 'complete')
         session['baseline'] = current_hash
         session['updated'] = now
 
@@ -126,7 +128,7 @@ def abandon(root, sid):
         session = sessions.find(state, sid)
         if session['status'] != 'active':
             raise ValueError(f'Session {sid} is {session["status"]}; it is already closed.')
-        sessions.close(session, 'abandoned', sessions.timestamp())
+        sessions.close(session, 'abandoned')
         sessions.save(root, state)
     return f'Session {sid} abandoned; {session["goal"] or "no goal"} released.'
 

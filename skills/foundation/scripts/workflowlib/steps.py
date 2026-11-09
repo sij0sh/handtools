@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import storage
+from _engine import storage
 
 MODE = 'stateless'
 AREA = 'decisions'  # shared with simple-by-design: <state root>/decisions/<project key>/
@@ -21,8 +21,17 @@ DESIGN = SKILL.parent / 'simple-by-design'
 ADR_LOG = '.agents/design/decisions.json'
 DESIGNFLOW = f'python3 {DESIGN / "scripts" / "designflow.py"} --root .'
 RECORD_CMD = f'{DESIGNFLOW} record'
-# foundation's own bookkeeping, per user: its goal in the ADR log and the capability ids accepted or declined.
-DECISIONS = storage.state_dir(AREA, Path.cwd().resolve()) / 'foundation.json'
+
+
+def decisions(root):
+    """foundation's own bookkeeping, per user: its goal in the ADR log and the capability ids accepted or declined."""
+    return storage.state_dir(AREA, Path(root)) / 'foundation.json'
+
+
+def _at(text):
+    """A prompt that names this project's foundation.json (flow calls it with the project root)."""
+    return lambda root: text.replace('@DECISIONS@', str(decisions(root)))
+
 RECORD = 'decisions-record'
 STATUSES = ['present', 'partial', 'missing', 'n/a', 'unknown']
 CAPABILITIES = {
@@ -51,8 +60,8 @@ PROMPTS = {
         'Pass the audit JSON and your classification to the next stages. '
         'Send `{"kind": "...", "maturity": "...", "mode": "..."}`.'
     ),
-    'interview': (
-        f'Read `{DECISIONS}` if it exists; its `goal` is foundation\'s goal in the ADR log. Run `{DESIGNFLOW} show` '
+    'interview': _at(
+        f'Read `@DECISIONS@` if it exists; its `goal` is foundation\'s goal in the ADR log. Run `{DESIGNFLOW} show` '
         'and treat that goal\'s resolved rows (including `Project kind` and `Maturity`) as settled. From the audit, list the '
         'high-impact decisions still open (what is being built, prototype/MVP/production, where it runs, '
         'solo or team, cost/security/compliance limits, what must not change in a brownfield repo). '
@@ -60,7 +69,7 @@ PROMPTS = {
         'If recorded maturity is below what the audit now shows, ask whether to reassess. '
         'Send `{"questions_asked": N, "decisions": {"topic": "answer", ...}}` with every decision, recorded and new.'
     ),
-    'assess': (
+    'assess': _at(
         f'Read `{SKILL / "references" / "greenfield.md"}` or `{SKILL / "references" / "brownfield.md"}` per `kind`. '
         'For `adrs`, use the audit\'s `adr_log`: if it exists but `ignored` or not `committed`, the gap is the '
         '.gitignore fix; legacy Markdown ADRs count as present, and converting them into the log is a separate '
@@ -71,11 +80,11 @@ PROMPTS = {
         'impact and effort, ordered by priority; proposed file-level changes; risks and tradeoffs. '
         'Recommend nothing the decisions make unnecessary; do not re-propose ids in the record\'s `declined` unless the user asks to reassess. '
         'Ask the user which items to apply (plan mode) and, in any mode, whether to record the decisions '
-        f'(`{RECORD}`: the interview answers into the ADR log, and `{DECISIONS}`), and which project tests/linters `validate` may run. '
+        f'(`{RECORD}`: the interview answers into the ADR log, and `@DECISIONS@`), and which project tests/linters `validate` may run. '
         'Send `{"mode": "audit|plan", "capabilities": {"<id>": {"status": "...", "evidence": "..."}, ...}, '
         '"approved": ["<id>", ...], "run": ["command", ...]}`; `approved` lists only ids the user approved, else [].'
     ),
-    'apply': (
+    'apply': _at(
         f'Read `{SKILL / "references" / "greenfield.md"}` or `{SKILL / "references" / "brownfield.md"}` per `kind`. '
         'Implement only the approved items, as small reviewable changes that keep existing conventions; '
         f'start from `{SKILL / "assets"}` templates where one fits and adapt it to the project. Do not touch unrelated '
@@ -83,8 +92,8 @@ PROMPTS = {
         f'`{DESIGN / "references" / "decisions.schema.json"}`; send rows without `id` or `status`); never edit '
         f'{ADR_LOG} directly and never write Markdown ADRs. Convert legacy Markdown ADRs only if the user approved '
         f'that conversion. Recording (`{RECORD}`): pipe every interview answer, plus `Project kind` and `Maturity`, as '
-        f'question/answer rows into `{RECORD_CMD} --goal <goal from {DECISIONS}>` (omit `--goal` the first time; the '
-        f'command prints the new G#). Then write `{DECISIONS}` with `goal` (that G#), `accepted` (approved ids), '
+        f'question/answer rows into `{RECORD_CMD} --goal <goal from @DECISIONS@>` (omit `--goal` the first time; the '
+        f'command prints the new G#). Then write `@DECISIONS@` with `goal` (that G#), `accepted` (approved ids), '
         '`declined` (proposed but not approved ids), and `updated` (ISO date), merging any existing file. '
         f'If `{RECORD}` is the only approved item, record only. '
         'Done when the files are written; send `{"changed": ["path", ...]}`.'
@@ -150,14 +159,14 @@ def check_assess(state, payload):
 
 
 def check_apply(state, payload):
-    path = DECISIONS
+    path = decisions(state['root'])
     try:
         record = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError) as error:
-        raise ValueError(f'{DECISIONS} must exist and be valid JSON: {error}') from None
+        raise ValueError(f'{path} must exist and be valid JSON: {error}') from None
     for key in ('goal', 'accepted', 'declined', 'updated'):
         if key not in record:
-            raise ValueError(f'{DECISIONS} is missing `{key}`.')
+            raise ValueError(f'{path} is missing `{key}`.')
     if not isinstance(payload.get('changed'), list) or not payload['changed']:
         raise ValueError('`changed` must list the files written.')
 

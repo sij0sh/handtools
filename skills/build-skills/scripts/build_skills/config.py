@@ -3,8 +3,9 @@ from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[2]
 REFS = SKILL_DIR / 'references'
-TEMPLATE = SKILL_DIR / 'templates' / 'workflow' / 'scripts'
-# Run state: <state root>/build-skills/<project key>/ (storage.py).
+TEMPLATE = SKILL_DIR / 'templates' / 'workflow' / 'scripts'  # launcher workflow.py and example steps.py
+ENGINE = SKILL_DIR.parent / '_engine'  # handtools' one engine, vendored into each workflow skill
+# Run state: <state root>/build-skills/<project key>/ (_engine/storage.py).
 AREA = 'build-skills'
 KINDS = ('prompt', 'staged')
 MODELS = ('stateless', 'stateful')

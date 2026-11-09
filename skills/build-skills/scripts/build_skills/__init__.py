@@ -1,9 +1,11 @@
-"""build-skills internals. Allowed imports (checked by tests):
+"""build-skills internals. Allowed imports (checked by tests/test_bundle.py):
 
-  flow     -> config, prompts, sessions, stages, storage
-  stages   -> config, payload, sessions, skill, storage
+  flow     -> config, prompts, sessions, stages
+  stages   -> config, payload, sessions, skill
   prompts  -> config, sessions
-  sessions -> config, storage
+  sessions -> config
   skill    -> config
-  cli, config, payload, storage -> none
+  config, payload -> none
+
+The engine (cli, storage, sessions registry) is handtools' skills/_engine/.
 """

@@ -73,7 +73,7 @@ def draft_prompt(root, s):
                 'scripts/ and references/ if present.\n\nDone when `done` passes the shape check.', {})
     d = s['design']
     order = [st['name'] for st in d['stages']]
-    engine = (f"The engine is in scripts/ with MODE = '{d['model']}' and AREA = '{name}'. Edit only scripts/workflowlib/steps.py: "
+    engine = (f"The engine is in scripts/ with MODE = '{d['model']}' and AREA = '{name}'. Edit only scripts/steps.py (scripts/_engine/ is a vendored copy; never edit it): "
               f'ORDER = {order}, PROMPTS, CHECKS, advance. SKILL.md body:\n\n{RUN_STEPS[d["model"]]}')
     return (f'{header(s)}\n{plan(s)}\n\nWrite only what closes the gap, in {draft}, per the design '
             f'and {ref("instructions.md")}: frontmatter `name: {name}`, a one-line `description`, '
@@ -90,7 +90,7 @@ def review_task(root, s):
         return (f'Read {work_dir(root, s, "draft")}/SKILL.md. {PROMPT_QUESTION} {facts} Criteria: '
                 f'{ref("instructions.md")}. Do not edit files.')
     return (f'Read the skill at {work_dir(root, s, "draft")}. {facts} {plan(s)}. Criteria: {ref("instructions.md")}. '
-            'Review SKILL.md, references/, and PROMPTS and CHECKS in scripts/workflowlib/steps.py; the other '
+            'Review SKILL.md, references/, and PROMPTS and CHECKS in scripts/steps.py; the other '
             "scripts/ files and SKILL.md's run steps are fixed. "
             f'Do not edit files. {REVIEW_QUESTION} Report design flaws (model, stages, router) separately.')
 

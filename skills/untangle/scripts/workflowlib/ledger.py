@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import storage
+from _engine import storage
 
 
 AREA = 'untangle'  # state and exports: <state root>/untangle/<project key>/ (storage.py)

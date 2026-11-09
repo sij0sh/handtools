@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'scripts'
 PACKAGE = SCRIPTS / 'workflowlib'
-LOCAL = {'cli', 'flow', 'steps', 'storage'}
+LOCAL = {'workflowlib', '_engine'}  # foundation's stages, handtools' engine
 
 FALLBACK_STDLIB = {
     'argparse', 'contextlib', 'fnmatch', 'hashlib', 'json', 'os', 'pathlib',
@@ -44,18 +44,15 @@ def top_level_imports(path):
 
 
 class ImportTests(unittest.TestCase):
-    def test_flow_only_imports_steps_and_storage(self):
-        self.assertEqual(local_imports(PACKAGE / 'flow.py'), {'steps', 'storage'})
+    def test_package_holds_only_steps(self):
+        self.assertEqual({p.stem for p in PACKAGE.glob('*.py')}, {'__init__', 'steps'})
 
-    def test_steps_only_imports_storage(self):
-        self.assertEqual(local_imports(PACKAGE / 'steps.py'), {'storage'})
-
-    def test_other_modules_have_no_local_imports(self):
-        for name in ('cli', 'storage'):
-            self.assertEqual(local_imports(PACKAGE / f'{name}.py'), set(), name)
+    def test_steps_import_only_the_engine_storage(self):
+        self.assertEqual(local_imports(PACKAGE / 'steps.py'), set())
+        self.assertIn('_engine', top_level_imports(PACKAGE / 'steps.py'))
 
     def test_scripts_import_only_the_standard_library(self):
-        local = LOCAL | {'workflowlib'}
+        local = LOCAL
         for path in source_files():
             self.assertLessEqual(top_level_imports(path) - local, STDLIB, path.name)
 

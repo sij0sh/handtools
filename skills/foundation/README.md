@@ -43,7 +43,7 @@ The scripts must stay Python 3.9+ and standard-library-only; ruff is a developme
 ```text
 SKILL.md                 agent-facing entrypoint and rules
 scripts/workflow.py      CLI: start, status, abandon, done
-scripts/workflowlib/     stages, CLI helpers, optional state storage
+scripts/workflowlib/     stages (steps.py); the engine is handtools' skills/_engine/
 scripts/audit.py         read-only project scan (JSON)
 scripts/validate.py      read-only changed-file checks (JSON)
 references/              greenfield and brownfield rules

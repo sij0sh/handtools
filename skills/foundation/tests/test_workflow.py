@@ -12,7 +12,7 @@ STATE = tempfile.TemporaryDirectory()  # never touch the real ~/.agents/state
 os.environ['HANDTOOLS_STATE'] = STATE.name
 WORKFLOW = ROOT / 'scripts' / 'workflow.py'
 
-sys.path.insert(0, str(ROOT / 'scripts'))
+sys.path[:0] = [str(ROOT / 'scripts'), str(ROOT.parent)]  # foundation's stages; handtools' skills/_engine
 from workflowlib import steps  # noqa: E402
 
 CAPABILITIES = {key: {'status': 'n/a', 'evidence': 'test fixture'} for key in steps.CAPABILITIES}

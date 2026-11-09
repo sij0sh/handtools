@@ -22,7 +22,7 @@ flowchart LR
 
 - `scripts/workflow.py` is the CLI. `start` prints the first stage; `done --stage S` validates the finished stage's JSON payload and prints the next; `validate` always ends the run.
 - `scripts/workflowlib/steps.py` is the single source of stage order, prompts, payload checks, and the capability baseline. `MODE = 'stateless'` means nothing is saved between executions.
-- `scripts/workflowlib/flow.py` implements start/status/done/abandon for both modes; `cli.py` handles JSON input and printed commands; `storage.py` provides the optional stateful backend.
+- handtools' `skills/_engine/` implements start/status/done/abandon (`flow`), JSON input and printed commands (`cli`), and paths (`storage`); `scripts/workflow.py` finds it and passes it `steps`.
 - `scripts/audit.py` scans file evidence and git facts without executing project code. `scripts/validate.py` parses only changed or untracked files and checks for committed secrets.
 - `references/` supplies greenfield and brownfield rules; `assets/` supplies templates that `apply` adapts to the target repo.
 

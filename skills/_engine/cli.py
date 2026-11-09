@@ -1,4 +1,4 @@
-"""Command-line helpers. Shared verbatim by every handtools workflow skill and the template; tests/test_bundle.py keeps the copies equal."""
+"""Command-line helpers: quoting, the rerun command, the stdin payload, and error printing."""
 import json
 import os
 import shlex

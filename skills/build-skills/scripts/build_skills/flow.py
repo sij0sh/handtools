@@ -1,19 +1,16 @@
 """Commands: start, done, status, abandon."""
+from _engine.storage import lock
+
 from .config import DONE_MSG
 from .prompts import render, summary
-from .sessions import active, base_dir, close, find, load_registry, save_registry, select_active, timestamp
+from .sessions import active, add, base_dir, close, find, load_registry, save_registry, select_active, timestamp
 from .stages import PHASES
-from .storage import lock
 
 
 def cmd_start(root, launcher):
     with lock(base_dir(root)):
         state = load_registry(root, allow_missing=True)
-        number = max((int(s['id'][1:]) for s in state['sessions']), default=0) + 1
-        now = timestamp()
-        session = {'id': f's{number}', 'status': 'active', 'phase': 'ground',
-                   'created': now, 'updated': now, 'completed': None}
-        state['sessions'].append(session)
+        session = add(state)
         save_registry(root, state)
     return render(root, session, launcher)
 

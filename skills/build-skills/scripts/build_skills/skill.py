@@ -6,7 +6,7 @@ import re
 import shutil
 from pathlib import Path
 
-from .config import DESCRIPTION_MAX, EXCLUDE_DIRS, TEMPLATE
+from .config import DESCRIPTION_MAX, ENGINE, EXCLUDE_DIRS, TEMPLATE
 
 FRONTMATTER = re.compile(r'\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)', re.S)
 
@@ -88,11 +88,20 @@ def overlay(src, target):
 
 
 def install_engine(skill, model):
-    """Staged model: copy the template engine into skill/scripts/ unless steps.py exists; set MODE and AREA."""
-    steps = skill / 'scripts' / 'workflowlib' / 'steps.py'
+    """Staged model: copy the template (launcher, example steps.py) unless steps.py exists; set MODE and AREA.
+
+    Always replace scripts/_engine/ with a fresh copy of handtools' engine (never edited in place),
+    so the skill runs without handtools and every revision picks up engine fixes.
+    """
+    if not (ENGINE / '__init__.py').is_file():
+        raise ValueError(f'engine not found at {ENGINE}; install the handtools bundle.')
+    scripts = skill / 'scripts'
+    steps = scripts / 'steps.py'
     if not steps.is_file():
-        shutil.copytree(TEMPLATE, skill / 'scripts', dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        shutil.copytree(TEMPLATE, scripts, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    if (scripts / '_engine').exists():
+        shutil.rmtree(scripts / '_engine')
+    shutil.copytree(ENGINE, scripts / '_engine', ignore=shutil.ignore_patterns('tests', '__pycache__', '*.pyc'))
     text = steps.read_text(encoding='utf-8')
     text = re.sub(r"^MODE\s*=\s*['\"]\w+['\"]", f"MODE = '{model}'", text, count=1, flags=re.M)
     text = re.sub(r"^AREA\s*=\s*['\"][\w.-]+['\"]", f"AREA = '{skill.name}'", text, count=1, flags=re.M)
@@ -162,11 +171,11 @@ def engine_order(steps):
 
 def check_model(skill, model, router, stages=()):
     """Shape matches the declared execution model, router, and design stage names."""
-    steps = skill / 'scripts' / 'workflowlib' / 'steps.py'
+    steps = skill / 'scripts' / 'steps.py'
     found = re.search(r"^MODE\s*=\s*['\"](\w+)['\"]", steps.read_text(encoding='utf-8'), re.M) \
         if steps.is_file() else None
     if not found or found.group(1) != model:
-        raise ValueError(f'{skill}: {model} model needs scripts/workflowlib/steps.py with MODE = \'{model}\'.')
+        raise ValueError(f'{skill}: {model} model needs scripts/steps.py with MODE = \'{model}\'.')
     order = engine_order(steps)
     if stages and order != list(stages):
         raise ValueError(f'{skill}: steps.py ORDER {order} must match design stages {list(stages)}.')

@@ -3,6 +3,7 @@ one version, schema and validator in step, and Codex/Claude invocation flags in 
 
 Run from the repo root: python3 -m unittest discover -s tests
 """
+import ast
 import difflib
 import hashlib
 import json
@@ -23,6 +24,7 @@ SHARED = sorted([OWNER / 'references' / n for n in ('defaults.md', 'contract.md'
 TEXT = {'.md', '.json', '.py', '.txt', '.yaml', '.yml', '.toml'}
 SKIP_DIRS = {'.git', '__pycache__', '.venv', 'node_modules', '.pytest_cache', '.ruff_cache'}
 SIMILAR = 0.8  # a copied-then-edited rule file still shares most of its text
+ENGINE = SKILLS / '_engine'
 
 
 def tracked_files():
@@ -48,6 +50,26 @@ def skills():
     return sorted(p for p in SKILLS.iterdir() if (p / 'SKILL.md').is_file())
 
 
+def assert_no_copies(test, owned, owner, fix):
+    """No file outside `owner` equals, or is an edited copy of, any file in `owned`."""
+    shared = {p: normalize(p.read_text(encoding='utf-8')) for p in owned}
+    hashes = {hashlib.sha256(t.encode()).hexdigest(): p for p, t in shared.items()}
+    for path in tracked_files():
+        if owner in path.parents or path.name == 'CHANGELOG.md':
+            continue
+        text = normalize(path.read_text(encoding='utf-8', errors='ignore'))
+        rel = path.relative_to(ROOT)
+        with test.subTest(file=str(rel)):
+            test.assertNotIn(hashlib.sha256(text.encode()).hexdigest(), hashes, f'{rel} is a copy; {fix}.')
+            for owner_path, owner_text in shared.items():
+                if len(text) < 200:
+                    continue
+                matcher = difflib.SequenceMatcher(None, text, owner_text, autojunk=False)
+                if matcher.real_quick_ratio() >= SIMILAR and matcher.quick_ratio() >= SIMILAR:
+                    test.assertLess(matcher.ratio(), SIMILAR,
+                                    f'{rel} looks like an edited copy of {owner_path.relative_to(ROOT)}; {fix}.')
+
+
 class SharedRulesTest(unittest.TestCase):
     def test_shared_files_exist(self):
         self.assertGreaterEqual(len(SHARED), 5)
@@ -55,27 +77,11 @@ class SharedRulesTest(unittest.TestCase):
             self.assertTrue(path.is_file(), path)
 
     def test_no_copy_of_a_shared_rule_outside_its_owner(self):
-        shared = {p: normalize(p.read_text(encoding='utf-8')) for p in SHARED}
-        hashes = {hashlib.sha256(t.encode()).hexdigest(): p for p, t in shared.items()}
-        for path in tracked_files():
-            if OWNER in path.parents or path.name == 'CHANGELOG.md':
-                continue
-            text = normalize(path.read_text(encoding='utf-8', errors='ignore'))
-            rel = path.relative_to(ROOT)
-            with self.subTest(file=str(rel)):
-                self.assertNotIn(hashlib.sha256(text.encode()).hexdigest(), hashes,
-                                 f'{rel} is a copy of a shared rule file; cite it from simple-by-design instead.')
-                for owner_path, owner_text in shared.items():
-                    if len(text) < 200:
-                        continue
-                    matcher = difflib.SequenceMatcher(None, text, owner_text, autojunk=False)
-                    if matcher.real_quick_ratio() >= SIMILAR and matcher.quick_ratio() >= SIMILAR:
-                        self.assertLess(matcher.ratio(), SIMILAR,
-                                        f'{rel} looks like an edited copy of {owner_path.relative_to(ROOT)}.')
+        assert_no_copies(self, SHARED, OWNER, 'cite it from simple-by-design instead')
 
 
 class SiblingPathsTest(unittest.TestCase):
-    SIBLING = re.compile(r'(?:\bS/)?\.\./(build-skills|untangle|foundation|simple-by-design|remember)'
+    SIBLING = re.compile(r'(?:\bS/)?\.\./(build-skills|untangle|foundation|simple-by-design|remember|_engine)'
                          r'((?:/[\w.*<>-]+)*)/?')
     OWN = re.compile(r'\bS/((?:scripts|references|languages|assets|templates)(?:/[\w.-]+)*)')
 
@@ -98,14 +104,14 @@ class SiblingPathsTest(unittest.TestCase):
                             self.assertTrue((skill / match.group(1)).exists())
 
     def test_runtime_lookups_resolve(self):
-        sys.path.insert(0, str(SKILLS / 'untangle' / 'scripts'))
+        sys.path[:0] = [str(SKILLS / 'untangle' / 'scripts'), str(SKILLS)]
         try:
             from workflowlib import ledger
             self.assertEqual(ledger.SIBLING, OWNER)
             self.assertEqual(set(ledger.load_policy()['files']),
                              {p.relative_to(OWNER).as_posix() for p in SHARED if p.suffix == '.md'})
         finally:
-            sys.path.pop(0)
+            del sys.path[:2]
             for name in [m for m in sys.modules if m == 'workflowlib' or m.startswith('workflowlib.')]:
                 del sys.modules[name]
         self.assertTrue((SKILLS / 'foundation' / 'scripts').is_dir())
@@ -155,7 +161,7 @@ class VersionTest(unittest.TestCase):
 class SchemaTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        sys.path.insert(0, str(OWNER / 'scripts'))
+        sys.path[:0] = [str(OWNER / 'scripts'), str(SKILLS)]  # designlib; _engine
         from designlib import record
         cls.record = record
         cls.schema = json.loads((OWNER / 'references' / 'decisions.schema.json').read_text(encoding='utf-8'))
@@ -163,6 +169,7 @@ class SchemaTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         sys.path.remove(str(OWNER / 'scripts'))
+        sys.path.remove(str(SKILLS))
 
     def test_schema_matches_validator(self):
         goal, decision = self.schema['$defs']['goal'], self.schema['$defs']['decision']
@@ -234,70 +241,67 @@ class CheckScriptTest(unittest.TestCase):
                           behind.stdout)
 
 
-TEMPLATE = SKILLS / 'build-skills' / 'templates' / 'workflow' / 'scripts' / 'workflowlib'
-# Engine files copied verbatim until phase 2 gives them one home (G3/D7); every copy must equal the template's.
-COPIES = {
-    'storage.py': [SKILLS / 'build-skills' / 'scripts' / 'build_skills', SKILLS / 'foundation' / 'scripts' / 'workflowlib',
-                   SKILLS / 'untangle' / 'scripts' / 'workflowlib', OWNER / 'scripts' / 'designlib'],
-    'cli.py': [SKILLS / 'build-skills' / 'scripts' / 'build_skills', SKILLS / 'foundation' / 'scripts' / 'workflowlib',
-               SKILLS / 'untangle' / 'scripts' / 'workflowlib'],
-    'flow.py': [SKILLS / 'foundation' / 'scripts' / 'workflowlib', SKILLS / 'untangle' / 'scripts' / 'workflowlib'],
-}
+
+# Launchers that find the engine by walking up to the first folder holding _engine/ (G4/D2).
+LAUNCHERS = [SKILLS / 'simple-by-design' / 'scripts' / 'designflow.py',
+             SKILLS / 'foundation' / 'scripts' / 'workflow.py',
+             SKILLS / 'untangle' / 'scripts' / 'workflow.py',
+             SKILLS / 'build-skills' / 'scripts' / 'build-skills.py',
+             SKILLS / 'build-skills' / 'templates' / 'workflow' / 'scripts' / 'workflow.py']
+# Packages whose docstring declares their allowed local imports as `mod -> a, b` lines.
+GRAPHS = [ENGINE, SKILLS / 'untangle' / 'scripts' / 'workflowlib', SKILLS / 'build-skills' / 'scripts' / 'build_skills']
 
 
-def load_storage():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location('handtools_storage', TEMPLATE / 'storage.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def declared_graph(package):
+    rules = {}
+    for line in ast.get_docstring(ast.parse((package / '__init__.py').read_text(encoding='utf-8'))).splitlines():
+        if '->' in line:
+            left, right = (part.strip() for part in line.split('->'))
+            right = right.split('  ')[0].strip()
+            for mod in left.split(','):
+                rules[mod.strip()] = set() if right == 'none' else {r.strip() for r in right.split(',')}
+    return rules
 
 
-class StateTest(unittest.TestCase):
-    """G3: per-user state under one root, one layout, no state inside an installed skill."""
+class EngineTest(unittest.TestCase):
+    """G4: one workflow engine in skills/_engine/, imported, never copied inside the repo."""
 
-    @classmethod
-    def setUpClass(cls):
-        cls.storage = load_storage()
+    def test_engine_is_not_a_skill(self):
+        self.assertTrue((ENGINE / '__init__.py').is_file())
+        self.assertFalse((ENGINE / 'SKILL.md').exists())
+        self.assertNotIn(ENGINE, skills())
 
-    def test_engine_copies_are_identical(self):
-        for name, dirs in COPIES.items():
-            for folder in dirs:
-                with self.subTest(file=str((folder / name).relative_to(ROOT))):
-                    self.assertEqual((folder / name).read_bytes(), (TEMPLATE / name).read_bytes(),
-                                     f'edit every copy of {name} together (see its docstring)')
+    def test_no_engine_copy_inside_the_repo(self):
+        stray = [p for p in SKILLS.rglob('_engine') if p != ENGINE and '__pycache__' not in p.parts]
+        self.assertEqual(stray, [], 'vendored engines belong only in skills generated outside handtools')
+        assert_no_copies(self, sorted(p for p in ENGINE.glob('*.py') if p.name != '__init__.py'), ENGINE,
+                         'import it from skills/_engine instead')
+
+    def test_every_launcher_resolves_the_engine(self):
+        for launcher in LAUNCHERS:
+            with self.subTest(launcher=str(launcher.relative_to(ROOT))):
+                text = launcher.read_text(encoding='utf-8')
+                self.assertIn("(p / '_engine' / '__init__.py').is_file()", text)
+                self.assertIn('from _engine import', text)
+                here = launcher.parent
+                found = next(p for p in (here, *here.parents) if (p / '_engine' / '__init__.py').is_file())
+                self.assertEqual(found, SKILLS)
+
+    def test_imports_follow_declared_graphs(self):
+        for package in GRAPHS:
+            rules = declared_graph(package)
+            modules = {p.stem for p in package.glob('*.py') if p.stem != '__init__'}
+            self.assertEqual(set(rules), modules, package)
+            for mod in modules:
+                used = set()
+                for node in ast.walk(ast.parse((package / f'{mod}.py').read_text(encoding='utf-8'))):
+                    if isinstance(node, ast.ImportFrom) and node.level == 1:
+                        used |= {node.module} if node.module else {a.name for a in node.names}
+                self.assertLessEqual(used, rules[mod], f'{package.name}.{mod}')
 
     def test_no_state_inside_skills(self):
         for skill in skills():
             self.assertFalse((skill / 'state').exists(), f'{skill.name}/state: state belongs in the state root')
-
-    def test_default_root_is_home_agents_state(self):
-        from unittest import mock
-        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, clear=False) as env:
-            env.pop(self.storage.ENV, None)
-            with mock.patch.object(Path, 'home', return_value=Path(home)):
-                self.assertEqual(self.storage.state_root(), Path(home) / '.agents' / 'state')
-
-    def test_env_overrides_root(self):
-        from unittest import mock
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {self.storage.ENV: tmp}):
-            self.assertEqual(self.storage.state_root(), Path(tmp).resolve())
-
-    def test_project_key_is_stable_and_per_path(self):
-        key = self.storage.project_key
-        a, b = Path('/work/my repo').resolve(), Path('/other/my repo').resolve()
-        self.assertEqual(key(a), key(a))
-        self.assertNotEqual(key(a), key(b))
-        self.assertRegex(key(a), r'^my-repo-[0-9a-f]{8}$')
-
-    def test_state_dir_layout_and_project_file(self):
-        from unittest import mock
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {self.storage.ENV: tmp}):
-            root = Path(tmp).resolve() / 'proj'
-            path = self.storage.state_dir('untangle', root)
-            self.assertEqual(path, Path(tmp).resolve() / 'untangle' / self.storage.project_key(root))
-            self.assertEqual(json.loads((path / 'project.json').read_text()), {'root': str(root)})
-
 
 if __name__ == '__main__':
     unittest.main()

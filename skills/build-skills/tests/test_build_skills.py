@@ -1,5 +1,4 @@
 """End-to-end tests: copy the skill to a temp dir and drive scripts/build-skills.py as the agent would."""
-import ast
 import json
 import os
 import shutil
@@ -25,6 +24,8 @@ class Base(unittest.TestCase):
         self.skill = self.tmp / 'build-skills'
         for sub in ('scripts', 'references', 'templates'):
             shutil.copytree(SOURCE / sub, self.skill / sub, ignore=shutil.ignore_patterns('__pycache__'))
+        # handtools' engine beside the skill, as in an installed bundle
+        shutil.copytree(SOURCE.parent / '_engine', self.tmp / '_engine', ignore=shutil.ignore_patterns('__pycache__'))
         self.project = self.tmp / 'project'
         self.project.mkdir()
 
@@ -95,7 +96,7 @@ class Base(unittest.TestCase):
 
     def staged(self, path, mode):
         shutil.copytree(self.skill / 'templates' / 'workflow' / 'scripts', path / 'scripts', dirs_exist_ok=True)
-        steps = path / 'scripts' / 'workflowlib' / 'steps.py'
+        steps = path / 'scripts' / 'steps.py'
         steps.write_text(steps.read_text().replace("MODE = 'stateful'", f"MODE = '{mode}'"))
 
     def to_review(self, **extra):
@@ -209,8 +210,12 @@ class Stages(Base):
         out = self.design('stateless', router=True)
         self.assertIn('done --stage S', out)
         path = self.write_skill(self.wdir())
-        steps = path / 'scripts' / 'workflowlib' / 'steps.py'
+        steps = path / 'scripts' / 'steps.py'
         self.assertIn("MODE = 'stateless'", steps.read_text())
+        self.assertIn(f"AREA = '{path.name}'", steps.read_text())
+        engine = path / 'scripts' / '_engine'
+        self.assertEqual((engine / 'flow.py').read_bytes(), (SOURCE.parent / '_engine' / 'flow.py').read_bytes())
+        self.assertFalse((engine / 'tests').exists())
         self.assertIn('router', self.done(ok=False))
         self.staged(path, 'stateful')
         self.assertIn("MODE = 'stateless'", self.done(ok=False))
@@ -284,7 +289,7 @@ class Revise(Base):
         self.staged(self.target, 'stateful')
         self.start(mode='revise', kind='staged')
         self.design('stateless')
-        steps = self.wdir() / 'scripts' / 'workflowlib' / 'steps.py'
+        steps = self.wdir() / 'scripts' / 'steps.py'
         self.assertIn("MODE = 'stateless'", steps.read_text())
 
     def test_staged_to_saved_prompt_removes_scripts(self):
@@ -310,7 +315,7 @@ class Template(Base):
         return list((self.home / 'workflow').glob('*/workflow.json'))
 
     def set_mode(self, mode):
-        steps = self.skill / 'templates' / 'workflow' / 'scripts' / 'workflowlib' / 'steps.py'
+        steps = self.skill / 'templates' / 'workflow' / 'scripts' / 'steps.py'
         steps.write_text(steps.read_text().replace("MODE = 'stateful'", f"MODE = '{mode}'"))
 
     def test_stateful_single_run_state_in_state_root(self):
@@ -350,38 +355,6 @@ class Template(Base):
         self.assertIn('nothing', self.run_cmd('status', script=self.script, ok=False))
         self.assertEqual(self.states(), [])
         self.assertFalse((self.home / 'workflow').exists())
-
-
-class Structure(unittest.TestCase):
-    PACKAGES = [SOURCE / 'scripts' / 'build_skills', SOURCE / 'templates' / 'workflow' / 'scripts' / 'workflowlib']
-
-    def allowed(self, package):
-        """Parse `mod -> a, b` lines from the package docstring."""
-        rules = {}
-        for line in ast.get_docstring(ast.parse((package / '__init__.py').read_text())).splitlines():
-            if '->' in line:
-                left, right = (part.strip() for part in line.split('->'))
-                for mod in left.split(','):
-                    rules[mod.strip()] = set() if right == 'none' else {r.strip() for r in right.split(',')}
-        return rules
-
-    def test_imports_follow_declared_graph(self):
-        for package in self.PACKAGES:
-            rules = self.allowed(package)
-            modules = {p.stem for p in package.glob('*.py') if p.stem != '__init__'}
-            self.assertEqual(set(rules), modules, package)
-            for mod in modules:
-                used = set()
-                for node in ast.walk(ast.parse((package / f'{mod}.py').read_text())):
-                    if isinstance(node, ast.ImportFrom) and node.level == 1:
-                        used |= {node.module} if node.module else {a.name for a in node.names}
-                self.assertLessEqual(used, rules[mod], f'{package.name}.{mod}')
-
-    def test_shared_files_identical(self):
-        for name in ('cli.py', 'storage.py'):
-            self.assertEqual((self.PACKAGES[0] / name).read_bytes(), (self.PACKAGES[1] / name).read_bytes(), name)
-
-
 
 
 class CodexPolicyTest(unittest.TestCase):

@@ -1,8 +1,5 @@
 """Per-user state: root, project key, state dirs, JSON files, and the lock around writes.
 
-Shared verbatim by every handtools workflow skill and build-skills' workflow template;
-tests/test_bundle.py fails when the copies differ, so edit them all together.
-
 Layout: <state root>/<area>/<project key>/, state root = $HANDTOOLS_STATE or ~/.agents/state
 (%USERPROFILE%\\.agents\\state on Windows). Each skill names its area in one constant (AREA).
 Nothing is written inside the installed skill, whose folder a plugin update replaces.

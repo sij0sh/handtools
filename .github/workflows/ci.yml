@@ -16,6 +16,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Bundle guards (shared rules, sibling paths, versions, schema, invocation policy)
         run: python -m unittest discover -s tests -v < /dev/null
+      - name: engine
+        run: python -m unittest discover -s skills/_engine/tests < /dev/null
       - name: simple-by-design
         run: python -m unittest discover -s skills/simple-by-design/tests < /dev/null
       - name: foundation

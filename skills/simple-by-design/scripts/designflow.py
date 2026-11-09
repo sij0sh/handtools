@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """State machine that drives the simple-by-design loop.
 
-Run from the project root. Requires Python 3.9+; standard library only.
+Run from the project root. Requires Python 3.9+; standard library only. The engine is handtools' skills/_engine/.
 `done` reads each step's edits as JSON on stdin; the agent never opens the files.
 Logic lives in designlib/; this file owns the command line only.
 
@@ -12,55 +12,26 @@ Files, all owned by this script:
   ($HANDTOOLS_STATE replaces ~/.agents/state.)
 """
 import argparse
-import json
-import os
-import shlex
-import subprocess
 import sys
 from pathlib import Path
 
-_HERE = str(Path(__file__).resolve().parent)
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+sys.dont_write_bytecode = True
+HERE = Path(__file__).resolve().parent
+ENGINE = next((p for p in (HERE, *HERE.parents) if (p / '_engine' / '__init__.py').is_file()), None)
+if ENGINE is None:
+    print('ERROR: engine not found; install the handtools bundle.', file=sys.stderr)
+    sys.exit(2)
+for path in (str(HERE), str(ENGINE)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
+from _engine import cli, storage  # noqa: E402
 from designlib import flow  # noqa: E402
-
-
-def quote(text):
-    """Quote one argument for the shell that will run the printed command."""
-    if os.name == 'nt':
-        return subprocess.list2cmdline([text])
-    return shlex.quote(text)
-
-
-def launcher(root):
-    """Command prefix that reruns this script for the same project root."""
-    command = f'{quote(sys.executable)} {quote(str(Path(__file__).resolve()))}'
-    if root != Path.cwd().resolve():
-        command += f' --root {quote(str(root))}'
-    return command
-
-
-def read_payload():
-    """Return stdin parsed as JSON, or None when stdin is a terminal or blank."""
-    if sys.stdin is None or sys.stdin.isatty():
-        return None
-    data = sys.stdin.buffer.read()
-    if data[:2] in (b'\xff\xfe', b'\xfe\xff'):
-        text = data.decode('utf-16')
-    else:
-        text = data.decode('utf-8-sig')
-    if not text.strip():
-        return None
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as error:
-        raise ValueError(f'Payload is not valid JSON: {error}') from None
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--root', type=Path, default=Path.cwd(), help='project root (default: cwd)')
+    parser.add_argument('--root', help='project root (default: git top level, else cwd)')
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('start', help='begin a new session; keep earlier sessions')
     status_cmd = commands.add_parser('status', help='list sessions or show one session')
@@ -75,25 +46,17 @@ def main():
     show_cmd = commands.add_parser('show', help='print the decision record (ADR log) as Markdown; read-only')
     show_cmd.add_argument('--goal', help='show only this goal (G#)')
     args = parser.parse_args()
-    root = args.root.resolve()
-    try:
-        if args.command == 'start':
-            print(flow.start(root, launcher(root)))
-        elif args.command == 'status':
-            print(flow.status(root, args.session, args.all, launcher(root)))
-        elif args.command == 'abandon':
-            print(flow.abandon(root, args.session))
-        elif args.command == 'record':
-            print(flow.record_goal(root, args.goal, read_payload()))
-        elif args.command == 'show':
-            print(flow.show(root, args.goal))
-        else:
-            print(flow.done(root, args.session, read_payload(), launcher(root)))
-    except (ValueError, OSError) as error:
-        print(f'ERROR: {error}', file=sys.stderr)
-        return 1
-    return 0
-
+    root = storage.project_root(args.root)
+    launch = cli.launcher(__file__, root)
+    actions = {
+        'start': lambda: flow.start(root, launch),
+        'status': lambda: flow.status(root, args.session, args.all, launch),
+        'abandon': lambda: flow.abandon(root, args.session),
+        'record': lambda: flow.record_goal(root, args.goal, cli.read_payload()),
+        'show': lambda: flow.show(root, args.goal),
+        'done': lambda: flow.done(root, args.session, cli.read_payload(), launch),
+    }
+    return cli.run(actions[args.command])
 
 if __name__ == '__main__':
     sys.exit(main())

@@ -1,5 +1,4 @@
 import ast
-import importlib.util
 import json
 import os
 import shlex
@@ -14,17 +13,12 @@ from unittest import mock
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPT = SKILL_DIR / 'scripts' / 'designflow.py'
 LIB = SKILL_DIR / 'scripts' / 'designlib'
-if str(SCRIPT.parent) not in sys.path:
-    sys.path.insert(0, str(SCRIPT.parent))
+for _path in (str(SCRIPT.parent), str(SKILL_DIR.parent)):  # designlib; handtools' skills/_engine
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
-from designlib import config, flow, storage  # noqa: E402
-
-
-def load_module(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from _engine import storage  # noqa: E402
+from designlib import config, flow  # noqa: E402
 
 
 def printed_command(output, marker='Then run:'):
@@ -559,21 +553,6 @@ class DesignflowTest(unittest.TestCase):
         self.assertNotIn('WARNING', out)
 
 
-class QuoteTest(unittest.TestCase):
-    def setUp(self):
-        self.designflow = load_module(SCRIPT, 'designflow_quote_test')
-
-    def test_posix_quoting(self):
-        self.assertEqual(self.designflow.quote('a b'), "'a b'")
-
-    def test_windows_quoting_uses_double_quotes(self):
-        with mock.patch('os.name', 'nt'):
-            self.assertEqual(
-                self.designflow.quote(r'C:\Program Files\Python\python.exe'),
-                r'"C:\Program Files\Python\python.exe"',
-            )
-
-
 class ConfigTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -618,7 +597,6 @@ class ImportGraphTest(unittest.TestCase):
         'sessions': {'config', 'record', 'storage'},
         'record': {'storage'},
         'config': set(),
-        'storage': set(),
         '__init__': set(),
     }
 

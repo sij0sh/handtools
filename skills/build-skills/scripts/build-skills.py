@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """build-skills: create or revise a skill: a saved prompt (ground, draft, review) or a staged skill (ground, design, draft, review).
 
-Run from the project root. Python 3.9+; standard library only.
+Run from the project root. Python 3.9+; standard library only. The engine is handtools' skills/_engine/.
 `done` reads each stage's payload as JSON on stdin. Logic lives in build_skills/; this file owns the command line only.
 
 State under ~/.agents/state/build-skills/<project-key>/ ($HANDTOOLS_STATE replaces ~/.agents/state;
@@ -17,11 +17,17 @@ import sys
 from pathlib import Path
 
 sys.dont_write_bytecode = True
-_HERE = str(Path(__file__).resolve().parent)
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+HERE = Path(__file__).resolve().parent
+ENGINE = next((p for p in (HERE, *HERE.parents) if (p / '_engine' / '__init__.py').is_file()), None)
+if ENGINE is None:
+    print('ERROR: engine not found; install the handtools bundle.', file=sys.stderr)
+    sys.exit(2)
+for path in (str(HERE), str(ENGINE)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
-from build_skills import cli, flow, storage  # noqa: E402
+from _engine import cli, storage  # noqa: E402
+from build_skills import flow  # noqa: E402
 
 
 def main():

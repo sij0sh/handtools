@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Workflow skill template: the script owns order; the agent does one step at a time.
+"""untangle: a resumable whole-codebase audit, one run per project.
 
-Copy this scripts/ folder into <skill>/scripts/ and edit workflowlib/steps.py only (set MODE and AREA there).
-Python 3.9+; standard library only.
-Stateful: ~/.agents/state/<AREA>/<project-key>/workflow.json, one run per project (storage.py).
-Stateless: nothing saved; `done --stage S` names the finished step.
+The stages are workflowlib/ (steps and its helpers); the engine is handtools' skills/_engine/.
+Run state and exports: ~/.agents/state/untangle/<project-key>/. Python 3.9+; standard library only.
 """
 import argparse
 import sys
 from pathlib import Path
 
 sys.dont_write_bytecode = True
-_HERE = str(Path(__file__).resolve().parent)
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+HERE = Path(__file__).resolve().parent
+ENGINE = next((p for p in (HERE, *HERE.parents) if (p / '_engine' / '__init__.py').is_file()), None)
+if ENGINE is None:
+    print('ERROR: engine not found; install the handtools bundle.', file=sys.stderr)
+    sys.exit(2)
+for path in (str(HERE), str(ENGINE)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
-from workflowlib import cli, flow, storage  # noqa: E402
+from workflowlib import steps  # noqa: E402
+from _engine import cli, flow, storage  # noqa: E402
 
 
 def main():
@@ -30,9 +34,9 @@ def main():
     args = parser.parse_args()
     root = storage.project_root(args.root)
     launch = cli.launcher(__file__, root)
-    actions = {'start': lambda: flow.start(root, launch), 'status': lambda: flow.status(root, launch),
-               'abandon': lambda: flow.abandon(root),
-               'done': lambda: flow.done(root, cli.read_payload(), launch, args.stage)}
+    actions = {'start': lambda: flow.start(steps, root, launch), 'status': lambda: flow.status(steps, root, launch),
+               'abandon': lambda: flow.abandon(steps, root),
+               'done': lambda: flow.done(steps, root, cli.read_payload(), launch, args.stage)}
     return cli.run(actions[args.command])
 
 
