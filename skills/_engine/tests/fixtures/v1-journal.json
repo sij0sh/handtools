@@ -1,0 +1,98 @@
+{
+ "events": [
+  {
+   "event_id": "20d429af-b2df-41b8-befc-1237330e851d",
+   "kind": "state.changed",
+   "parent_event_id": null,
+   "payload": {
+    "state": {
+     "phase": "map",
+     "root": "/p"
+    }
+   },
+   "policy_version": "1",
+   "protocol": "handtools.workflow",
+   "request_id": "r1",
+   "revision": 1,
+   "run_id": "workflow.json",
+   "schema_version": 1,
+   "timestamp": "2026-11-09T15:02:16.973447+00:00",
+   "workflow_version": "1",
+   "workspace_id": "ws"
+  },
+  {
+   "event_id": "5b02445a-7862-4c55-9e0d-d4a10dc8c195",
+   "kind": "stage.completed",
+   "parent_event_id": "20d429af-b2df-41b8-befc-1237330e851d",
+   "payload": {
+    "phase": "scope",
+    "units": {
+     "U1": {
+      "status": "pending"
+     }
+    }
+   },
+   "policy_version": "1",
+   "protocol": "handtools.workflow",
+   "request_id": "r2",
+   "revision": 2,
+   "run_id": "workflow.json",
+   "schema_version": 1,
+   "timestamp": "2026-11-09T15:02:16.973784+00:00",
+   "workflow_version": "1",
+   "workspace_id": "ws"
+  },
+  {
+   "event_id": "0ac5cca6-44f6-4e08-ba31-2e86c31d7dc4",
+   "kind": "plan.revised",
+   "parent_event_id": "5b02445a-7862-4c55-9e0d-d4a10dc8c195",
+   "payload": {
+    "plan": {
+     "goal": "g",
+     "verification": "v"
+    }
+   },
+   "policy_version": "1",
+   "protocol": "handtools.workflow",
+   "request_id": "r3",
+   "revision": 3,
+   "run_id": "workflow.json",
+   "schema_version": 1,
+   "timestamp": "2026-11-09T15:02:16.974106+00:00",
+   "workflow_version": "1",
+   "workspace_id": "ws"
+  },
+  {
+   "event_id": "54bad782-1ea2-408a-8d9c-429665b75b40",
+   "kind": "run.closed",
+   "parent_event_id": "0ac5cca6-44f6-4e08-ba31-2e86c31d7dc4",
+   "payload": {
+    "result": "done"
+   },
+   "policy_version": "1",
+   "protocol": "handtools.workflow",
+   "request_id": "r4",
+   "revision": 4,
+   "run_id": "workflow.json",
+   "schema_version": 1,
+   "timestamp": "2026-11-09T15:02:16.974448+00:00",
+   "workflow_version": "1",
+   "workspace_id": "ws"
+  }
+ ],
+ "note": "Written by the version-1 events.py (commit 6ea9c1c); never regenerate.",
+ "state": {
+  "phase": "scope",
+  "plan": {
+   "goal": "g",
+   "verification": "v"
+  },
+  "result": "done",
+  "root": "/p",
+  "units": {
+   "U1": {
+    "status": "pending"
+   }
+  }
+ }
+}

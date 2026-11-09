@@ -250,7 +250,7 @@ LAUNCHERS = [SKILLS / 'simple-by-design' / 'scripts' / 'designflow.py',
              SKILLS / 'build-skills' / 'scripts' / 'build-skills.py',
              SKILLS / 'build-skills' / 'templates' / 'workflow' / 'scripts' / 'workflow.py']
 # Packages whose docstring declares their allowed local imports as `mod -> a, b` lines.
-GRAPHS = [ENGINE, SKILLS / 'untangle' / 'scripts' / 'workflowlib', SKILLS / 'build-skills' / 'scripts' / 'build_skills']
+GRAPHS = [ENGINE, ENGINE / 'recon', SKILLS / 'untangle' / 'scripts' / 'workflowlib', SKILLS / 'build-skills' / 'scripts' / 'build_skills']
 
 
 def declared_graph(package):

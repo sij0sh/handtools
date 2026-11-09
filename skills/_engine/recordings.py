@@ -19,7 +19,14 @@ def command_is_engine(value):
     except ValueError:
         return False
     # Only a direct Python invocation, never echo/cat/embedded examples or shell composition.
-    if len(words) < 3 or not Path(words[0]).name.lower().startswith(('python', 'py')) or Path(words[1]).name != 'engine.py':
+    if len(words) < 3 or not Path(words[0]).name.lower().startswith(('python', 'py')):
+        return False
+    script = Path(words[1])
+    if script.name == 'engine.py':
+        writes = ('append', 'start')
+    elif script.name == 'cli.py' and script.parent.name == 'recon':
+        writes = ('start', 'record', 'close')
+    else:
         return False
     if any(w in words for w in (';', '&&', '||', '|')):
         return False
@@ -28,7 +35,7 @@ def command_is_engine(value):
         if len(args) < 2:
             return False
         args = args[2:]
-    return bool(args and args[0] in ('append', 'start'))
+    return bool(args and args[0] in writes)
 
 
 
@@ -40,7 +47,8 @@ def text_content(value):
     return ''
 
 
-def receipts(paths, run):
+def receipts(paths, run, reducers=None):
+    """Receipts for `run`, replay-checked. They are evidence of what a session saw, not accepted state."""
     result = []
     for name in paths:
         path = Path(name)
@@ -100,5 +108,5 @@ def receipts(paths, run):
                     validate(receipt)
                     if receipt['run_id'] == run:
                         result.append({**receipt, 'source_ref': '%s:%s' % (path.resolve(), number)})
-    replay(result)
+    replay(result, reducers)
     return result

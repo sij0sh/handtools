@@ -1,0 +1,27 @@
+{
+  "name": "untangle",
+  "contract_version": 1,
+  "invocation": "explicit",
+  "mode": "stateful",
+  "recon": {"depth": "map", "required_records": ["contract", "relationship", "gap", "component"], "external_scope": "supplied",
+            "freshness": "pin"},
+  "check_packs": {"packs": [], "unsupported": "report-gap"},
+  "stages": [
+    {"name": "inventory", "inputs": ["user-approved boundary"], "outputs": {"ledger": "path ledger"}, "evidence": ["file hashes"],
+     "exit_check": "check_inventory", "next": ["map"]},
+    {"name": "map", "inputs": ["ledger", "pinned recon snapshot"], "outputs": {"units": "partition", "entry_points": "list", "observables": "list", "recon_snapshot": "pin or none+reason"},
+     "evidence": ["unit ranges", "recon_refs"], "exit_check": "check_map", "next": ["scope"]},
+    {"name": "scope", "inputs": ["map", "recon contracts and gaps"], "outputs": {"budgets": "six limits", "allowed_commands": "list"},
+     "evidence": ["user approval of map_rev"], "exit_check": "check_scope", "next": ["map", "dissect", "synthesize", "checkpoint"]},
+    {"name": "dissect", "inputs": ["queue head"], "outputs": {"findings": "A|B|gap with policy tier", "recon_refs": "optional"},
+     "evidence": ["reviewed ranges", "trace steps"], "exit_check": "check_dissect", "next": ["dissect", "synthesize", "checkpoint"]},
+    {"name": "synthesize", "inputs": ["findings"], "outputs": {"recommendations": "list", "waves": "list"}, "evidence": ["finding ids"],
+     "exit_check": "check_synthesize", "next": ["challenge", "dissect", "checkpoint"]},
+    {"name": "challenge", "inputs": ["ledger", "report state"], "outputs": {"objections": "list"}, "evidence": ["current source"],
+     "exit_check": "check_challenge", "next": ["dissect", "synthesize", "checkpoint", null]},
+    {"name": "checkpoint", "inputs": ["reason", "coverage"], "outputs": {"decision": "extend|reinventory|publish_incomplete"},
+     "evidence": ["user decision"], "exit_check": "check_checkpoint", "next": ["inventory", "dissect", "synthesize", "challenge", null]}
+  ],
+  "budgets": {"limits": {"dissect_transitions": 20, "passes_per_unit": 2, "split_depth": 3, "synth_reopens": 3, "challenge_rounds": 2}, "on_exhausted": "checkpoint"},
+  "outcomes": ["complete", "incomplete", "cancelled"]
+}

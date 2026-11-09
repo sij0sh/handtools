@@ -1,0 +1,22 @@
+{
+  "name": "foundation",
+  "contract_version": 1,
+  "invocation": "explicit",
+  "mode": "stateless",
+  "recon": {"depth": "map", "required_records": ["contract", "gap", "component"], "external_scope": "supplied",
+            "freshness": "reuse-if-fresh"},
+  "check_packs": {"packs": [], "unsupported": "report-gap"},
+  "stages": [
+    {"name": "discover", "inputs": ["audit.py output", "recon status/orient"], "outputs": {"kind": "greenfield|brownfield", "maturity": "prototype|mvp|production", "mode": "audit|plan", "recon_snapshot": "snap-N (optional)"},
+     "evidence": ["audit.py file evidence", "closed recon snapshot"], "exit_check": "check_discover", "next": ["interview"]},
+    {"name": "interview", "inputs": ["ADR log", "recon open gaps"], "outputs": {"questions_asked": "0-5", "decisions": "object"},
+     "evidence": [], "exit_check": "check_interview", "next": ["assess"]},
+    {"name": "assess", "inputs": ["audit", "decisions", "recon contracts"], "outputs": {"capabilities": "status+evidence per capability", "contract_gaps": "per contract with unknown owner/compatibility", "approved": "ids"},
+     "evidence": ["file path or searched scope per capability", "recon record id per contract gap"], "exit_check": "check_assess", "next": ["apply", null]},
+    {"name": "apply", "inputs": ["approved ids"], "outputs": {"changed": "paths"}, "evidence": ["written files"], "exit_check": "check_apply", "next": ["validate"]},
+    {"name": "validate", "inputs": ["approved commands"], "outputs": {"changed": "list", "passed": "list", "remaining": "list"},
+     "evidence": ["validate.py result"], "exit_check": "check_validate", "next": [null]}
+  ],
+  "budgets": {"limits": {"questions": 5}, "on_exhausted": "stop"},
+  "outcomes": ["complete", "incomplete"]
+}

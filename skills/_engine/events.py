@@ -33,15 +33,20 @@ def validate(item):
     if item.get('workflow_version') != '1' or item.get('policy_version') != '1':
         raise ValueError('unsupported workflow/policy version')
     if item.get('kind') not in ('state.changed', 'state.deleted', 'run.started', 'stage.completed',
-                                'plan.revised', 'authorization.recorded', 'run.closed'):
+                                'plan.revised', 'authorization.recorded', 'run.closed', 'record.accepted'):
         raise ValueError('unsupported event kind')
     if not isinstance(item.get('payload'), dict):
         raise ValueError('event payload must be an object')
     json.dumps(item, allow_nan=False)
 
 
-def replay(items):
-    """Order by predecessor, reject gaps/forks/identity collisions; never infer latest by time."""
+def replay(items, reducers=None):
+    """Order by predecessor, reject gaps/forks/identity collisions; never infer latest by time.
+
+    `record.accepted` payloads are versioned domain envelopes {"schema": name, "version": n, ...};
+    `reducers` maps a schema name to a pure function (state, event) -> state. Every other kind keeps
+    the generic merge, so version-1 runs replay exactly as before. A missing reducer raises.
+    """
     unique, requests = {}, {}
     for raw in items:
         item = copy.deepcopy(raw)
@@ -67,6 +72,14 @@ def replay(items):
             closed = True
         if item['kind'] == 'state.deleted':
             state = None
+        elif item['kind'] == 'record.accepted':
+            if state is None:
+                raise ValueError('closed/deleted run cannot advance')
+            schema = item['payload'].get('schema')
+            reducer = (reducers or {}).get(schema)
+            if reducer is None:
+                raise ValueError('no reducer for record schema %r' % (schema,))
+            state = reducer(copy.deepcopy(state), copy.deepcopy(item))
         elif item['kind'] == 'state.changed':
             state = copy.deepcopy(item['payload']['state'])
         else:
@@ -78,8 +91,9 @@ def replay(items):
 
 
 class Journal:
-    def __init__(self, path):
+    def __init__(self, path, reducers=None):
         self.path = Path(path)
+        self.reducers = reducers
 
     @contextmanager
     def connect(self):
@@ -105,13 +119,19 @@ class Journal:
 
     def read(self, run):
         items = self.history(run)
-        return replay(items)[0] if items else None
+        return replay(items, self.reducers)[0] if items else None
+
+    def runs(self):
+        if not self.path.exists():
+            return []
+        with self.connect() as db:
+            return [r[0] for r in db.execute('SELECT DISTINCT run FROM events ORDER BY run')]
 
     def append(self, run, kind, payload, expected=None, request_id=None, workspace=None):
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             rows = [json.loads(r[0]) for r in db.execute('SELECT body FROM events WHERE run=? ORDER BY revision', (run,))]
-            _, rows = replay(rows)
+            _, rows = replay(rows, self.reducers)
             if request_id:
                 previous = next((r for r in rows if r['request_id'] == request_id), None)
                 if previous:
@@ -123,7 +143,7 @@ class Journal:
                 raise ValueError('stale revision: expected %s, current %s' % (expected, revision))
             item = event(run, revision + 1, rows[-1]['event_id'] if rows else None,
                          kind, payload, request_id, workspace)
-            replay(rows + [item])
+            replay(rows + [item], self.reducers)
             db.execute('INSERT INTO events VALUES (?,?,?,?,?)',
                        (run, item['revision'], item['event_id'], item['request_id'], json.dumps(item)))
             return item

@@ -1,0 +1,50 @@
+{
+  "about": "M1 acceptance map for tests/fixtures/recon/orders (primary) and billing (separately supplied consumer). Contracts match by kind and channel substring; ids are the canonical ones.",
+  "contracts": [
+    {"id": "contract:http:POST /orders", "kind": "http", "channel": "/orders", "direction": "inbound",
+     "role": "upstream", "evidence": ["app/api.py"], "producers": "unresolved (HTTP clients are not in scope)",
+     "consumers": "component:orders/api"},
+    {"id": "contract:http:GET https://feeds.example-vendor.com/v2/prices.csv", "kind": "http",
+     "channel": "example-vendor.com", "direction": "outbound", "role": "upstream", "evidence": ["app/ingest.py"],
+     "producers": "external: example-vendor price feed", "consumers": "component:orders/ingest"},
+    {"id": "contract:schedule:ingest-prices", "kind": "schedule", "channel": "ingest", "direction": "inbound",
+     "role": "upstream", "evidence": ["deploy/cron.yaml"], "note": "configured hourly; configuration alone does not prove it runs"},
+    {"id": "contract:queue:orders.created", "kind": "queue", "channel": "orders.created", "direction": "outbound",
+     "role": "downstream", "evidence": ["app/events.py"], "producers": "component:orders/events",
+     "consumers_repo_only": "unresolved", "consumers_with_billing": "component:billing/consumer"},
+    {"id": "contract:schema:order_created.v1", "kind": "schema", "channel": "order_created", "direction": "both",
+     "role": "downstream", "evidence": ["schemas/order_created.v1.json", "app/events.py"]},
+    {"id": "contract:table:orders", "kind": "table", "channel": "orders", "direction": "internal",
+     "evidence": ["migrations/001_create_orders.sql"]},
+    {"id": "contract:table:prices", "kind": "table", "channel": "prices", "direction": "internal",
+     "evidence": ["migrations/001_create_orders.sql"]}
+  ],
+  "repo_only": {
+    "unresolved": ["contract:queue:orders.created"],
+    "gap_affects": ["contract:queue:orders.created"]
+  },
+  "with_billing": {
+    "resolved": {"contract:queue:orders.created": "component:billing/consumer"},
+    "evidence": ["billing:billing/consumer.py"]
+  },
+  "foundation": {
+    "gap": "orders.created / order_created.v1 has no recorded owner, compatibility or versioning policy",
+    "contracts": ["contract:queue:orders.created", "contract:schema:order_created.v1"]
+  },
+  "untangle": {
+    "constraint": "billing reads order_id and total_cents from orders.created and dedupes by order_id: renaming or dropping either field, or reusing an order id, changes downstream behavior",
+    "contracts": ["contract:queue:orders.created", "contract:schema:order_created.v1"]
+  },
+  "schema_change": {
+    "edit": "schemas/order_created.v1.json",
+    "stale": ["contract:schema:order_created.v1", "rel:conforms-to:contract:queue:orders.created->contract:schema:order_created.v1",
+              "obs:billing-requires-total-cents"],
+    "reused": ["contract:http:POST /orders", "contract:queue:orders.created", "contract:table:orders",
+               "contract:table:prices", "component:orders/events"]
+  },
+  "inferred_pattern": {
+    "id": "obs:events-module-per-topic",
+    "claim": "Each topic gets its own publish_* function in app/events.py",
+    "never": "decision:"
+  }
+}

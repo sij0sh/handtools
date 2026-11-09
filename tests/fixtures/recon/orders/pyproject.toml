@@ -1,0 +1,7 @@
+[project]
+name = "orders"
+version = "1.4.0"
+dependencies = ["flask>=3", "kafka-python>=2"]
+
+[project.scripts]
+orders-ingest = "app.ingest:main"

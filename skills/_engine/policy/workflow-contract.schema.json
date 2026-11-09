@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "handtools/workflow-contract.schema.json",
+  "title": "Workflow contract (draft, M1; enforced by build-skills from M4)",
+  "type": "object",
+  "required": ["name", "contract_version", "invocation", "mode", "recon", "check_packs", "stages", "budgets", "outcomes"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "contract_version": {"const": 1},
+    "invocation": {"enum": ["explicit"]},
+    "mode": {"enum": ["stateless", "stateful"]},
+    "recon": {
+      "type": "object",
+      "required": ["depth"],
+      "additionalProperties": false,
+      "properties": {
+        "depth": {"enum": ["none", "orient", "map", "deepen"]},
+        "reason": {"type": "string", "minLength": 1},
+        "required_records": {"type": "array", "items": {"enum": ["component", "contract", "relationship", "observation", "decision", "gap"]}},
+        "external_scope": {"enum": ["repository", "supplied"]},
+        "freshness": {"enum": ["pin", "reuse-if-fresh"]}
+      },
+      "if": {"properties": {"depth": {"const": "none"}}},
+      "then": {"required": ["reason"]},
+      "else": {"required": ["required_records", "external_scope", "freshness"]}
+    },
+    "check_packs": {
+      "type": "object",
+      "required": ["packs", "unsupported"],
+      "additionalProperties": false,
+      "properties": {
+        "packs": {"type": "array", "items": {"type": "object", "required": ["name", "version"],
+                  "properties": {"name": {"type": "string"}, "version": {"type": "integer", "minimum": 1}}}},
+        "unsupported": {"enum": ["report-gap"]}
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "inputs", "outputs", "evidence", "exit_check", "next"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "inputs": {"type": "array", "items": {"type": "string"}},
+          "outputs": {"type": "object", "additionalProperties": {"type": "string"}},
+          "evidence": {"type": "array", "items": {"type": "string"}},
+          "exit_check": {"type": "string", "minLength": 1},
+          "next": {"type": "array", "items": {"type": ["string", "null"]}}
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "required": ["limits", "on_exhausted"],
+      "properties": {
+        "limits": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+        "on_exhausted": {"enum": ["checkpoint", "stop"]}
+      }
+    },
+    "outcomes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["complete", "incomplete", "cancelled"]}}
+  }
+}
