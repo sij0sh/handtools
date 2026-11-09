@@ -2,6 +2,19 @@
 
 One entry per release. A release bumps `VERSION` (and the manifests that copy it) and adds one entry here.
 
+## [Unreleased]
+
+v0.1.1 milestone M1 (reconnaissance contract). Released with M2-M4 per `.agents/artifacts/v011.md`.
+
+- Shared reconnaissance in `skills/_engine/recon/` (not a skill, no trigger): evidence-backed snapshots of components, contracts, relationships, observations, decision references and discovery gaps. `recon/cli.py` runs bounded read-only collectors (`orient`, `candidates`) and records snapshots (`start`, `record`, `close`, `refresh`, `status`, `query`). The recorder hashes every cited file; unknown fields stay unknown; an advertised channel without subscriber evidence has an unresolved consumer and a gap. A `decision:` record must match an answered decision in the ADR log, so inferred patterns stay observations.
+- The journal accepts `record.accepted` events carrying a versioned domain envelope, reduced by explicit reducers. Version-1 runs replay unchanged; an unknown envelope version or a missing reducer fails visibly. Recon receipts are recognized in transcripts as non-authoritative evidence.
+- `refresh` starts a successor snapshot: records whose evidence is unchanged carry forward, changed ones and their dependents are marked stale, and records without evidence go stale when the scope changed.
+- remember adds `recon_snapshots`, `recon_contracts`, `recon_components`, `recon_relationships`, `recon_observations` and `recon_gaps`, rebuilt from the journal.
+- foundation: discover follows the shared recon guide and may pin a closed snapshot; interview asks only consequential recon gaps; a new `external-contracts` capability; assess requires a `contract_gaps` finding for every external contract with an unknown owner or compatibility rule. Still stateless.
+- untangle: MAP pins a closed recon snapshot or states why none is needed; map entries and findings cite `recon_refs`; the printed steps render state from the journal and `show` prints it (current.md/audit.json are still written); cited recon records that changed block a complete report until reinventory; `start --continue <audit-id>` begins a successor audit that keeps unchanged reviews.
+- Generated workflow skills ship `_engine/recon` and record `recon: 1` in `distribution.json`. Draft workflow contract in `_engine/policy/workflow-contract.md` (enforced from M4).
+- remember, foundation, untangle and build-skills' `install_engine` were changed directly rather than through build-skills, which only generates standalone skills (G5 D17, D18).
+
 ## [0.1.0] - 2026-11-09
 
 - Shared non-skill planning contract and policy ownership in `_engine`.
