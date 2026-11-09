@@ -6,6 +6,7 @@ One repository for my agent skills, released as one plugin for Claude Code, Code
 |---|---|
 | [simple-by-design](skills/simple-by-design/) | Records design decisions before implementation. Owns the shared design rules and the ADR log. |
 | [untangle](skills/untangle/) | Audits a codebase for avoidable complexity using simple-by-design's rules. |
+| [review](skills/review/) | Reviews a diff, a subsystem or a reported bug; confirms bugs only with evidence. Report-only. |
 | [foundation](skills/foundation/) | Audits and bootstraps a repository's foundation; records ADRs in simple-by-design's log. |
 | [build-skills](skills/build-skills/) | Creates or revises an agent skill. |
 | [remember](skills/remember/) | Memory for coding agents from past sessions and commits. |
@@ -108,6 +109,21 @@ missing or conflicting chains fail. Status reports an **observed prefix**, not g
 The pilot has synthetic capture tests; live harness retention/flush guarantees are not established.
 It is not the backend for filesystem application. Do not silently switch an existing run's backend.
 
+## Review and shared audit bookkeeping
+
+`/handtools:review` runs frame → recon → obligations → hunt → validate → challenge → report, in
+three modes: diff (base ref vs checked-out HEAD or the working tree), subsystem (paths) and bug (a
+reported symptom). It writes nothing in the project; only commands the user approves at FRAME run, in
+a worktree or temp copy. A candidate is confirmed only by a repeatable counterexample or a cited
+source argument (trigger → fault → effect, guards checked); diff mode also needs origin
+(introduced/pre-existing with baseline evidence at the merge base). Missing or weak tests are test
+gaps, not findings. Budgets end every run at the report or a checkpoint; incomplete and cancelled
+reports say so. `report.md` is rendered from the journal.
+
+`skills/_engine/audit/` holds the domain-free mechanics (obligations, candidates, evidence refs,
+budgets) and the check packs (`packs/general.json`, `tests.json`, `python.json`). Verdict rules stay
+in each workflow. Languages without a pack are reported as unsupported scope.
+
 ## Runtime distribution
 
 In-bundle skills share `_engine`. Generated external workflow skills receive one pinned copy under
@@ -131,6 +147,8 @@ python3 -m unittest discover -s skills/_engine/tests
 python3 -m unittest discover -s skills/simple-by-design/tests
 python3 -m unittest discover -s skills/foundation/tests
 python3 -m unittest discover -s skills/build-skills/tests
+python3 -m unittest discover -s skills/untangle/tests
+python3 -m unittest discover -s skills/review/tests
 python3 -m unittest discover -s skills/remember/tests       # optional tree-sitter deps: skills/remember/requirements.txt
 ```
 

@@ -1,8 +1,8 @@
 {
   "name": "handtools",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
-  "description": "Agent skills: simple-by-design, untangle, foundation, build-skills and remember, with one set of shared design rules.",
+  "description": "Agent skills: simple-by-design, untangle, review, foundation, build-skills and remember, with one set of shared design rules.",
   "repository": {
     "type": "git",
     "url": "https://github.com/sij0sh/handtools.git"

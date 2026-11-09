@@ -2,6 +2,19 @@
 
 One entry per release. A release bumps `VERSION` (and the manifests that copy it) and adds one entry here.
 
+## [0.1.2] - 2026-11-09
+
+v0.1.1 plan milestone M2 (review, candidate validation, targeted test analysis), per `.agents/artifacts/v011.md`; design in `.agents/design/decisions.json` goal G6.
+
+- New user-invoked skill `review`: diff, subsystem and reported-bug review in stages frame → recon → obligations → hunt → validate → challenge → report, with checkpoints. Report-only; approved commands run only in a worktree or temp copy and are recorded with revision, exit code and output hash.
+- Candidates are confirmed only by a repeatable counterexample or a complete cited source argument with guards checked; rejection needs counterevidence; a failed tool is never evidence against a claim. Diff mode records origin (introduced, pre-existing, unknown) with baseline evidence at the merge base. Bug mode reports whether the symptom is explained.
+- Test analysis runs as checks inside review; missing, unasserted, unrealistic, skipped or flaky tests are test gaps, never bug findings.
+- Source drift reopens exactly the obligations, candidates and test gaps that cite a changed file; stale recon citations block a complete report. `report.md` is rendered from the journal (same bytes on replay); `abandon` after FRAME writes a CANCELLED report.
+- Shared audit bookkeeping in `skills/_engine/audit/` (no trigger): obligations, candidates, evidence refs (working tree or a commit), budgets, and versioned check packs (`general`, `tests`, `python`). Languages without a pack are reported as unsupported scope. Generated workflow skills record `audit: 1` in `distribution.json`.
+- Recon pinning moved to `_engine/recon/pin.py`, shared by untangle and review; untangle's behavior and exports are unchanged.
+- Engine: `flow.abandon` calls an optional `steps.on_abandon(state, root)` hook before closing a run.
+- Workflow contract fixtures include review with concrete check packs.
+
 ## [0.1.1] - 2026-11-09
 
 v0.1.1 milestone M1 (reconnaissance contract), per `.agents/artifacts/v011.md`.
