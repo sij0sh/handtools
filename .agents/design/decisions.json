@@ -838,7 +838,10 @@
         {
           "id": "D1",
           "question": "How is skills/review/ laid out and run (engine mode, state area, run multiplicity)?",
-          "status": "open"
+          "status": "resolved",
+          "answer": "Mirror untangle: skills/review/SKILL.md (disable-model-invocation: true), agents/openai.yaml (allow_implicit_invocation: false), scripts/workflow.py launcher that finds _engine by walking up, scripts/reviewlib/{steps,checks,transitions,verdicts,report}.py, tests/. steps.MODE='stateful', AREA='review', PLANNING=True on FRAME (shared planning gates readiness, as the spec's frame exit requires a ready plan). ORDER = frame, recon, obligations, hunt, validate, challenge, report, checkpoint. One unfinished run per project (flow.start already refuses a second); commands start/status/show/abandon/done like untangle.",
+          "rationale": "Existing convention for a stateful bundle skill; flow.py already gives journal-backed single-run semantics and planning gates.",
+          "date": "2026-11-09"
         },
         {
           "id": "D2",
@@ -846,7 +849,10 @@
           "after": [
             "D1"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "_engine/audit/ holds pure functions over plain dicts in run state: obligations.py (statuses, allowed transitions, finite queue, applicability filter over a check catalog), candidates.py (state machine proposed->validating->terminal, validation attempts list, duplicate links, reopen), evidence.py (evidence refs in recon's shape {source, path, sha256, lines, statement}, hashed by the recorder via recon.sources.file_hash; changed-ref detection), budgets.py (named counters, spend, checkpoint_to). Each terminal transition calls a domain `verdict(candidate, state)` callable passed in by the workflow; audit itself has no bug rules. review's reviewlib/verdicts.py owns bug confirmation/rejection rules. Untangle is not migrated in M2 (its work.py stays); M3 security is the second consumer that justifies any further extraction.",
+          "rationale": "Spec: share only mechanics a consumer demonstrates; explicit callable keeps audit domain-free and locally readable (no registry).",
+          "date": "2026-11-09"
         },
         {
           "id": "D3",
@@ -854,7 +860,10 @@
           "after": [
             "D1"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "FRAME payload: mode diff|subsystem|bug plus a ready plan, expected behavior, scope, budgets, allowed_commands, approved_by_user. diff: {base, head} where head is a git ref or 'worktree' (uncommitted tree); script resolves refs to SHAs (git rev-parse, read-only), computes merge-base, records changed paths (git diff --name-only), and scope = changed paths plus agent-named affected callers/consumers. subsystem: path specs (file, dir, file:start-end) parsed by _engine/audit/evidence.py (untangle keeps its own ledger.parse_spec; no extraction). bug: {symptom, expected, reproduction steps or 'none', reported version/ref}; scope = suspected paths, extendable at checkpoint. All modes fingerprint in-scope files at FRAME (recon.sources.file_hash). Non-git roots allow subsystem and bug only.",
+          "rationale": "One workflow, mode-specific scope preparation (spec); git reads only, never checkout in the target.",
+          "date": "2026-11-09"
         },
         {
           "id": "D4",
@@ -862,7 +871,10 @@
           "after": [
             "D2"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "Move untangle's mode-neutral recon helpers (pin, snapshot, fresh_refs, stale) into _engine/recon/pin.py taking a `need` error callable and a root; untangle/workflowlib/reconview.py keeps its scope-specific views (contracts inside/outside audit boundary) and calls pin.py. Review's RECON stage payload: recon_snapshot 'snap-N' (closed) or recon_none reason, identical to untangle MAP. Prompt includes recon guide.prompt and suggests map depth around the scope; deepen only for gaps an obligation needs. Untangle tests and exports must stay byte-identical.",
+          "rationale": "Pin logic now has two consumers; one owner prevents drift. Allowed by constraint when untangle stays unchanged.",
+          "date": "2026-11-09"
         },
         {
           "id": "D5",
@@ -870,7 +882,10 @@
           "after": [
             "D2"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "Obligation = {id, target (path spec, flow, or recon id), risk, check (catalog id), rationale, status, outcome?, evidence[]}. Check catalog = JSON packs in _engine/audit/checks/: general.json (compatibility, lifecycle/cleanup, concurrency, error propagation, resource bounds, input validation at boundary), tests.json (D9), python.json (async cancellation, subprocess, exception swallowing, mutable defaults, ORM transaction scope). Each check: id, pack, version, applies {languages[], boundaries[], modes[]}, evidence_required, falsifiers, validation_methods, limits. OBLIGATIONS gate: every obligation names a catalog check whose `applies` matches the target's language/boundary; total <= budget max_obligations (suggest 2x scope units, hard cap 200); each has rationale; script rejects duplicates (same target+check). Languages in scope without a pack become a recorded coverage gap (unsupported scope), never silently skipped. not-applicable requires reason.",
+          "rationale": "Agent selects relevant pairs with rationale under a hard cap, so no Cartesian product; catalog as data is shared with M3 and fits workflow-contract check_packs.",
+          "date": "2026-11-09"
         },
         {
           "id": "D6",
@@ -878,7 +893,10 @@
           "after": [
             "D5"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "HUNT `done` reports on one or more obligations from the queue head (max hunt_batch, default 5): each moves to examined (check performed + outcome + evidence), blocked (reason), deferred (reason) or not-applicable (reason), and may propose candidates linked to it. Candidates go to the VALIDATE queue; after the obligation queue empties or a batch ends with proposed candidates, next stage is VALIDATE; VALIDATE may spawn variant obligations (budget variant_obligations) which return to HUNT. Budgets (all finite, approved at FRAME): hunt_transitions, validate_transitions, attempts_per_candidate, variant_obligations, challenge_rounds, max_obligations. Spending any one routes to CHECKPOINT (extend with user approval, publish_incomplete, or reframe), like untangle.",
+          "rationale": "Batching keeps turns proportional; explicit counters guarantee termination.",
+          "date": "2026-11-09"
         },
         {
           "id": "D7",
@@ -887,7 +905,10 @@
             "D2",
             "D3"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "Candidate = {id, obligation, expected (contract/invariant text + recon id or evidence), actual, trigger, affected sources (evidence), counterevidence[], state, attempts[], verdict}. Terminal gates in reviewlib/verdicts.py: confirmed needs proof.kind = counterexample {command (approved), revision, exit, observed output digest+excerpt, repeatable: true} or source_argument {steps: ordered claims each with evidence, covering trigger -> fault -> observable effect; mitigations_checked: callers/guards examined with evidence}; rejected needs >=1 counterevidence ref (e.g. caller guard) with statement; duplicate needs duplicate_of an existing non-duplicate candidate; unresolved needs reason and attempts listing what was tried (tool failure lands here, never in counterevidence). Diff mode: confirmed also needs origin introduced|pre-existing|unknown; introduced/pre-existing require baseline evidence (file content at merge-base read via `git show <sha>:path`, hashed by the script, or a counterexample run at baseline in an isolated worktree); unknown requires reason. Severity (high|medium|low) and confidence are separate fields.",
+          "rationale": "Spec's confirmation rule made mechanical: script checks structure and hashes, agent supplies reasoning.",
+          "date": "2026-11-09"
         },
         {
           "id": "D8",
@@ -895,7 +916,10 @@
           "after": [
             "D3"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "allowed_commands approved at FRAME (default none = static analysis), each with exact argv string, purpose and declared side effects, extendable only at CHECKPOINT with approved_by_user. Every recorded run: {command, cwd kind: worktree|tempdir, base revision, env notes, exit, output sha256 + <=2000-char excerpt}; the gate rejects commands not in the list and cwd = target root. Prompt instructs `git worktree add <scratch> <sha>` (or copy to temp dir for non-git) and removal afterwards; the script never runs them. Drift guard: before VALIDATE->CHALLENGE and at REPORT the script re-fingerprints in-scope files; any change blocks a complete report (checkpoint 'drift'). Exit !=0 because of tooling (missing dep, timeout) is recorded as attempt outcome tool-failed -> candidate stays validating/unresolved.",
+          "rationale": "Same permission model as untangle; isolation enforced by recording + fingerprint check since the script cannot sandbox the agent.",
+          "date": "2026-11-09"
         },
         {
           "id": "D9",
@@ -904,7 +928,10 @@
             "D5",
             "D7"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "Test analysis is checks in tests.json applied as obligations: contract->test exists, assertion meaningful (asserts the contract, not incidental output), setup fidelity (mocks match real boundary), CI execution (test is collected and run by CI config, not skipped/xfail), negative/failure path, lifecycle/recovery, flaky markers. Outcomes are TestGap records {id, contract, chain_break: no-test|no-assertion|wrong-assertion|unrealistic-setup|not-in-ci|skipped|flaky, evidence, consequence}, stored separately from candidates and never counted as findings. A wrong-assertion test that also hides a real defect yields both a test gap and a separate candidate. Mutation testing allowed only as a validation attempt with `uncertainty` named, an approved command, and within attempts_per_candidate. Coverage numbers may be attached as evidence only.",
+          "rationale": "Spec: missing tests are gaps, not bugs; keeps one obligation mechanism.",
+          "date": "2026-11-09"
         },
         {
           "id": "D10",
@@ -913,7 +940,10 @@
             "D4",
             "D7"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "status/resume and the CHALLENGE/REPORT gates compare current hashes of every evidence path cited by obligations, candidates and test gaps (plus FRAME fingerprints). Items citing a changed/vanished file are reopened (obligation -> planned, candidate -> proposed with attempts kept, confirmed verdict cleared) and requeued; items without changed citations keep state. Stale recon citations (via _engine/recon/pin.stale) block a complete report and route to checkpoint 'recon stale'. In diff mode a moved head ref is drift: checkpoint offers reframe.",
+          "rationale": "Reopen exactly what cited changed evidence; same conservative rule as M1 D6.",
+          "date": "2026-11-09"
         },
         {
           "id": "D11",
@@ -923,7 +953,10 @@
             "D7",
             "D9"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "CHALLENGE: fresh reviewer subagent (or 'self', disclosed) given `show` output checks counterarguments, mitigations, affected versions and consequential omissions per confirmed and unresolved candidate; objections {target, verdict accepted|rejected, reason}; accepted ones reopen candidates/obligations within challenge_rounds. REPORT is rendered by reviewlib/report.py from journal state only (sorted keys/ids, no timestamps except the run's recorded ones) to <state>/review/<key>/<run>/report.md and printed: outcome complete|incomplete|cancelled; confirmed findings (severity, confidence, origin, proof); unresolved candidates; rejected with counterevidence (summary); test gaps; coverage table with counts per status and separate blocked/deferred/not-applicable/unsupported lists with reasons; recon gaps in scope; commands run; limitations (self-review, budgets spent). complete only when no planned/investigating obligations, no blocked/unresolved without listing, no drift, no stale recon; `abandon` after FRAME records cancelled. Reaching REPORT means report written, not full coverage.",
+          "rationale": "Spec stage table; deterministic rendering is testable by re-render and replay equality.",
+          "date": "2026-11-09"
         },
         {
           "id": "D12",
@@ -931,7 +964,10 @@
           "after": [
             "D1"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "No new remember tables in M2. remember's load_workflow already projects every <area>/<key>/events.sqlite3 run into workflow events/runs, so review runs are searchable. Revisit if M3 needs cross-workflow finding queries.",
+          "rationale": "Keep it simple; generic projection exists.",
+          "date": "2026-11-09"
         },
         {
           "id": "D13",
@@ -941,7 +977,10 @@
             "D9",
             "D10"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "tests/fixtures/review/shop: small Python package (cart.py, pricing.py, checkout.py, tests/) built into a temp git repo by the test with two commits (base, head). Seeds: (1) head changes pricing.round_cents rounding so checkout totals drift (cross-module regression, introduced); (2) pre-existing off-by-one in cart pagination present at base; (3) apparent None deref in pricing.discount neutralized because every caller validates (reject with caller counterevidence); (4) checkout.refund has no test but is correct (test gap no-test, no finding); (5) test_checkout asserts the formatted string, not the total (wrong-assertion test gap). expected-classification.json lists each. Automated unittest (skills/review/tests): scripted payload runs for all three modes, every refusal in the criteria, budget exhaustion -> checkpoint -> publish_incomplete, drift reopen exactness, deterministic report (render twice and after journal replay), recon pin/none, _engine/audit unit tests, recon/pin refactor keeps untangle tests green, bundle guard + manifest schema test. Agent-driven: fresh agent runs /handtools:review in diff mode on the fixture from prompts alone; results vs expected written to .agents/artifacts/v011-m2-report.md with false positives, unresolved cases and cost (also closes M1's open independent-agent evaluation if run on recon fixture).",
+          "rationale": "Mechanics tested deterministically; workflow quality evaluated against explicit expectations, as in M1 D11.",
+          "date": "2026-11-09"
         },
         {
           "id": "D14",
@@ -949,7 +988,102 @@
           "after": [
             "D13"
           ],
-          "status": "open"
+          "status": "resolved",
+          "answer": "Branch v011-m2-review from current HEAD. Slices, each with tests and all README test commands green: S0 fixture + expected classification + review manifest fixture (workflow-contract check_packs field made concrete). S1 _engine/audit (obligations, candidates, evidence, budgets) + check packs + catalog loader/validator. S2 _engine/recon/pin.py extraction; untangle switched, tests/exports unchanged. S3 review skeleton: SKILL.md, launcher, FRAME (modes, git baseline, fingerprints, commands) + RECON. S4 OBLIGATIONS + HUNT + budgets/checkpoint. S5 VALIDATE + verdicts + test gaps. S6 drift/resume. S7 CHALLENGE + REPORT + abandon-cancelled. S8 bundle guards, README/skill table, plugin description, CHANGELOG (extend unreleased 0.1.1 entry with M2), agent-driven evaluation report. VERSION stays 0.1.1: the spec releases 0.1.1 after all four milestone gates, matching M1 commits that did not bump.",
+          "rationale": "Library first, consumer after; one release per spec. Note: overrides the global per-commit bump; user can override.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D15",
+          "question": "Who assigns obligation/candidate/test-gap ids and how big may payloads be?",
+          "after": [
+            "D5",
+            "D7"
+          ],
+          "answer": "Agent supplies ids matching O<n>, C<n>, T<n>; the script rejects reuse within the run (ids are never recycled, even after reopen). Trust-boundary caps: obligations 200 per run, candidates 100, test gaps 100, records per payload 50, statements 500 chars, output excerpts 2000 chars; payloads must be JSON objects. Dedup is within one run only.",
+          "rationale": "Same convention as untangle U#/F# ids and recon D13 caps.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D16",
+          "question": "How does evidence cite a non-working-tree revision (baseline at merge-base)?",
+          "after": [
+            "D7"
+          ],
+          "answer": "_engine/audit evidence refs add optional `revision`: absent = working tree (hashed with recon.sources.file_hash); a commit SHA = content of `git show <sha>:<path>`, read and hashed by the script. Recon's evidence shape is not changed. Drift checks only rehash working-tree refs; commit refs are immutable.",
+          "rationale": "Baseline evidence must be verifiable without checking out the target.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D17",
+          "question": "How do HUNT and VALIDATE interleave, and how many candidates does one VALIDATE step handle?",
+          "after": [
+            "D6"
+          ],
+          "answer": "HUNT -> VALIDATE when a batch proposes candidates or the obligation queue is empty with candidates open; VALIDATE handles up to validate_batch (default 3) candidates per done, each gaining an attempt or a terminal verdict (with verdict gate). VALIDATE -> HUNT when no open candidates remain and obligations are planned (including variants); -> CHALLENGE when both queues are empty. Counters per D6 force CHECKPOINT.",
+          "rationale": "Deterministic transition rule; two implementers would otherwise differ on ordering.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D18",
+          "question": "What does bug mode's report state about the reported symptom?",
+          "after": [
+            "D3",
+            "D7"
+          ],
+          "answer": "In bug mode a confirmed candidate may set explains_report: true (needs a counterexample reproducing the reported symptom or a source argument whose last step is the symptom). REPORT states 'symptom explained by C#' or 'symptom not explained' with what was tried; an unexplained symptom makes the outcome incomplete.",
+          "rationale": "Reported-bug investigation succeeds only when the reported behavior is accounted for.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D19",
+          "question": "How does `abandon` record a cancelled outcome when flow.abandon deletes state?",
+          "after": [
+            "D11"
+          ],
+          "answer": "Add an optional `steps.on_abandon(state, root)` hook to _engine/flow.abandon, called under the lock before deletion; review uses it to write report.md with outcome cancelled (stages reached, items covered so far). Skills without the hook behave as today; engine tests cover both.",
+          "rationale": "Smallest engine change; keeps cancelled distinct from success per spec.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D20",
+          "question": "What derived views does review write besides report.md, and how do prompts show state?",
+          "after": [
+            "D1",
+            "D11"
+          ],
+          "answer": "No current.md/audit.json equivalents. Each printed step opens with a state summary rendered from the journal (like untangle's _at), `show [part]` prints JSON parts (frame, recon, obligations, candidates, test_gaps, commands, objections, coverage). report.md is the only file written, under <state>/review/<key>/<run-id>/ with run-id review-YYYYmmdd-HHMMSS.",
+          "rationale": "M1 moved untangle toward journal-rendered prompts; no new maintained artifacts.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D21",
+          "question": "How are language and boundary applicability determined, and how does check_packs appear in the workflow contract?",
+          "after": [
+            "D5"
+          ],
+          "answer": "_engine/audit/checks.py loads packs, validates them, and maps file extensions to languages (python only for code checks in M2; tests/general apply to any). Obligations declare `boundary` from a fixed vocabulary (http, queue, schedule, db, file, subprocess, config, cli, library, test) matching recon contract kinds where they overlap; the gate checks the check's applies.languages/boundaries/modes. In-scope files whose language has no pack produce one unsupported-scope coverage item per language. workflow-contract.schema.json: check_packs becomes [{name, version}] plus unsupported: report-gap; review.json fixture lists general@1, tests@1, python@1.",
+          "rationale": "Fixture-backed support matrix per spec; vocabulary aligned with recon.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D22",
+          "question": "What do CHECKPOINT decisions do, especially reframe, and what is an examined obligation's outcome vocabulary?",
+          "after": [
+            "D6",
+            "D10"
+          ],
+          "answer": "CHECKPOINT payload decision: extend (approved_by_user; raises named budgets and/or adds allowed_commands or scope paths; resumes the interrupted stage), reframe (back to FRAME with prior obligations/candidates/test gaps kept; new FRAME re-fingerprints and D10 reopen applies; recon stays pinned unless changed at RECON), publish_incomplete (REPORT with outcome incomplete and the checkpoint reason). Examined outcome = {performed: text, result: no-issue|candidates|test-gaps, refs: [C#/T#]}; result must agree with refs.",
+          "rationale": "Mirrors untangle's checkpoint (extend/reinventory/publish_incomplete) with review's frame in place of inventory.",
+          "status": "resolved",
+          "date": "2026-11-09"
         }
       ]
     }
