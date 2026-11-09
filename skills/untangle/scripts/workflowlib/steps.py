@@ -55,9 +55,9 @@ PROMPTS = {
     'dissect': (
         f'{_CURRENT} It names the item, its ranges, the rev, and the policy files to apply.\n'
         'Policy, where the first source that answers wins: 1) requirements and adopted decisions; '
-        '2) project conventions that fit the goal (listed in current.md); 3) references/defaults.md under the '
-        'Policy path in current.md; 4) the relevant reference there (references/contract.md, '
-        'languages/<lang>.md, references/instructions.md); 5) the simplest '
+        '2) project conventions that fit the goal (listed in current.md); 3) defaults.md under the '
+        'Policy path in current.md; 4) the relevant reference there (contract.md, '
+        'languages/<lang>.md, instructions.md); 5) the simplest '
         'adequate choice. A project convention beats a conflicting default; cite the convention.\n'
         'Unit: read every line of its ranges and look for avoidable complexity the policy names, and for '
         'missing characterization tests. If a unit is too big for one careful pass or holds two responsibilities, '

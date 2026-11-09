@@ -60,7 +60,7 @@ code.
 ## The decision record is the ADR log
 
 `decisions.json` is the project's architecture decision record, shared with
-the foundation skill. [`references/decisions.schema.json`](references/decisions.schema.json)
+the foundation skill. [`../_engine/policy/decisions.schema.json`](../_engine/policy/decisions.schema.json)
 is its one definition: each goal is the decision context (goal, constraints,
 criteria) and each decision row is one ADR (question, answer, rationale,
 `after`, `date`, `superseded_by`). Status is derived: `open`, `resolved`, or
@@ -90,7 +90,7 @@ Each `start` adds a short session ID and keeps every earlier session. Use
 `status --session s1` to show one. `done --session s1` advances it, reading
 that step's edits as JSON on stdin;
 `abandon --session s1` closes a stale run. Completed and abandoned sessions
-stay in `workflow.json` for review.
+stay in `events.sqlite3` for review.
 
 ## Settings
 
@@ -101,19 +101,18 @@ metadata:
   max-challenges: 3   # challenge rounds per session; default 3
 ```
 
-At the limit the session closes; gaps the last challenge leaves open get one
-final decide, and anything still open is listed in the summary.
+At the limit, unresolved questions block completion with `needs_input`. Resolve them or abandon the run.
 
 ## Files it writes
 
 All owned by the script; the agent edits them only through `done`.
 
 - `<project>/.agents/design/decisions.json`: the decision record (ADR log), one set per goal. Commit it.
-- `~/.agents/state/decisions/<project key>/workflow.json`: permanent `{version, sessions[]}` registry, per user.
+- `~/.agents/state/decisions/<project key>/events.sqlite3`: permanent `{version, sessions[]}` registry, per user.
 - `~/.agents/state/decisions/<project key>/workflow.lock`: short-lived lock directory around writes.
 
 `$HANDTOOLS_STATE` replaces `~/.agents/state`. The project key is `<folder name>-<8-hex hash of its path>`;
-`project.json` beside it names the project. After moving a repo, move its key folder by hand.
+The resolved project path remains part of the run state. After moving a repo, move its key folder by hand.
 
 ## What's inside
 
@@ -121,12 +120,12 @@ All owned by the script; the agent edits them only through `done`.
 |---|---|
 | `SKILL.md` | How to run the loop |
 | `scripts/designflow.py` | Command line: arguments, stdin payload, printed commands |
-| `scripts/designlib/` | Loop internals: `flow` (phases, `record`, `show`), `steps` (prompts, output), `sessions` (`workflow.json`), `record` (`decisions.json`), `storage` (paths, lock), `gitcheck` (is the record committed), `config` (`SKILL.md` settings) |
-| `references/decisions.schema.json` | The ADR definition: shape of `decisions.json` |
-| `references/defaults.md` | Defaults every run starts from |
-| `references/contract.md` | Ownership, dependencies, state, failures, tradeoffs |
-| `references/instructions.md` | Semantic instructions: designing skills, prompts, `AGENTS.md` |
-| `languages/*.md` | TypeScript, JavaScript, Python, Go, Rust, Java, C#, C, C++, SQL |
+| `scripts/designlib/` | Loop internals: `flow` (phases, `record`, `show`), `steps` (prompts, output), `sessions` (`events.sqlite3`), `record` (`decisions.json`), `storage` (paths, lock), `gitcheck` (is the record committed), `config` (`SKILL.md` settings) |
+| `../_engine/policy/decisions.schema.json` | The ADR definition: shape of `decisions.json` |
+| `../_engine/policy/defaults.md` | Defaults every run starts from |
+| `../_engine/policy/contract.md` | Ownership, dependencies, state, failures, tradeoffs |
+| `../_engine/policy/instructions.md` | Semantic instructions: designing skills, prompts, `AGENTS.md` |
+| `../_engine/policy/languages/*.md` | TypeScript, JavaScript, Python, Go, Rust, Java, C#, C, C++, SQL |
 
 Profile rules are tagged **Requirement**, **Default**, or **Heuristic**.
 
@@ -136,7 +135,7 @@ The skill stops at decisions. It doesn't write, review, or test code.
 
 - [Skill entrypoint](SKILL.md)
 - [Loop script](scripts/designflow.py)
-- [Defaults](references/defaults.md)
-- [Contract](references/contract.md)
-- [Language profiles](languages/)
+- [Defaults](../_engine/policy/defaults.md)
+- [Contract](../_engine/policy/contract.md)
+- [Language profiles](../_engine/policy/languages/)
 - [Changelog](../../CHANGELOG.md)

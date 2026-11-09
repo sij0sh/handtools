@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+from _engine import planning
+
 from .config import REFS, REVIEW_LIMIT
 from .sessions import work_dir
 
@@ -31,8 +33,8 @@ def ref(name):
 
 
 def plan(s):
-    """The skill's shape for prompts: saved prompt, or the staged design artifact."""
-    return 'Kind: saved prompt' if s['kind'] == 'prompt' else f'Design: {s["design"]["artifact"]}'
+    """The skill's shape for prompts: saved prompt, or the event-backed design view."""
+    return 'Kind: saved prompt' if s['kind'] == 'prompt' else 'Design: ' + json.dumps(s['design'], sort_keys=True)
 
 
 def header(s):
@@ -44,11 +46,12 @@ def ground_prompt(root, s):
     return ('Agree with the user on the skill: purpose, trigger, gap (what the agent does without the skill and '
             'where that fails), and a pass condition observable in its output. '
             "Revise: read the existing skill at the target first; infer them, gap = the existing skill's shortfall. "
-            f'Choose `kind` per {ref("execution.md")} section 1: `prompt` (saved prompt) or `staged` (default); '
+            f'Choose `kind` per {ref("execution.md")} section 1: `prompt` (saved prompt) or `staged` only when orchestration criteria require it; '
             'revise: tell the user when it changes the existing kind. If the user gave the prompt wording, send it '
             'as `wording`; it is used verbatim. Done when the user agrees; send `confirmed: true`.',
             {'mode': 'new|revise', 'kind': 'staged|prompt', 'target': 'skills/release-notes', 'purpose': '...',
-             'trigger': '...', 'gap': '...', 'pass_condition': '...', 'wording': '(optional)', 'confirmed': True})
+             'trigger': '...', 'gap': '...', 'pass_condition': '...', 'wording': '(optional)', 'confirmed': True, 'plan': {'goal': '...', 'constraints': [], 'criteria': ['observable result'],
+             'decisions': [], 'blocking': [], 'verification': '...', 'challenged': True}})
 
 
 def design_prompt(root, s):
@@ -74,12 +77,12 @@ def draft_prompt(root, s):
     d = s['design']
     order = [st['name'] for st in d['stages']]
     engine = (f"The engine is in scripts/ with MODE = '{d['model']}' and AREA = '{name}'. Edit only scripts/steps.py (scripts/_engine/ is a vendored copy; never edit it): "
-              f'ORDER = {order}, PROMPTS, CHECKS, advance. SKILL.md body:\n\n{RUN_STEPS[d["model"]]}')
+              f'PLANNING = True, ORDER = {order}, PROMPTS, CHECKS, advance. The first step takes a shared plan payload; the engine enforces readiness. SKILL.md body:\n\n{RUN_STEPS[d["model"]]}')
     return (f'{header(s)}\n{plan(s)}\n\nWrite only what closes the gap, in {draft}, per the design '
             f'and {ref("instructions.md")}: frontmatter `name: {name}`, a one-line `description`, '
-            f'and `disable-model-invocation: true` unless clearly model-invoked; name '
+            f'and `disable-model-invocation: true`; name '
             f'every references/ leaf in SKILL.md or scripts/. Cite shared design rules from '
-            f'`S/../simple-by-design/` (defaults, contracts, instructions, languages, decision schema) instead of '
+            f'the packaged `_engine/policy/` resources instead of '
             f'copying them; the script writes agents/openai.yaml from the frontmatter. {engine}\n\nDone when `done` passes the shape check.', {})
 
 
@@ -104,18 +107,29 @@ def review_prompt(root, s):
             f'1. Give a fresh subagent this task: "{review_task(root, s)}" Without subagents, answer it yourself.\n'
             f'2. Check each finding against the pass condition{against}. '
             f'Apply the findings that hold to the draft; reject the rest.{verbatim} Tell the user about design flaws; '
-            'review cannot change the kind or design (`abandon` and restart to redesign).\n'
+            'to revise the design, send replan=true and a ready plan; the run preserves history and invalidates affected acceptance.\n'
             '3. Show the user the draft. Record edits they ask for as applied findings. '
-            '`confirmed: true` writes the draft to the target; otherwise applied findings start the next loop.',
+            '`confirmed: true` accepts this draft and enters APPLY; otherwise applied findings start the next loop.',
             {'findings': [{'file': 'SKILL.md:3', 'finding': '...', 'action': 'applied|rejected', 'why': '...'}],
              'none_found': False, 'confirmed': True})
 
 
-PROMPTS = {'ground': ground_prompt, 'design': design_prompt, 'draft': draft_prompt, 'review': review_prompt}
+def apply_prompt(root, s):
+    return ('Apply the accepted draft. The engine records durable intent, checks the target baseline and verifies bytes. '
+            'If interrupted, inspect target/backup; retry with recover=retry only after reconciling partial writes.', {})
+
+
+def verify_prompt(root, s):
+    return ('Verify the installed target against the accepted draft and close. Report failed/skipped checks.', {})
+
+
+PROMPTS = {'apply': apply_prompt, 'verify': verify_prompt, 'ground': ground_prompt, 'design': design_prompt, 'draft': draft_prompt, 'review': review_prompt}
 
 
 def render(root, s, launcher):
     text, example = PROMPTS[s['phase']](root, s)
+    if s['phase'] in ('ground', 'design'):
+        text += '\n\n' + planning.prompt()
     return '\n'.join([
         f'SESSION: {s["id"]}',
         f'PHASE: {s["phase"].upper()}',
@@ -124,7 +138,7 @@ def render(root, s, launcher):
         'Payload (JSON on stdin), for example:',
         json.dumps(example),
         '',
-        f"Then run: {launcher} done --session {s['id']} <<'EOF'",
+        f"Then run: {launcher} done --session {s['id']} --expect-revision {s.get('revision', 0)} --request-id {s['id']}-r{s.get('revision', 0)} <<'EOF'",
         '<payload>',
         'EOF',
         '(Windows: pipe a JSON file into the same command.)',
@@ -140,8 +154,8 @@ def summary(root, s):
     if s.get('design'):
         d = s['design']
         lines.append(f'Model: {d["model"]}{", router" if d["router"] else ""}. '
-                     f'Criteria: {", ".join(d.get("criteria", [])) or "none"}. Design: {d["artifact"]}')
-    lines += [f'- review {r["n"]}: {r.get("applied", 0)}/{r["findings"]} findings applied. {r["artifact"]}'
+                     f'Criteria: {", ".join(d.get("criteria", [])) or "none"}. Plan revision: {s.get("plan_revision", 1)}')
+    lines += [f'- review {r["n"]}: {r.get("applied", 0)}/{r["findings"]} findings applied. (findings available in session history)'
               for r in s.get('reviews', [])]
     if s.get('status') == 'complete':
         lines.append(f'Written to {s["target"]}.')

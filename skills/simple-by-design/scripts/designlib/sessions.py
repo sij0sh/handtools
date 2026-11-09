@@ -97,15 +97,15 @@ def base(root):
 
 def load(root, allow_missing=False, persist_migration=False):
     path = registry.path(config.AREA, root)
-    if not path.exists():
+    if not storage.has_state(path):
         if allow_missing:
             return registry.empty()
         raise ValueError('No workflow found. Run `start`.')
-    raw = storage.read_json(path)
+    raw = storage.read_state(path)
     state = _normalize(root, raw)
     if persist_migration and isinstance(raw, dict) and 'sessions' not in raw:
         with storage.lock(base(root)):
-            state = _normalize(root, storage.read_json(path))
+            state = _normalize(root, storage.read_state(path))
             save(root, state)
     return state
 

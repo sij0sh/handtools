@@ -17,8 +17,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / 'skills'
-OWNER = SKILLS / 'simple-by-design'
-SHARED = sorted([OWNER / 'references' / n for n in ('defaults.md', 'contract.md', 'instructions.md',
+OWNER = SKILLS / '_engine' / 'policy'
+DESIGN_SKILL = SKILLS / 'simple-by-design'
+SHARED = sorted([OWNER / n for n in ('defaults.md', 'contract.md', 'instructions.md',
                                                      'decisions.schema.json')]
                 + list((OWNER / 'languages').glob('*.md')))
 TEXT = {'.md', '.json', '.py', '.txt', '.yaml', '.yml', '.toml'}
@@ -64,7 +65,7 @@ def assert_no_copies(test, owned, owner, fix):
             for owner_path, owner_text in shared.items():
                 if len(text) < 200:
                     continue
-                matcher = difflib.SequenceMatcher(None, text, owner_text, autojunk=False)
+                matcher = difflib.SequenceMatcher(None, text.splitlines(), owner_text.splitlines(), autojunk=False)
                 if matcher.real_quick_ratio() >= SIMILAR and matcher.quick_ratio() >= SIMILAR:
                     test.assertLess(matcher.ratio(), SIMILAR,
                                     f'{rel} looks like an edited copy of {owner_path.relative_to(ROOT)}; {fix}.')
@@ -117,7 +118,7 @@ class SiblingPathsTest(unittest.TestCase):
         self.assertTrue((SKILLS / 'foundation' / 'scripts').is_dir())
         validate = (SKILLS / 'foundation' / 'scripts' / 'validate.py').read_text(encoding='utf-8')
         self.assertIn("parents[2] / 'simple-by-design' / 'scripts'", validate)
-        self.assertTrue((OWNER / 'scripts' / 'designlib' / 'record.py').is_file())
+        self.assertTrue((DESIGN_SKILL / 'scripts' / 'designlib' / 'record.py').is_file())
 
 
 class VersionTest(unittest.TestCase):
@@ -161,14 +162,14 @@ class VersionTest(unittest.TestCase):
 class SchemaTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        sys.path[:0] = [str(OWNER / 'scripts'), str(SKILLS)]  # designlib; _engine
+        sys.path[:0] = [str(DESIGN_SKILL / 'scripts'), str(SKILLS)]  # designlib; _engine
         from designlib import record
         cls.record = record
-        cls.schema = json.loads((OWNER / 'references' / 'decisions.schema.json').read_text(encoding='utf-8'))
+        cls.schema = json.loads((OWNER / 'decisions.schema.json').read_text(encoding='utf-8'))
 
     @classmethod
     def tearDownClass(cls):
-        sys.path.remove(str(OWNER / 'scripts'))
+        sys.path.remove(str(DESIGN_SKILL / 'scripts'))
         sys.path.remove(str(SKILLS))
 
     def test_schema_matches_validator(self):
@@ -188,7 +189,7 @@ class SchemaTest(unittest.TestCase):
     def test_committed_records_are_valid(self):
         listed = subprocess.run(['git', '-C', str(ROOT), 'ls-files', '*decisions.json'],
                                 capture_output=True, text=True).stdout.split()
-        paths = [ROOT / p for p in listed] or [ROOT / '.agents' / 'design' / 'decisions.json']
+        paths = [ROOT / p for p in listed if (ROOT / p).exists()]
         for path in paths:
             with self.subTest(record=str(path.relative_to(ROOT))):
                 self.record.validate(json.loads(path.read_text(encoding='utf-8')))

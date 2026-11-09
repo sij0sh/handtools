@@ -74,7 +74,7 @@ def render_report(state, complete, reasons):
     head = 'COMPLETE (static assessment of the approved scope)' if complete else 'INCOMPLETE: ' + '; '.join(reasons)
     out = [f'# Untangle audit {state["audit_id"]}', '', f'Status: **{head}**',
            f'Snapshot: `{state["root"]}`, validated {time.strftime("%Y-%m-%d %H:%M:%S %Z")}; state rev '
-           f'{state["rev"]}', f'Policy: simple-by-design from handtools {state["policy"].get("version")} at `{policy_root()}`',
+           f'{state["rev"]}', f'Policy: shared handtools policy {state["policy"].get("version")} at `{policy_root()}`',
            f'Reviewer: {state.get("reviewer", "none")}' + (' (self-review, not independent)'
                                                            if state.get('reviewer') == 'self' else ''),
            '', '## Coverage', '',

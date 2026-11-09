@@ -7,7 +7,7 @@ Logic lives in designlib/; this file owns the command line only.
 
 Files, all owned by this script:
   <root>/.agents/design/decisions.json  the project's decision record (ADR log), one set per goal; commit it
-  ~/.agents/state/decisions/<project key>/workflow.json  permanent session registry (per user)
+  ~/.agents/state/decisions/<project key>/events.sqlite3  permanent session registry (per user)
   ~/.agents/state/decisions/<project key>/workflow.lock  short-lived lock directory around writes
   ($HANDTOOLS_STATE replaces ~/.agents/state.)
 """

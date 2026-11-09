@@ -44,51 +44,78 @@ Test edits without pushing:
 - pi: `pi install /abs/path/to/handtools` (a local path is live)
 - Codex: `codex plugin marketplace add /abs/path/to/handtools` (Codex caches a copy; run `codex plugin marketplace upgrade` after edits)
 
-## Shared rules: one owner
+## Shared planning and policy
 
-simple-by-design owns every rule other skills use. Nothing is copied:
+`skills/_engine/` is a Python package, not an invokable skill. It owns the shared planning
+contract (`planning.py`) and `policy/`: defaults, contracts, instruction design, language rules
+and the ADR schema. Workflow skills use these directly; they never invoke simple-by-design.
+The four workflow skills remain user-invoked only. Remember remains a read-only memory tool.
 
-- `skills/simple-by-design/references/defaults.md`, `contract.md`, `instructions.md`, and `languages/*.md`: the design rules untangle applies.
-- `skills/simple-by-design/references/decisions.schema.json`: the one ADR definition. A project's ADR log is its committed `.agents/design/decisions.json`, written only by `designflow.py` (`record` for other skills, `show` to read).
+Planning grounds the goal and acceptance criteria, resolves material decisions, challenges gaps,
+and checks readiness. No-choice plans are valid; blocking unknowns cannot pass readiness.
+Generated staged skills enable `PLANNING = True`; the engine enforces readiness before work.
 
-A skill reaches them at `S/../simple-by-design/`, where `S` is the skill's own directory.
+## State and recovery
 
-## Where skills keep state
-
-The ADR log is committed in each project (`.agents/design/decisions.json`). Everything else a skill saves
-between steps is per user, outside both the project and the installed skill (a plugin update replaces the
-skill's folder):
+The authoritative resumable state is a script-owned SQLite event journal under:
 
 ```text
-~/.agents/state/                     # $HANDTOOLS_STATE overrides; %USERPROFILE%\.agents\state on Windows
-  decisions/<project key>/           # simple-by-design sessions (workflow.json), foundation.json
-  untangle/<project key>/            # run state and <audit-id>/{current.md, audit.json, report.md}
-  build-skills/<project key>/        # sessions, drafts, backups
-  <skill>/<project key>/             # any skill built from build-skills' workflow template
+~/.agents/state/<area>/<project-key>/events.sqlite3
 ```
 
-The project key is `<folder name>-<8-hex hash of its absolute path>`, and each key folder has a
-`project.json` naming its project. Moving a repo leaves its state behind; `mv` the key folder to follow it.
-Each skill names its folder in one `AREA` constant; `skills/_engine/storage.py` owns the layout.
+`HANDTOOLS_STATE` overrides the root. The existing path-based project key is retained for compatibility;
+use explicit `--root` consistently. Moving a checkout still requires moving its state directory.
+A journal stream's `state.changed` events contain validated stage state, not independently edited JSON.
+Read-only status does not append events. Legacy workflow JSON is read until the first mutation imports
+it and retains a `.migrated` backup. Old binaries must not be used after migration; edits to old JSON
+are never merged back. Legacy build-skills runs without a ready plan cannot advance: preserve drafts/backups, abandon, and restart from the current target. There is one authority per stream, with deterministic replay.
 
-## One workflow engine
+Project ADRs remain committed in `.agents/design/decisions.json` for team portability. Untangle's
+`current.md`, `audit.json`, and final `report.md` are generated views. Drafts, backups and accepted
+application bytes remain files because recovery needs their contents. Never edit generated views as
+workflow state. Build-skills keeps design and review data inside its journal; status renders them.
 
-`skills/_engine/` is the one implementation of what the workflow skills share. It is a Python package, not a
-skill (no `SKILL.md`):
+Build-skills runs ground → design (staged output) → draft → review → apply → verify. Ground includes
+a proportional ready plan even for prompt outputs. Review can send `replan: true` with a new ready
+`plan` to revise the design within the same run. Accepted drafts are hashed; apply commits intent
+before writing, checks target drift, then verifies installed bytes. Interrupted application remains
+pending until reconciled. A retry requires the same accepted draft and unchanged pre/postimage bytes.
+No live install is performed just by generating a skill.
 
-| Module | Owns | Used by |
-|---|---|---|
-| `storage` | state root, project root and key, state dirs, atomic JSON, lock | all four |
-| `cli` | quoting, the printed rerun command, the stdin payload, error printing | all four |
-| `flow` | single-run `start`/`status`/`done`/`abandon`, given the skill's `steps` module | foundation, untangle, template |
-| `sessions` | the multi-session registry (`s1`, `s2`, ...) | simple-by-design, build-skills |
+## Event commands and transcript pilot
 
-A skill keeps only its own steps (prompts, checks, `advance`) and a thin launcher. The launcher walks up from
-its own path to the first folder holding `_engine/`, so the same `from _engine import ...` works inside
-handtools and in a skill build-skills generated elsewhere, which gets a vendored `scripts/_engine/` copy
-refreshed on every revision. A new workflow skill inside handtools starts from
-`skills/build-skills/templates/workflow/scripts/` (`workflow.py` + `steps.py`). `tests/test_bundle.py` fails if
-an engine module is copied or edited into a skill, or a launcher stops resolving `skills/_engine/`.
+From the bundle root, use `python3 skills/_engine/engine.py --help`.
+Explicit journal runs support start/append/status/history, expected revisions, retry IDs and a read-only
+SQL query over `workflow_events`. Existing workflow CLIs use journal-backed state automatically.
+Remember exposes `workflow_events`, `workflow_runs`, `workflow_decisions`, and `workflow_authorizations` through its usual read-only query interface.
+
+A minimal explicit event run:
+
+```bash
+python3 skills/_engine/engine.py start --run example --expect-revision 0 --request-id example-start <<'JSON'
+{"goal":"Explore a design"}
+JSON
+python3 skills/_engine/engine.py history --run example
+python3 skills/_engine/engine.py query --sql 'SELECT run_id, revision, kind FROM workflow_events'
+```
+
+For a plan-only capture experiment, add `--backend transcript` before the command. Start emits a JSON
+receipt without storing state. Provide every source using `--recording PATH` before status/append.
+Append requires both `--expect-revision` and `--head` (the previous receipt's event ID), plus a stable
+request ID. The exact reader supports direct engine command results in Codex, Claude Code and pi JSONL;
+it includes explicitly selected current sessions. Examples in assistant prose are ignored. Invalid,
+missing or conflicting chains fail. Status reports an **observed prefix**, not guaranteed durability.
+The pilot has synthetic capture tests; live harness retention/flush guarantees are not established.
+It is not the backend for filesystem application. Do not silently switch an existing run's backend.
+
+## Runtime distribution
+
+In-bundle skills share `_engine`. Generated external workflow skills receive one pinned copy under
+`scripts/_engine/`, including planning policy and schema resources. The generator refreshes launcher
+and runtime together; domain steps remain authored in `scripts/steps.py`. Generated prompt skills
+remain prompt-only. Run model (`stateful`/resumable vs `stateless`/ephemeral) is independent of output
+kind; resumable currently selects the journal, ephemeral writes no state. No sibling skill install is
+required. Reject unsupported runtime versions rather than guessing a migration.
 
 ## Release
 

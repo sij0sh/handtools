@@ -1,5 +1,6 @@
 """Inspect, copy, hash, overlay, and check one skill directory."""
 import ast
+import json
 import hashlib
 import os
 import re
@@ -38,7 +39,7 @@ def tree_hash(skill):
     for path in skill_files(skill):
         digest.update(path.relative_to(skill).as_posix().encode('utf-8') + b'\0')
         digest.update(path.read_bytes() + b'\0')
-    return digest.hexdigest()[:12]
+    return digest.hexdigest()
 
 
 def leaves(skill):
@@ -99,6 +100,8 @@ def install_engine(skill, model):
     steps = scripts / 'steps.py'
     if not steps.is_file():
         shutil.copytree(TEMPLATE, scripts, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    # Launcher is part of the versioned runtime, never leave an obsolete CLI behind.
+    shutil.copy2(TEMPLATE / 'workflow.py', scripts / 'workflow.py')
     if (scripts / '_engine').exists():
         shutil.rmtree(scripts / '_engine')
     shutil.copytree(ENGINE, scripts / '_engine', ignore=shutil.ignore_patterns('tests', '__pycache__', '*.pyc'))
@@ -106,10 +109,13 @@ def install_engine(skill, model):
     text = re.sub(r"^MODE\s*=\s*['\"]\w+['\"]", f"MODE = '{model}'", text, count=1, flags=re.M)
     text = re.sub(r"^AREA\s*=\s*['\"][\w.-]+['\"]", f"AREA = '{skill.name}'", text, count=1, flags=re.M)
     steps.write_text(text, encoding='utf-8')
+    (scripts / '_engine' / 'distribution.json').write_text(json.dumps({'engine_api': 1, 'event_schema': 1, 'policy': 1, 'backend': 'journal' if model == 'stateful' else 'none'}) + '\n')
 
 
 def check_files(skill):
     """Structural gates: frontmatter name, description, invocation; every leaf named in SKILL.md or scripts/."""
+    if any(p.is_symlink() for p in skill.rglob('*')):
+        raise ValueError('skill must not contain symlinks')
     meta, _ = split_skill(skill)
     if meta.get('name') != skill.name:
         raise ValueError(f'{skill}: frontmatter `name` must be `{skill.name}`.')
@@ -176,6 +182,11 @@ def check_model(skill, model, router, stages=()):
         if steps.is_file() else None
     if not found or found.group(1) != model:
         raise ValueError(f'{skill}: {model} model needs scripts/steps.py with MODE = \'{model}\'.')
+    meta, _ = split_skill(skill)
+    if meta.get('disable-model-invocation') != 'true':
+        raise ValueError('workflow skills are user-invoked only')
+    if not re.search(r'^PLANNING\s*=\s*True\b', steps.read_text(), re.M):
+        raise ValueError('workflow needs PLANNING = True for shared readiness enforcement')
     order = engine_order(steps)
     if stages and order != list(stages):
         raise ValueError(f'{skill}: steps.py ORDER {order} must match design stages {list(stages)}.')

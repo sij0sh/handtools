@@ -24,6 +24,17 @@ SESSION_COLUMNS = {name: "TEXT" for name in (
 SESSION_COLUMNS.update({name: "INTEGER" for name in ("events", "user_messages", "tool_calls", "failed_calls",
                                                        "repo_paths")})
 CATALOG = {
+    "workflow_decisions": Table({"run_id":"TEXT", "session_id":"TEXT", "decision_id":"TEXT", "question":"TEXT",
+                                 "answer":"TEXT", "status":"TEXT", "source_ref":"TEXT"},
+                                "workflow", "one explicit recorded plan or project ADR decision"),
+    "workflow_authorizations": Table({"run_id":"TEXT", "session_id":"TEXT", "plan_revision":"INTEGER",
+                                      "draft_hash":"TEXT", "user_ref":"TEXT", "source":"TEXT", "source_ref":"TEXT"},
+                                     "workflow", "one reported authorization; not proof of user consent"),
+    "workflow_events": Table({"run_id": "TEXT", "revision": "INTEGER", "event_id": "TEXT",
+                              "kind": "TEXT", "payload": "TEXT", "source_ref": "TEXT"},
+                             "workflow", "one committed workflow event", ("source_ref",)),
+    "workflow_runs": Table({"run_id": "TEXT", "revision": "INTEGER", "state": "TEXT", "source_ref": "TEXT"},
+                           "workflow", "one exact journal stream head", ("source_ref",)),
     "nodes": Table(TABLES["nodes"], "graph", "one source node", ("id",)),
     "edges": Table(TABLES["edges"], "graph", "one typed relationship", ("id",)),
     "gaps": Table(TABLES["gaps"], "graph", "one unresolved occurrence"),
@@ -53,7 +64,7 @@ CATALOG = {
     "checkpoints": Table(operation_facts.CHECKPOINT_COLUMNS, "checkpoints", operation_facts.CHECKPOINT_GRAIN,
                          ("checkpoint_id",), "transient"),
 }
-DEPENDENCIES = {"graph": (), "recordings": (), "git": (), "links": ("recordings",),
+DEPENDENCIES = {"workflow": (), "graph": (), "recordings": (), "git": (), "links": ("recordings",),
                 "edits": ("recordings", "graph"), "operations": ("recordings",),
                 "checkpoints": ("recordings",), "segments": ("recordings",),
                 "episodes": ("recordings", "operations", "links"),

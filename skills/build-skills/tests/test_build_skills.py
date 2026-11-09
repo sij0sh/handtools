@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 SOURCE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SOURCE.parent))
 if str(SOURCE / 'scripts') not in sys.path:
     sys.path.insert(0, str(SOURCE / 'scripts'))
 
@@ -47,8 +48,9 @@ class Base(unittest.TestCase):
 
     def registry(self, root=None):
         root = str((root or self.project).resolve())
-        for f in (self.home / 'build-skills').glob('*/workflow.json'):
-            data = json.loads(f.read_text())
+        from _engine.events import Journal
+        for f in (self.home / 'build-skills').glob('*/events.sqlite3'):
+            data = Journal(f).read('workflow.json')
             if data['root'] == root:
                 return data
         raise AssertionError('registry not found')
@@ -58,7 +60,8 @@ class Base(unittest.TestCase):
 
     def ground_payload(self, **extra):
         payload = {'mode': 'new', 'kind': 'prompt', 'target': 'skills/demo', 'purpose': 'p', 'trigger': 't', 'gap': 'g',
-                   'pass_condition': 'pc',
+                   'pass_condition': 'pc', 'plan': {'goal': 'p', 'constraints': [], 'criteria': ['pc'],
+                   'decisions': [], 'blocking': [], 'verification': 'inspect output', 'challenged': True},
                    'confirmed': True}
         payload.update(extra)
         return payload
@@ -79,7 +82,11 @@ class Base(unittest.TestCase):
         payload = {'findings': findings if findings is not None else
                    [{'file': 'SKILL.md:1', 'finding': 'f', 'action': 'applied', 'why': 'w'}], 'confirmed': True}
         payload.update(extra)
-        return self.done(payload, ok=ok)
+        out = self.done(payload, ok=ok)
+        if ok and payload.get('confirmed') and 'PHASE: APPLY' in out:
+            self.done()
+            out = self.done()
+        return out
 
     def wdir(self, kind='draft', sid='s1'):
         return next((self.home / 'build-skills').glob(f'*/{sid}/{kind}/demo'))
@@ -97,7 +104,7 @@ class Base(unittest.TestCase):
     def staged(self, path, mode):
         shutil.copytree(self.skill / 'templates' / 'workflow' / 'scripts', path / 'scripts', dirs_exist_ok=True)
         steps = path / 'scripts' / 'steps.py'
-        steps.write_text(steps.read_text().replace("MODE = 'stateful'", f"MODE = '{mode}'"))
+        steps.write_text(steps.read_text().replace("MODE = 'stateful'", f"MODE = '{mode}'").replace("ORDER = ['plan', 'work', 'verify']", "ORDER = ['x', 'y', 'z']"))
 
     def to_review(self, **extra):
         self.start(**extra)
@@ -120,7 +127,7 @@ class Sessions(Base):
         other.mkdir(parents=True)
         self.run_cmd('start')
         self.run_cmd('start', root=other)
-        self.assertEqual(len(list((self.home / 'build-skills').glob('*/workflow.json'))), 2)
+        self.assertEqual(len(list((self.home / 'build-skills').glob('*/events.sqlite3'))), 2)
 
     def test_target_held_by_one_active_session(self):
         self.start()
@@ -152,9 +159,10 @@ class Stages(Base):
         self.assertIn('model', self.design('semantic', ok=False))
         self.assertIn('confirmed', self.design(confirmed=False, ok=False))
         self.assertIn('PHASE: DRAFT', self.design())
-        text = Path(self.session()['design']['artifact']).read_text()
-        self.assertIn('Model: stateless', text)
-        self.assertIn('Criteria: none', text)
+        design = self.session()['design']
+        self.assertEqual(design['model'], 'stateless')
+        self.assertEqual(design['backend'], 'none')
+        self.assertNotIn('artifact', design)
 
     def test_design_criteria_and_stages(self):
         self.start(kind='staged')
@@ -171,9 +179,8 @@ class Stages(Base):
         looped[2]['loop_limit'] = 3
         out = self.design('stateful', criteria=['gate', 'loop'], stages=looped)
         self.assertIn("ORDER = ['x', 'y', 'z']", out)
-        text = Path(self.session()['design']['artifact']).read_text()
-        self.assertIn('loop limit 3', text)
-        self.assertIn('Criteria: gate, loop', text)
+        self.assertEqual(self.session()['design']['stages'][2]['loop_limit'], 3)
+        self.assertEqual(self.session()['design']['criteria'], ['gate', 'loop'])
 
     def test_draft_checks_order_matches_stages(self):
         self.start(kind='staged')
@@ -216,6 +223,7 @@ class Stages(Base):
         engine = path / 'scripts' / '_engine'
         self.assertEqual((engine / 'flow.py').read_bytes(), (SOURCE.parent / '_engine' / 'flow.py').read_bytes())
         self.assertFalse((engine / 'tests').exists())
+        steps.write_text(steps.read_text().replace("ORDER = ['plan', 'work', 'verify']", "ORDER = ['x', 'y', 'z']"))
         self.assertIn('router', self.done(ok=False))
         self.staged(path, 'stateful')
         self.assertIn("MODE = 'stateless'", self.done(ok=False))
@@ -312,49 +320,117 @@ class Template(Base):
     script = 'templates/workflow/scripts/workflow.py'
 
     def states(self):
-        return list((self.home / 'workflow').glob('*/workflow.json'))
+        from _engine.events import Journal
+        return [p for p in (self.home / 'workflow').glob('*/events.sqlite3') if Journal(p).read('workflow.json') is not None]
 
-    def set_mode(self, mode):
-        steps = self.skill / 'templates' / 'workflow' / 'scripts' / 'steps.py'
-        steps.write_text(steps.read_text().replace("MODE = 'stateful'", f"MODE = '{mode}'"))
-
-    def test_stateful_single_run_state_in_state_root(self):
-        self.assertIn('STEP: X', self.run_cmd('start', script=self.script))
+    def test_stateful_planning_work_and_verification(self):
+        self.assertIn('STEP: PLAN', self.run_cmd('start', script=self.script))
         self.assertIn('unfinished', self.run_cmd('start', script=self.script, ok=False))
         self.assertEqual(len(self.states()), 1)
-        self.assertFalse((self.skill / 'templates' / 'workflow' / 'state').exists())
-        self.assertIn('omit `--stage`', self.run_cmd('done', '--stage', 'x', script=self.script, ok=False))
-        self.run_cmd('done', script=self.script)
+        self.assertIn('plan', self.run_cmd('done', script=self.script, ok=False))
+        self.run_cmd('done', script=self.script, payload={'plan': self.ground_payload()['plan']})
         self.assertIn('result', self.run_cmd('done', script=self.script, ok=False))
-        self.assertIn('STEP: Z', self.run_cmd('done', payload={'result': 'A'}, script=self.script))
-        self.assertIn('DONE', self.run_cmd('done', script=self.script))
+        self.run_cmd('done', script=self.script, payload={'result': 'produced'})
+        self.assertIn('evidence', self.run_cmd('done', script=self.script, ok=False))
+        self.assertIn('DONE', self.run_cmd('done', script=self.script, payload={'passed': True, 'evidence': 'observed result'}))
         self.assertEqual(self.states(), [])
 
-    def test_stateful_abandon_discards(self):
+    def test_abandon_and_resume_isolation(self):
+        other = self.tmp / 'other'; other.mkdir()
         self.run_cmd('start', script=self.script)
-        self.run_cmd('abandon', script=self.script)
-        self.assertIn('STEP: X', self.run_cmd('start', script=self.script))
-
-    def test_project_keys_are_isolated(self):
-        other = self.tmp / 'other' / 'project'
-        other.mkdir(parents=True)
-        self.run_cmd('start', script=self.script)
-        self.assertIn('STEP: X', self.run_cmd('start', script=self.script, root=other))
+        self.run_cmd('start', script=self.script, root=other)
         self.assertEqual(len(self.states()), 2)
+        self.run_cmd('abandon', script=self.script)
+        self.assertIn('STEP: PLAN', self.run_cmd('status', script=self.script, root=other))
+        self.assertIn('STEP: PLAN', self.run_cmd('start', script=self.script))
 
-    def test_stateless_saves_nothing(self):
-        self.set_mode('stateless')
-        out = self.run_cmd('start', script=self.script)
-        self.assertIn('done --stage x', out)
-        self.assertIn('STEP: X', self.run_cmd('start', script=self.script))
-        self.assertIn('--stage', self.run_cmd('done', script=self.script, ok=False))
-        self.assertIn('STEP: Y', self.run_cmd('done', '--stage', 'x', script=self.script))
-        self.assertIn('result', self.run_cmd('done', '--stage', 'y', script=self.script, ok=False))
-        self.assertIn('DONE', self.run_cmd('done', '--stage', 'y', payload={'result': 'B'}, script=self.script))
-        self.assertIn('STEP: Z', self.run_cmd('done', '--stage', 'y', payload={'result': 'A'}, script=self.script))
+    def test_ephemeral_uses_no_persistent_state(self):
+        steps = self.skill / 'templates/workflow/scripts/steps.py'
+        steps.write_text(steps.read_text().replace("MODE = 'stateful'", "MODE = 'stateless'"))
+        self.assertIn('done --stage plan', self.run_cmd('start', script=self.script))
+        self.run_cmd('done', '--stage', 'plan', script=self.script, payload={'plan': self.ground_payload()['plan']})
         self.assertIn('nothing', self.run_cmd('status', script=self.script, ok=False))
-        self.assertEqual(self.states(), [])
         self.assertFalse((self.home / 'workflow').exists())
+
+
+class RecoveryAndPlanning(Base):
+    def accepted(self):
+        self.to_review()
+        out = self.done({'findings': [], 'none_found': True, 'confirmed': True})
+        self.assertIn('PHASE: APPLY', out)
+        return self.session()
+
+    def test_acceptance_does_not_write_target_and_apply_verifies(self):
+        s = self.accepted()
+        self.assertFalse(Path(s['target']).exists())
+        self.assertIn('PHASE: VERIFY', self.done())
+        self.assertTrue(Path(s['target']).is_dir())
+        self.assertIn('DONE', self.done())
+        self.assertEqual(self.session()['status'], 'complete')
+
+    def test_changed_accepted_draft_cannot_apply(self):
+        s = self.accepted()
+        (self.wdir() / 'SKILL.md').write_text((self.wdir() / 'SKILL.md').read_text()+'changed')
+        self.assertIn('draft changed', self.done(ok=False))
+        self.assertFalse(Path(s['target']).exists())
+
+    def test_crash_after_write_is_reconciled_without_duplicate_effect(self):
+        from _engine import effects, storage
+        from build_skills.skill import copy_skill, overlay, tree_hash
+        s = self.accepted()
+        base = self.wdir().parents[2]
+        def interrupted(src, dst):
+            overlay(src, dst)
+            if dst == Path(s['target']):
+                raise OSError('simulated interrupted completion')
+        with self.assertRaises(OSError):
+            effects.apply(base, s, self.wdir(), Path(s['target']), copy_skill, interrupted, tree_hash)
+        self.assertEqual(self.session()['phase'], 'apply')
+        self.assertIn('PHASE: VERIFY', self.done())
+        self.assertIn('DONE', self.done())
+        self.assertEqual(storage.journal(base).read('effect/'+s['effect_id'])['status'], 'applied')
+
+    def test_partial_writes_require_explicit_reconciliation(self):
+        from _engine import effects
+        from build_skills.skill import copy_skill, overlay, tree_hash
+        s = self.accepted(); base = self.wdir().parents[2]
+        def interrupted(src, dst):
+            if dst == Path(s['target']):
+                dst.mkdir(parents=True, exist_ok=True)
+                (dst / 'external.txt').write_text('external edit')
+                raise OSError('interrupted')
+            overlay(src, dst)
+        with self.assertRaises(OSError):
+            effects.apply(base, s, self.wdir(), Path(s['target']), copy_skill, interrupted, tree_hash)
+        self.assertIn('partial/conflicting', self.done(ok=False))
+        self.assertIn('conflicting target bytes', self.done({'recover':'retry'}, ok=False))
+
+    def test_replan_preserves_run_and_invalidates_acceptance(self):
+        self.to_review()
+        plan = self.ground_payload()['plan']; plan['goal'] = 'revised goal'
+        out = self.done({'replan':True, 'plan':plan})
+        self.assertIn('PHASE: DRAFT', out)
+        self.assertEqual(self.session()['plan_revision'], 2)
+        self.assertNotIn('authorization', self.session())
+        self.assertTrue(self.wdir().exists())
+
+    def test_revision_flags_make_command_retry_idempotent(self):
+        self.run_cmd('start')
+        payload = self.ground_payload()
+        args = ['done', '--session', 's1', '--expect-revision', '0', '--request-id', 'ground-once']
+        self.run_cmd(*args, payload=payload)
+        self.run_cmd(*args, payload=payload)
+        self.assertEqual(self.session()['revision'], 1)
+        self.assertEqual(self.session()['phase'], 'draft')
+        changed = dict(payload, purpose='changed')
+        self.assertIn('different payload', self.run_cmd(*args, payload=changed, ok=False))
+        self.assertIn('stale', self.run_cmd('done', '--session', 's1', '--expect-revision', '0', payload={}, ok=False))
+
+    def test_ready_plan_required_at_authoring_boundary(self):
+        self.run_cmd('start')
+        payload = self.ground_payload(); payload['plan']['blocking'] = ['missing intent']
+        self.assertIn('needs_input', self.done(payload, ok=False))
+        self.assertEqual(self.session()['phase'], 'ground')
 
 
 class CodexPolicyTest(unittest.TestCase):

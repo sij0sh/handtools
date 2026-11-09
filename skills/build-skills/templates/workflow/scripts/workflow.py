@@ -2,7 +2,7 @@
 """Workflow skill template: the script owns order; the agent does one step at a time.
 
 Edit steps.py only (set MODE and AREA there). Python 3.9+; standard library only.
-Stateful: ~/.agents/state/<AREA>/<project-key>/workflow.json, one run per project.
+Stateful: event journal in ~/.agents/state/<AREA>/<project-key>/events.sqlite3, one active run per project.
 Stateless: nothing saved; `done --stage S` names the finished step.
 The engine is _engine/ (vendored beside this file, or handtools' skills/_engine/).
 """

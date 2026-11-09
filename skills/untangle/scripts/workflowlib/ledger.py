@@ -10,10 +10,11 @@ from _engine import storage
 
 
 AREA = 'untangle'  # state and exports: <state root>/untangle/<project key>/ (storage.py)
-POLICY_FILES = ('references/defaults.md', 'references/contract.md', 'references/instructions.md')
+POLICY_FILES = ('defaults.md', 'contract.md', 'instructions.md')
 POLICY_ENV = 'UNTANGLE_POLICY_ROOT'
 # untangle and simple-by-design ship together in the handtools bundle: skills/untangle, skills/simple-by-design.
-SIBLING = Path(__file__).resolve().parents[3] / 'simple-by-design'
+from _engine.planning import POLICY
+SIBLING = POLICY
 LANG = {'.py': 'python', '.ts': 'typescript', '.tsx': 'typescript', '.mts': 'typescript', '.js': 'javascript',
         '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.go': 'go', '.rs': 'rust',
         '.java': 'java', '.cs': 'csharp', '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp',
@@ -111,7 +112,7 @@ def walk_tree(root, rules, limits):
 
 
 def policy_root():
-    """simple-by-design beside this skill, resolved on every command (never stored).
+    """shared non-skill policy, resolved on every command (never stored).
 
     UNTANGLE_POLICY_ROOT overrides it for the current command only.
     """
@@ -124,10 +125,10 @@ def load_policy():
     base = policy_root()
     missing = [n for n in POLICY_FILES if not (base / n).is_file()]
     need(not missing and (base / 'languages').is_dir(),
-          f'{base} is not simple-by-design (missing {", ".join(missing) or "languages/"}). Install the '
-          f'handtools bundle so simple-by-design sits beside untangle, or set {POLICY_ENV} for this command.')
+          f'{base} has no shared policy (missing {", ".join(missing) or "languages/"}). Install the '
+          f'handtools bundle including _engine/policy, or set {POLICY_ENV} for this command.')
     names = list(POLICY_FILES) + sorted(p.relative_to(base).as_posix() for p in (base / 'languages').glob('*.md'))
-    version = base.parent.parent / 'VERSION'
+    version = base.parents[2] / 'VERSION'
     return {'version': version.read_text().strip() if version.is_file() else None,
             'files': {n: file_sha((base / n).read_bytes()) for n in names}}
 

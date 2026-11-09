@@ -13,7 +13,7 @@ Set `S` to this skill's absolute directory. From the project root, drive the run
 
 Scripts in `S/scripts/` take `--root <project root>`. `audit.py` and `validate.py` are read-only.
 
-ADRs are decision rows in the project's `.agents/design/decisions.json`, defined by `S/../simple-by-design/references/decisions.schema.json`. Write them only through `S/../simple-by-design/scripts/designflow.py --root <project root> record`.
+ADRs are decision rows in the project's `.agents/design/decisions.json`, defined by `S/../_engine/policy/decisions.schema.json`. Write them only through `S/../simple-by-design/scripts/designflow.py --root <project root> record`.
 
 Pass each stage the user's request and the earlier stages' results.
 

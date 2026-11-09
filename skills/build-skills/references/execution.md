@@ -31,3 +31,12 @@ Staged only. Router if:
 Content every run reads stays in SKILL.md. Stage-specific text goes in the stage prompt, not a leaf. One condition per leaf.
 
 Revise: apply fresh; show the user any change from the existing model.
+
+## Shared planning and backend
+
+The authoring run always uses the shared planning contract in `_engine/planning.py`.
+Prompt output needs no runtime. Staged output uses the engine's `PLANNING = True` readiness gate.
+Stateful means resumable, currently backed by a journal; stateless means ephemeral with no recovery
+or retained cross-turn authorization promise. Backend is a separate runtime choice. Transcript-only
+capture is an explicit plan-only pilot, not an installation backend. Shared resources live in the
+packaged `_engine/policy/`; never depend on a sibling skill.

@@ -1,39 +1,38 @@
-"""The workflow itself: the only file a skill author edits.
-
-Example flow: do X, then Y; if Y's result is A, do Z, else finish.
-Each prompt ends on a criterion its check verifies. Payloads arrive as JSON on stdin.
-MODE: 'stateful' tracks one run per project; 'stateless' saves nothing and `done --stage S` names the step.
-AREA: this skill's folder under the per-user state root (_engine/storage.py); set it to the skill's name.
-A PROMPTS value may be a function of the project root; every state given to a check or advance has 'root'.
+"""Workflow adapter. Edit domain prompts/checks only; never edit vendored _engine.
+Stateful = resumable journal; stateless = ephemeral (no resume/retained approval).
+The shared planner is a library. No sibling skill is invoked.
 """
+from _engine import planning
 MODE = 'stateful'
+PLANNING = True
 AREA = 'workflow'
-ORDER = ['x', 'y', 'z']
-
+ORDER = ['plan', 'work', 'verify']
 PROMPTS = {
-    'x': 'Do X. Done when X is complete.',
-    'y': 'Do Y. Send `{"result": "R"}`, where R is Y\'s outcome (A or other).',
-    'z': 'Y gave A, so do Z. Done when Z is complete.',
+    'plan': 'Create a proportional plan. Send {"plan": {"goal": "...", "constraints": [], "criteria": ["observable result"], "decisions": [], "blocking": [], "verification": "...", "challenged": true}}. Resolve blocking issues before work.',
+    'work': 'Perform only the planned work within existing user authorization. Send {"result": "..."}; report blocked work rather than inventing completion.',
+    'verify': 'Verify the observable acceptance criteria. Send {"passed": true, "evidence": "..."}; failed/skipped verification cannot close the run.',
 }
-
-DONE_MSG = 'DONE: workflow complete.'
-
-
-def check_y(state, payload):
-    if not isinstance(payload.get('result'), str) or not payload['result']:
-        raise ValueError('Step y needs `{"result": "R"}`.')
+DONE_MSG = 'DONE: verified workflow complete.'
 
 
-# Per-step verification; raise ValueError to refuse `done`.
-CHECKS = {'y': check_y}
+def check_plan(state, payload):
+    state['plan_digest'] = planning.require_ready(payload.get('plan'))
+    state['plan'] = payload['plan']
+
+
+def check_work(state, payload):
+    if not isinstance(payload.get('result'), str) or not payload['result'].strip():
+        raise ValueError('work needs result')
+
+
+def check_verify(state, payload):
+    if payload.get('passed') is not True or not isinstance(payload.get('evidence'), str) or not payload['evidence'].strip():
+        raise ValueError('verify needs passed=true and evidence')
+
+CHECKS = {'plan': check_plan, 'work': check_work, 'verify': check_verify}
 
 
 def advance(state, payload):
-    """Return the next step, or None to finish."""
-    phase = state['phase']
-    if phase == 'y':
-        state['result'] = payload['result']
-        return 'z' if payload['result'] == 'A' else None
-    if phase == 'z':
+    if state['phase'] == 'verify':
         return None
-    return ORDER[ORDER.index(phase) + 1]
+    return ORDER[ORDER.index(state['phase']) + 1]

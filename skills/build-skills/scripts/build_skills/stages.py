@@ -1,5 +1,7 @@
 """Stages: ground, design (staged kind only), draft, review (loops until confirmed, then finish)."""
 import re
+import uuid
+from _engine import planning, effects
 from pathlib import Path
 
 from .config import GROUND_FIELDS, KINDS, MODELS, REVIEW_LIMIT, ROUTER_LABELS, STAGE_LABELS, STATE_LABELS
@@ -9,14 +11,6 @@ from .skill import (check_files, check_model, check_prompt, copy_skill, install_
                     write_codex_policy)
 
 ACTIONS = ('applied', 'rejected')
-
-
-def artifact(root, s, name, text):
-    """Write an agent-readable stage artifact under sN/; return its path."""
-    path = base_dir(root) / s['id'] / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding='utf-8')
-    return str(path)
 
 
 def confirmed(payload, where):
@@ -41,13 +35,21 @@ def done_ground(root, state, s, payload):
     held = [o['id'] for o in active(state) if o['id'] != s['id'] and o.get('target') == str(target)]
     if held:
         raise ValueError(f'{target} is held by active session {held[0]}; run `status`.')
+    if any(p.is_symlink() for p in target.rglob('*')):
+        raise ValueError('target contains symlinks')
     exists = (target / 'SKILL.md').is_file()
     if values['mode'] == 'new' and exists:
         raise ValueError(f'{target / "SKILL.md"} exists; use `"mode": "revise"`.')
     if values['mode'] == 'revise' and not exists:
         raise ValueError(f'{target / "SKILL.md"} does not exist; use `"mode": "new"`.')
     values['target'] = str(target)
-    s.update(values, reviews=[])
+    s.update(values, reviews=[], plan_revision=1, redesigns=0)
+    s['target_hash'] = tree_hash(target) if target.exists() else None
+    if 'plan' in payload:
+        s['plan_hash'] = planning.require_ready(payload['plan'])
+        s['plan'] = payload['plan']
+    else:
+        raise ValueError('GROUND: supply plan using the shared planning contract')
     if wording:
         s['wording'] = wording.strip()
     if values['mode'] == 'revise':
@@ -104,12 +106,11 @@ def done_design(root, state, s, payload):
     design = {'model': model, 'router': payload['router'], 'criteria': criteria, 'stages': stages,
               'why': text_field(payload, 'why', 'DESIGN')}
     confirmed(payload, 'DESIGN')
-    lines = [f'# Design: {Path(s["target"]).name}', '', f'Model: {model}', f'Router: {"yes" if design["router"] else "no"}',
-             f'Criteria: {", ".join(criteria) or "none"}', f'Why: {design["why"]}']
-    lines += ['', 'Stages:'] + [
-        f'- {st["name"]}: output {st["output"]}; check {st["check"]}'
-        + (f'; loop limit {st["loop_limit"]}' if 'loop_limit' in st else '') for st in stages]
-    design['artifact'] = artifact(root, s, 'design.md', '\n'.join(lines) + '\n')
+    design['plan_revision'] = s['plan_revision']
+    s['plan_hash'] = planning.require_ready(payload.get('plan', s['plan']))
+    s['plan'] = payload.get('plan', s['plan'])
+    design['backend'] = 'journal' if model == 'stateful' else 'none'
+    design['policy_version'] = planning.VERSION
     s['design'] = design
     install_engine(work_dir(root, s, 'draft'), model)
     s['phase'] = 'draft'
@@ -131,6 +132,23 @@ def done_draft(root, state, s, payload):
 
 
 def done_review(root, state, s, payload):
+    if payload.get('replan'):
+        if s.get('redesigns', 0) >= REVIEW_LIMIT:
+            raise ValueError('needs_input: redesign limit reached')
+        planning.require_ready(payload['plan'])
+        kind = payload.get('kind', s['kind'])
+        if kind not in KINDS:
+            raise ValueError('replan kind must be prompt or staged')
+        s['kind'] = kind
+        if kind == 'prompt':
+            s.pop('design', None)
+        s['plan'] = payload['plan']
+        s['plan_hash'] = planning.digest(s['plan'])
+        s['plan_revision'] += 1
+        s['redesigns'] = s.get('redesigns', 0) + 1
+        s.pop('authorization', None)
+        s['phase'] = 'design' if s['kind'] == 'staged' else 'draft'
+        return
     findings = payload.get('findings')
     if not isinstance(findings, list) or not all(isinstance(f, dict) for f in findings):
         raise ValueError('REVIEW: `findings` must be a list of objects.')
@@ -154,14 +172,15 @@ def done_review(root, state, s, payload):
     check_draft(root, s)
     if done:
         check_target(s)
-    lines = [f'# Review {n}: {Path(s["target"]).name}', ''] + \
-            [f'- {f["file"]} [{f["action"]}]: {f["finding"]} ({f["why"]})' for f in findings] + \
-            ([] if findings else ['- none found'])
     s['reviews'].append({'n': n, 'findings': len(findings), 'applied': applied,
-                         'artifact': artifact(root, s, f'review-{n}.md', '\n'.join(lines) + '\n')})
+                         'items': findings, 'plan_revision': s['plan_revision']})
     if done:
-        overlay(work_dir(root, s, 'draft'), Path(s['target']))
-        close(s, 'complete')
+        s['draft_hash'] = tree_hash(work_dir(root, s, 'draft'))
+        s['accepted_revision'] = s['plan_revision']
+        s['authorization'] = {'plan_revision': s['plan_revision'], 'draft_hash': s['draft_hash'],
+                              'user_ref': payload.get('user_ref'), 'source': 'agent_reported_user_confirmation'}
+        s['effect_id'] = str(uuid.uuid4())
+        s['phase'] = 'apply'
 
 
 def check_target(s):
@@ -173,4 +192,21 @@ def check_target(s):
         raise ValueError(f'{target} changed since GROUND; abandon and start again from the current target.')
 
 
-PHASES = {'ground': done_ground, 'design': done_design, 'draft': done_draft, 'review': done_review}
+def done_apply(root, state, s, payload):
+    if s.get('accepted_revision') != s['plan_revision']:
+        raise ValueError('stale plan authorization')
+    intent = effects.apply(base_dir(root), s, check_draft(root, s), Path(s['target']),
+                           copy_skill, overlay, tree_hash, payload.get('recover'))
+    s['application'] = intent
+    s['phase'] = 'verify'
+
+
+def done_verify(root, state, s, payload):
+    if tree_hash(Path(s['target'])) != s['application']['after']:
+        raise ValueError('installed target changed; verification blocked')
+    check_files(Path(s['target']))
+    s['verification'] = {'target_hash': s['application']['after'], 'result': 'installed bytes and structure verified'}
+    close(s, 'complete')
+
+
+PHASES = {'apply': done_apply, 'verify': done_verify, 'ground': done_ground, 'design': done_design, 'draft': done_draft, 'review': done_review}

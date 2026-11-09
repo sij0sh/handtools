@@ -3,11 +3,13 @@ import re
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[2]
+from _engine.planning import POLICY
+
 SKILL_MD = SKILL_DIR / 'SKILL.md'
-DEFAULTS = SKILL_DIR / 'references' / 'defaults.md'
-CONTRACT = SKILL_DIR / 'references' / 'contract.md'
-LANGUAGES = SKILL_DIR / 'languages'
-INSTRUCTIONS = SKILL_DIR / 'references' / 'instructions.md'
+DEFAULTS = POLICY / 'defaults.md'
+CONTRACT = POLICY / 'contract.md'
+LANGUAGES = POLICY / 'languages'
+INSTRUCTIONS = POLICY / 'instructions.md'
 
 # Session state lives in <state root>/decisions/<project key>/ (storage.py), shared with foundation.
 AREA = 'decisions'

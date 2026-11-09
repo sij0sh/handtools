@@ -50,10 +50,10 @@ def done(root, sid, payload, launcher):
             session['goal'] = gid
             session['phase'] = 'branch'
         elif phase == 'decide' and session['cycle'] > limit:
+            if record.open_rows(record.find_goal(rec, gid)):
+                raise ValueError('needs_input: unresolved decisions remain at challenge limit')
             sessions.close(session, 'complete')
         elif phase in ('branch', 'decide'):
-            if not changed:
-                raise ValueError(f'{phase} requires a change to goal {gid}; send it as the payload.')
             session['phase'] = 'decide' if phase == 'branch' else 'challenge'
         else:
             # Changed with open rows: decide (final one past the limit). Changed and
@@ -66,6 +66,8 @@ def done(root, sid, payload, launcher):
                 raise ValueError(f'{len(unresolved)} open decision(s) remain: {", ".join(unresolved)}; '
                                  'resolve them or send new gaps as the payload.')
             else:
+                if unresolved:
+                    raise ValueError('needs_input: unresolved decisions remain at challenge limit')
                 sessions.close(session, 'complete')
         session['baseline'] = current_hash
         session['updated'] = now
@@ -136,7 +138,7 @@ def abandon(root, sid):
 def status(root, sid, show_all, launcher):
     if sid is not None and show_all:
         raise ValueError('Use either --session or --all, not both.')
-    state = sessions.load(root, persist_migration=True)
+    state = sessions.load(root, persist_migration=False)
     rec = record.load_or_empty(root)
     if sid is None:
         listed = state['sessions'] if show_all else sessions.active(state)

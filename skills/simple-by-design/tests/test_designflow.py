@@ -59,7 +59,9 @@ class DesignflowTest(unittest.TestCase):
         return result
 
     def workflow(self):
-        return json.loads(self.state.read_text())
+        sys.path.insert(0, str(SKILL_DIR.parent))
+        from _engine import storage
+        return storage.read_state(self.state)
 
     def goals(self):
         return json.loads(self.record.read_text())['goals']
@@ -187,9 +189,9 @@ class DesignflowTest(unittest.TestCase):
     def test_done_requires_change(self):
         self.run_cmd('start')
         self.done(payload={'goal': 'Ship.'})
-        self.assertIn('requires a change', self.done(ok=False).stderr)
-        self.done(payload={'goal': 'Ship.'}, ok=False)
-        self.assertEqual(self.phase(), ('branch', 1))
+        self.assertIn('PHASE: DECIDE', self.done().stdout)
+        self.done(payload={'goal': 'Ship.'})
+        self.assertEqual(self.phase(), ('challenge', 1))
 
     def test_blank_or_bom_stdin(self):
         self.run_cmd('start')
@@ -235,7 +237,7 @@ class DesignflowTest(unittest.TestCase):
     def test_payload_violations_rejected_and_nothing_written(self):
         self.run_cmd('start')
         self.done(payload={'goal': 'Ship.'})
-        before = (self.record.read_text(), self.state.read_text())
+        before = (self.record.read_text(), json.dumps(self.workflow(), sort_keys=True))
         bad = [
             [],
             {'extra': 1},
@@ -253,7 +255,7 @@ class DesignflowTest(unittest.TestCase):
         for payload in bad:
             with self.subTest(payload=payload):
                 self.done(payload=payload, ok=False)
-                self.assertEqual((self.record.read_text(), self.state.read_text()), before)
+                self.assertEqual((self.record.read_text(), json.dumps(self.workflow(), sort_keys=True)), before)
 
     def test_edit_touches_only_session_goal(self):
         other = {'id': 'G1', 'goal': 'old', 'decisions': [
@@ -272,8 +274,8 @@ class DesignflowTest(unittest.TestCase):
         self.done(payload={'goal': 'Ship.'})
         out = self.done(payload={'decisions': [{'id': 'D1', 'question': 'Q?'}]}).stdout
         self.assertIn('PHASE: DECIDE', out)
-        self.assertIn(str(SKILL_DIR / 'references' / 'contract.md'), out)
-        self.assertIn(str(SKILL_DIR / 'references' / 'instructions.md'), out)
+        self.assertIn(str(SKILL_DIR.parent / '_engine' / 'policy' / 'contract.md'), out)
+        self.assertIn(str(SKILL_DIR.parent / '_engine' / 'policy' / 'instructions.md'), out)
         self.assertIn('python', out)
         self.assertNotIn('instructions,', out)
 
@@ -326,11 +328,8 @@ class DesignflowTest(unittest.TestCase):
         self.done(payload={'decisions': [{'id': 'D4', 'question': 'Late?'}]})
         self.assertEqual(self.phase(), ('decide', 4))
         self.assertIn('LOOP: 3/3', self.run_cmd('status', '--session', 's1').stdout)
-        out = self.done().stdout
-        self.assertIn('## Open questions', out)
-        self.assertIn('- Late?', out)
-        self.assertNotIn('### Late?', out)
-        self.assertEqual(self.session()['status'], 'complete')
+        self.assertIn('needs_input', self.done(ok=False).stderr)
+        self.assertEqual(self.session()['status'], 'active')
 
     def test_final_challenge_without_change_closes_with_open_rows(self):
         self.to_challenge()
@@ -339,19 +338,17 @@ class DesignflowTest(unittest.TestCase):
         self.assertEqual(self.phase(), ('decide', 3))
         self.done(payload={'decisions': [{'id': 'D3', 'question': 'Q3?', 'answer': 'A.'}]})
         self.assertEqual(self.phase(), ('challenge', 3))
-        out = self.done().stdout
-        self.assertIn('## Open questions', out)
-        self.assertEqual(self.session()['status'], 'complete')
+        self.assertIn('needs_input', self.done(ok=False).stderr)
+        self.assertEqual(self.session()['status'], 'active')
 
     def test_lowered_limit_applies_mid_session(self):
         self.to_challenge()
         self.done(payload={'decisions': [{'id': 'D2', 'question': 'Gap?'}]})
         self.assertEqual(self.phase(), ('decide', 2))
         with mock.patch('designlib.config.max_challenges', return_value=1):
-            out = flow.done(self.root, 's1', None, 'L')
-        self.assertIn('DONE', out)
-        self.assertIn('- Gap?', out)
-        self.assertEqual(self.session()['status'], 'complete')
+            with self.assertRaisesRegex(ValueError, 'needs_input'):
+                flow.done(self.root, 's1', None, 'L')
+        self.assertEqual(self.session()['status'], 'active')
 
     def test_bad_limit_blocks_done_but_not_abandon(self):
         self.run_cmd('start')
@@ -428,7 +425,7 @@ class DesignflowTest(unittest.TestCase):
         self.done('s1', payload={'goal': 'one changed'})
         self.assertEqual(self.phase('s1'), ('decide', 1))
         self.assertEqual(self.phase('s2'), ('branch', 1))
-        self.done('s2', ok=False)
+        self.done('s2')
         self.assertEqual([g['goal'] for g in self.goals()], ['one changed', 'two'])
 
     def test_migration_wraps_old_state(self):
@@ -450,8 +447,9 @@ class DesignflowTest(unittest.TestCase):
         }))
         result = self.run_cmd('status', '--session', 's1')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.workflow()['version'], 1)
-        self.assertEqual(self.phase('s1'), ('decide', 2))
+        self.assertNotIn('version', self.workflow())
+        self.assertIn('PHASE: DECIDE', result.stdout)
+        self.assertEqual(self.workflow()['cycle'], 2)
 
     def test_migration_handoff_maps_complete(self):
         self.seed([{'id': 'G1', 'goal': 'old', 'decisions': []}])

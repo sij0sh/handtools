@@ -2,7 +2,7 @@
 
 Audit, plan, and bootstrap a repository's project foundation: pinned toolchains, one-command setup, tests and lint, CI, dependency updates, migrations, infrastructure as code, ADRs (in simple-by-design's `.agents/design/decisions.json`), architecture docs, secrets hygiene, and onboarding.
 
-Part of the [handtools](../../README.md) bundle. An agent reads `SKILL.md`; `scripts/workflow.py` owns the stage order. ADRs use simple-by-design's decision record: `../simple-by-design/references/decisions.schema.json` defines them and `designflow.py record` writes them.
+Part of the [handtools](../../README.md) bundle. An agent reads `SKILL.md`; `scripts/workflow.py` owns the stage order. ADRs use simple-by-design's decision record: `../_engine/policy/decisions.schema.json` defines them and `designflow.py record` writes them.
 
 ## Quick start
 

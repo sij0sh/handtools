@@ -30,7 +30,7 @@ def decisions(root):
 
 def _at(text):
     """A prompt that names this project's foundation.json (flow calls it with the project root)."""
-    return lambda root: text.replace('@DECISIONS@', str(decisions(root)))
+    return lambda root: text.replace('@DECISIONS@', f'python3 {SCRIPTS / "workflow.py"} --root {root} show')
 
 RECORD = 'decisions-record'
 STATUSES = ['present', 'partial', 'missing', 'n/a', 'unknown']
@@ -61,7 +61,7 @@ PROMPTS = {
         'Send `{"kind": "...", "maturity": "...", "mode": "..."}`.'
     ),
     'interview': _at(
-        f'Read `@DECISIONS@` if it exists; its `goal` is foundation\'s goal in the ADR log. Run `{DESIGNFLOW} show` '
+        f'Run `@DECISIONS@` if bookkeeping exists; its `goal` is foundation\'s goal in the ADR log. Run `{DESIGNFLOW} show` '
         'and treat that goal\'s resolved rows (including `Project kind` and `Maturity`) as settled. From the audit, list the '
         'high-impact decisions still open (what is being built, prototype/MVP/production, where it runs, '
         'solo or team, cost/security/compliance limits, what must not change in a brownfield repo). '
@@ -89,12 +89,12 @@ PROMPTS = {
         'Implement only the approved items, as small reviewable changes that keep existing conventions; '
         f'start from `{SKILL / "assets"}` templates where one fits and adapt it to the project. Do not touch unrelated '
         f'config. ADRs (`adrs`): record decisions only by piping a payload into `{RECORD_CMD}` (shape: '
-        f'`{DESIGN / "references" / "decisions.schema.json"}`; send rows without `id` or `status`); never edit '
+        f'`{DESIGN.parent / "_engine" / "policy" / "decisions.schema.json"}`; send rows without `id` or `status`); never edit '
         f'{ADR_LOG} directly and never write Markdown ADRs. Convert legacy Markdown ADRs only if the user approved '
         f'that conversion. Recording (`{RECORD}`): pipe every interview answer, plus `Project kind` and `Maturity`, as '
         f'question/answer rows into `{RECORD_CMD} --goal <goal from @DECISIONS@>` (omit `--goal` the first time; the '
-        f'command prints the new G#). Then write `@DECISIONS@` with `goal` (that G#), `accepted` (approved ids), '
-        '`declined` (proposed but not approved ids), and `updated` (ISO date), merging any existing file. '
+        f'command prints the new G#). Then pipe a JSON payload into `python3 {SCRIPTS / "workflow.py"} --root . record` with `goal` (that G#), `accepted` (approved ids), '
+        '`declined` (proposed but not approved ids), and `updated` (ISO date), merging the existing bookkeeping returned by show. '
         f'If `{RECORD}` is the only approved item, record only. '
         'Done when the files are written; send `{"changed": ["path", ...]}`.'
     ),
@@ -161,7 +161,7 @@ def check_assess(state, payload):
 def check_apply(state, payload):
     path = decisions(state['root'])
     try:
-        record = json.loads(path.read_text(encoding='utf-8'))
+        record = storage.read_state(path)
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f'{path} must exist and be valid JSON: {error}') from None
     for key in ('goal', 'accepted', 'declined', 'updated'):

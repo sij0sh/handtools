@@ -31,7 +31,7 @@ def save_registry(root, state):
 
 
 def add(state):
-    return registry.add(state, phase='ground')
+    return registry.add(state, phase='ground', revision=0, requests={})
 
 
 def close(session, status):

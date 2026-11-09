@@ -1,3 +1,4 @@
+from pathlib import Path
 """Invocation-local provider registry; shared source, Git and recording datasets."""
 import os
 from types import SimpleNamespace
@@ -65,6 +66,50 @@ class Providers:
         definition = catalog.CATALOG[name]
         return Input(name, self.tables[name], self.coverage[definition.provider],
                      list(definition.columns), definition.columns, definition.grain)
+
+    def load_workflow(self):
+        import json
+        from _engine import storage
+        from _engine.events import Journal, replay
+        key = storage.project_key(Path(self.store.root))
+        events, runs, decisions, authorizations = [], [], [], []
+        for path in sorted(storage.state_root().glob('*/' + key + '/events.sqlite3')):
+            store = Journal(path)
+            with store.connect() as db:
+                names = [x[0] for x in db.execute('SELECT DISTINCT run FROM events')]
+            for name in names:
+                state, chain = replay(store.history(name))
+                ref = str(path) + '#' + name
+                for item in chain:
+                    events.append({'run_id': name, 'revision': item['revision'], 'event_id': item['event_id'],
+                                   'kind': item['kind'], 'payload': json.dumps(item['payload']),
+                                   'source_ref': ref + ':' + str(item['revision'])})
+                runs.append({'run_id': name, 'revision': len(chain), 'state': json.dumps(state), 'source_ref': ref})
+                for session in (state or {}).get('sessions', []):
+                    sid = session['id']
+                    for decision in session.get('plan', {}).get('decisions', []):
+                        decisions.append({'run_id':name, 'session_id':sid, 'decision_id':decision['id'],
+                                          'question':decision['question'], 'answer':decision.get('answer'),
+                                          'status':'answered' if decision.get('answer') else 'open',
+                                          'source_ref':ref + ':' + str(len(chain))})
+                    if session.get('authorization'):
+                        auth = session['authorization']
+                        authorizations.append({'run_id':name, 'session_id':sid, 'plan_revision':auth['plan_revision'],
+                            'draft_hash':auth['draft_hash'], 'user_ref':auth.get('user_ref'), 'source':auth['source'],
+                            'source_ref':ref + ':' + str(len(chain))})
+        adr = Path(self.store.root) / '.agents' / 'design' / 'decisions.json'
+        if adr.is_file():
+            for goal in json.loads(adr.read_text()).get('goals', []):
+                for decision in goal.get('decisions', []):
+                    decisions.append({'run_id':'project-adr', 'session_id':goal['id'], 'decision_id':decision['id'],
+                        'question':decision['question'], 'answer':decision.get('answer'),
+                        'status': 'superseded' if decision.get('status') == 'superseded' else
+                                  'answered' if decision.get('answer') else 'open', 'source_ref':str(adr)})
+        self.tables['workflow_decisions'], self.tables['workflow_authorizations'] = decisions, authorizations
+
+        self.tables['workflow_events'], self.tables['workflow_runs'] = events, runs
+        self.coverage['workflow'] = {'complete': True, 'scope': 'exact local project journals',
+                                     'transcript_capture': 'not_searched'}
 
     def load_graph(self):
         self.graph = graph_cli.get_graph(self.store, self.args)

@@ -46,7 +46,7 @@ def state_dir(area, root):
     """<state root>/<area>/<key>/, created with project.json naming the project it belongs to."""
     path = state_root() / area / project_key(root)
     if not (path / 'project.json').exists():
-        write_json(path / 'project.json', {'root': str(root)})
+        path.mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -71,14 +71,25 @@ def lock(base):
     while True:
         try:
             path.mkdir()
+            (path / 'owner').write_text(str(os.getpid()))
             break
         except FileExistsError:
             try:
                 age = time.time() - path.stat().st_mtime
             except FileNotFoundError:
                 continue
-            if age > LOCK_STALE:
+            alive = False
+            try:
+                pid = int((path / 'owner').read_text())
+                os.kill(pid, 0)
+                alive = True
+            except PermissionError:
+                alive = True
+            except (OSError, ValueError):
+                pass
+            if age > LOCK_STALE and not alive:
                 try:
+                    (path / 'owner').unlink(missing_ok=True)
                     path.rmdir()
                 except OSError:
                     pass
@@ -90,6 +101,50 @@ def lock(base):
         yield
     finally:
         try:
+            (path / 'owner').unlink(missing_ok=True)
             path.rmdir()
         except FileNotFoundError:
             pass
+
+
+# State documents are logical stream names, not independently maintained files.
+def journal(base):
+    from .events import Journal
+    return Journal(Path(base) / 'events.sqlite3')
+
+
+def has_state(path):
+    path = Path(path)
+    history = journal(path.parent).history(path.name)
+    return journal(path.parent).read(path.name) is not None if history else path.exists()
+
+
+def read_state(path):
+    path = Path(path)
+    history = journal(path.parent).history(path.name)
+    if history:
+        from .events import replay
+        value = replay(history)[0]
+        if value is None:
+            raise ValueError('No workflow in progress. Run `start`.')
+        return value
+    # Read-only legacy fallback; the next accepted mutation writes one imported baseline.
+    return read_json(path)
+
+
+def write_state(path, data):
+    path = Path(path)
+    store = journal(path.parent)
+    if not store.history(path.name) and path.exists():
+        store.put(path.name, read_json(path))
+    store.put(path.name, data)
+    # Keep legacy input as a migration backup, never as a second active authority.
+    if path.exists():
+        path.rename(path.with_suffix(path.suffix + '.migrated'))
+
+
+def delete_state(path):
+    path = Path(path)
+    journal(path.parent).append(path.name, 'state.deleted', {})
+    if path.exists():
+        path.rename(path.with_suffix(path.suffix + '.migrated'))

@@ -1,5 +1,6 @@
 """Commands: start, done, status, abandon."""
 from _engine.storage import lock
+from _engine.planning import digest
 
 from .config import DONE_MSG
 from .prompts import render, summary
@@ -15,14 +16,27 @@ def cmd_start(root, launcher):
     return render(root, session, launcher)
 
 
-def cmd_done(root, sid, payload, launcher):
+def cmd_done(root, sid, payload, launcher, expected=None, request_id=None):
     payload = {} if payload is None else payload
     if not isinstance(payload, dict):
         raise ValueError('Payload must be a JSON object.')
     with lock(base_dir(root)):
         state = load_registry(root)
+        if request_id and sid:
+            previous = find(state, sid)
+            if request_id in previous.get('requests', {}):
+                if previous['requests'][request_id] != digest(payload):
+                    raise ValueError('request reused with different payload')
+                return summary(root, previous) if previous['status'] != 'active' else render(root, previous, launcher)
         s = select_active(state, sid)
+        if s['phase'] != 'ground' and 'plan' not in s:
+            raise ValueError('legacy run has no ready plan; preserve draft/backup, abandon, then start from current target')
+        if expected is not None and expected != s.get('revision', 0):
+            raise ValueError('stale session revision; run status before advancing')
         PHASES[s['phase']](root, state, s, payload)
+        s['revision'] = s.get('revision', 0) + 1
+        if request_id:
+            s.setdefault('requests', {})[request_id] = digest(payload)
         s['updated'] = timestamp()
         save_registry(root, state)
     if s['status'] == 'complete':

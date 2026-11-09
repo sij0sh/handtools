@@ -28,15 +28,15 @@ def empty():
 def load(area, root, allow_missing=False):
     """The raw registry; callers validate their own fields."""
     file = path(area, root)
-    if not file.exists():
+    if not storage.has_state(file):
         if allow_missing:
             return empty()
         raise ValueError('No sessions for this project. Run `start`.')
-    return storage.read_json(file)
+    return storage.read_state(file)
 
 
 def save(area, root, state):
-    storage.write_json(path(area, root), state)
+    storage.write_state(path(area, root), state)
 
 
 def add(state, **fields):

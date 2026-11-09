@@ -6,7 +6,7 @@ names the finished step), AREA, ORDER, PROMPTS (text, or a function of the proje
 CHECKS, advance(state, payload) and DONE_MSG. Every state passed to a check or to advance
 carries 'phase' and 'root'.
 """
-from . import storage
+from . import storage, planning
 
 
 def _base(steps, root):
@@ -18,14 +18,15 @@ def _path(steps, root):
 
 
 def _load(steps, root):
-    if not _path(steps, root).exists():
+    if not storage.has_state(_path(steps, root)):
         raise ValueError('No workflow in progress. Run `start`.')
-    return storage.read_json(_path(steps, root))
+    return storage.read_state(_path(steps, root))
 
 
 def show(steps, phase, root, launcher):
     prompt = steps.PROMPTS[phase]
     text = prompt(root) if callable(prompt) else prompt
+    text += '\n\n' + planning.prompt()
     stage = f' --stage {phase}' if steps.MODE == 'stateless' else ''
     return (f'STEP: {phase.upper()}\n{text}\n\n'
             f'Then run: {launcher} done{stage}  (pipe a JSON payload on stdin when the step asks for one)')
@@ -35,10 +36,10 @@ def start(steps, root, launcher):
     if steps.MODE == 'stateless':
         return show(steps, steps.ORDER[0], root, launcher)
     with storage.lock(_base(steps, root)):
-        if _path(steps, root).exists():
+        if storage.has_state(_path(steps, root)):
             raise ValueError('A run is unfinished; run `status` to resume or `abandon` to discard it.')
         state = {'phase': steps.ORDER[0], 'root': str(root)}
-        storage.write_json(_path(steps, root), state)
+        storage.write_state(_path(steps, root), state)
     return show(steps, state['phase'], root, launcher)
 
 
@@ -52,6 +53,9 @@ def _step(steps, state, payload):
     payload = {} if payload is None else payload
     if not isinstance(payload, dict):
         raise ValueError('Payload must be a JSON object.')
+    if getattr(steps, 'PLANNING', False) and state['phase'] == steps.ORDER[0]:
+        state['plan_digest'] = planning.require_ready(payload.get('plan'))
+        state['plan'] = payload['plan']
     check = steps.CHECKS.get(state['phase'])
     if check:
         check(state, payload)
@@ -71,10 +75,10 @@ def done(steps, root, payload, launcher, stage=None):
         state.setdefault('root', str(root))
         nxt = _step(steps, state, payload)
         if nxt is None:
-            _path(steps, root).unlink()
+            storage.delete_state(_path(steps, root))
             return steps.DONE_MSG
         state['phase'] = nxt
-        storage.write_json(_path(steps, root), state)
+        storage.write_state(_path(steps, root), state)
     return show(steps, nxt, root, launcher)
 
 
@@ -83,5 +87,5 @@ def abandon(steps, root):
         raise ValueError('Stateless: nothing saved, nothing to abandon.')
     with storage.lock(_base(steps, root)):
         _load(steps, root)
-        _path(steps, root).unlink()
+        storage.delete_state(_path(steps, root))
     return 'Run abandoned.'

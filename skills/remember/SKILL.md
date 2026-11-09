@@ -37,3 +37,7 @@ The output shows leads in four groups: `pitfall` (failed tries, corrections), `i
  The result status: partial limits your conclusions. Use show on a returned next[].ref. Do not rebuild its flags yourself. Always quote full session tokens or full commit SHAs.
 
  More detail: [runtime and SQL](references/runtime.md), [graph](references/graph.md), [history](references/history.md), [setup](references/reader.md).
+
+Workflow state: `query 'SELECT run_id, revision, state FROM workflow_runs' --format table`
+reads exact local journal heads. `workflow_events` adds history. These tables do not use ranked
+session search or its current-session exclusion. `source_ref` identifies the journal/stream/revision.

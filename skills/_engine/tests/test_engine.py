@@ -49,7 +49,8 @@ class StorageTest(TempState):
     def test_state_dir_layout_and_project_file(self):
         path = storage.state_dir('untangle', self.root)
         self.assertEqual(path, self.tmp / 'state' / 'untangle' / storage.project_key(self.root))
-        self.assertEqual(storage.read_json(path / 'project.json'), {'root': str(self.root)})
+        self.assertTrue(path.is_dir())
+        self.assertFalse((path / 'project.json').exists())
 
     def test_lock_is_exclusive_and_released(self):
         base = self.tmp / 'lockdir'

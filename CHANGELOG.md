@@ -2,6 +2,14 @@
 
 One entry per release. A release bumps `VERSION` (and the manifests that copy it) and adds one entry here.
 
+## [0.1.0] - 2026-11-09
+
+- Shared non-skill planning contract and policy ownership in `_engine`.
+- Transactional workflow event journal, legacy state import, exact transcript receipt pilot and SQL views.
+- Build-skills ready-plan gates, bounded redesign, accepted-draft apply/verify and durable application recovery.
+- Standalone workflow templates ship compatible engine, launcher, policy and schema resources.
+- User-only generated workflows; no-choice plans allowed; unresolved choices block completion.
+
 ## [0.0.3] - 2026-11-09
 
 - Per-user state moves to `~/.agents/state/<area>/<project key>/` (`$HANDTOOLS_STATE` overrides it), out of installed skill folders (a plugin update replaced them) and out of projects: build-skills and untangle runs, untangle's `current.md`/`audit.json`/`report.md`, simple-by-design's `workflow.json`, and foundation's `foundation.json`. The ADR log stays committed at `.agents/design/decisions.json`.
