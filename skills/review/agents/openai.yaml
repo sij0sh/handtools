@@ -1,0 +1,5 @@
+interface:
+  display_name: Review
+  short_description: Review a diff, subsystem or reported bug; confirm bugs with evidence, report coverage honestly
+policy:
+  allow_implicit_invocation: false

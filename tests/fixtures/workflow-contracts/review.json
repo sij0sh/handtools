@@ -1,0 +1,32 @@
+{
+  "name": "review",
+  "contract_version": 1,
+  "invocation": "explicit",
+  "mode": "stateful",
+  "recon": {"depth": "map", "required_records": ["contract", "relationship", "gap", "component", "observation"], "external_scope": "supplied",
+            "freshness": "pin"},
+  "check_packs": {"packs": [{"name": "general", "version": 1}, {"name": "tests", "version": 1}, {"name": "python", "version": 1}],
+                  "unsupported": "report-gap"},
+  "stages": [
+    {"name": "frame", "inputs": ["ready plan", "user-approved mode, scope, commands, budgets"], "outputs": {"frame": "mode, baseline, fingerprinted scope", "budgets": "six limits"},
+     "evidence": ["git merge base and changed paths", "file hashes"], "exit_check": "on_frame", "next": ["recon"]},
+    {"name": "recon", "inputs": ["frame"], "outputs": {"recon": "pinned closed snapshot or none+reason"}, "evidence": ["snapshot revision"],
+     "exit_check": "on_recon", "next": ["obligations"]},
+    {"name": "obligations", "inputs": ["frame", "recon", "check packs"], "outputs": {"obligations": "finite (target, check) pairs with rationale"},
+     "evidence": ["check applicability"], "exit_check": "on_obligations", "next": ["hunt", "validate", "challenge", "checkpoint"]},
+    {"name": "hunt", "inputs": ["obligation queue"], "outputs": {"results": "examined|blocked|deferred|not-applicable", "candidates": "proposed", "test_gaps": "chain breaks"},
+     "evidence": ["hashed evidence refs", "approved command runs"], "exit_check": "on_hunt", "next": ["hunt", "validate", "challenge", "checkpoint"]},
+    {"name": "validate", "inputs": ["open candidates"], "outputs": {"verdicts": "confirmed|rejected|unresolved|duplicate", "variants": "obligations"},
+     "evidence": ["counterexample run or complete source argument", "counterevidence", "baseline at merge base"], "exit_check": "on_validate",
+     "next": ["hunt", "validate", "challenge", "checkpoint"]},
+    {"name": "challenge", "inputs": ["journal state"], "outputs": {"objections": "accepted|rejected"}, "evidence": ["current source"],
+     "exit_check": "on_challenge", "next": ["hunt", "validate", "report", "checkpoint"]},
+    {"name": "report", "inputs": ["outcome decided on entry"], "outputs": {"report.md": "generated view"}, "evidence": ["journal state"],
+     "exit_check": "on_report", "next": [null]},
+    {"name": "checkpoint", "inputs": ["reason", "coverage"], "outputs": {"decision": "extend|reframe|publish_incomplete"},
+     "evidence": ["user decision"], "exit_check": "on_checkpoint", "next": ["frame", "hunt", "validate", "challenge", "report"]}
+  ],
+  "budgets": {"limits": {"hunt_transitions": 10, "validate_transitions": 10, "attempts_per_candidate": 3, "variant_obligations": 5,
+                         "challenge_rounds": 2, "max_obligations": 40}, "on_exhausted": "checkpoint"},
+  "outcomes": ["complete", "incomplete", "cancelled"]
+}

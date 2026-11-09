@@ -1,0 +1,20 @@
+{
+  "fixture": "shop: base/ is commit 1; head/ overlays commit 2 (message: 'Simplify cent rounding').",
+  "mode": "diff",
+  "changed": ["shop/pricing.py"],
+  "seeds": [
+    {"id": "rounding-regression", "kind": "candidate", "verdict": "confirmed", "origin": "introduced",
+     "where": "shop/pricing.py round_cents", "observed_at": "shop/checkout.py tax_cents",
+     "example": "tax_cents(1000, 0.0825) is 83 at base and 82 at head (82.5 truncated)"},
+    {"id": "page-off-by-one", "kind": "candidate", "verdict": "confirmed", "origin": "pre-existing",
+     "where": "shop/cart.py Cart.page", "example": "page(1, 2) of 3 items returns item 3, not items 1-2"},
+    {"id": "discount-none", "kind": "candidate", "verdict": "rejected",
+     "where": "shop/pricing.py apply_discount", "claim": "discount['percent'] fails when discount is None",
+     "counterevidence": "shop/checkout.py checkout_total returns before apply_discount when discount is None and validates it otherwise; it is the only caller"},
+    {"id": "refund-untested", "kind": "test_gap", "chain_break": "no-test", "finding": false,
+     "where": "shop/checkout.py refund", "note": "refund is correct; the missing test is a gap, not a bug"},
+    {"id": "discount-test-asserts-format", "kind": "test_gap", "chain_break": "wrong-assertion", "finding": false,
+     "where": "tests/test_checkout.py test_total_with_discount", "note": "asserts '$' in the formatted string, not the 1800 total"}
+  ],
+  "not_findings": ["refund-untested", "discount-test-asserts-format", "discount-none"]
+}

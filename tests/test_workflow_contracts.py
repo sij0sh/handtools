@@ -1,4 +1,4 @@
-"""Draft workflow contract (G5/D10): foundation and untangle are expressible in it.
+"""Draft workflow contract (G5/D10, G6/D21): foundation, untangle and review are expressible in it.
 
 Checks the schema's required keys and enums plus the M4 semantic rules (known transitions,
 reachable stages, defined outcomes, evidence gates). No runtime enforcement yet.
@@ -48,10 +48,19 @@ def problems(m):
 
 class WorkflowContractTest(unittest.TestCase):
     def test_existing_workflows_are_expressible(self):
-        self.assertEqual([p.stem for p in INSTANCES], ['foundation', 'untangle'])
+        self.assertEqual([p.stem for p in INSTANCES], ['foundation', 'review', 'untangle'])
         for path in INSTANCES:
             with self.subTest(manifest=path.name):
                 self.assertEqual(problems(json.loads(path.read_text())), [])
+
+    def test_review_packs_exist_at_their_versions(self):
+        import sys
+        sys.path.insert(0, str(ROOT / 'skills'))
+        from _engine.audit import packs
+        manifest = json.loads((ROOT / 'tests' / 'fixtures' / 'workflow-contracts' / 'review.json').read_text())
+        catalog = packs.load([p['name'] for p in manifest['check_packs']['packs']])
+        versions = {c['pack']: c['version'] for c in catalog.values()}
+        self.assertEqual(versions, {p['name']: p['version'] for p in manifest['check_packs']['packs']})
 
     def test_rules_reject_broken_manifests(self):
         good = json.loads(INSTANCES[0].read_text())
