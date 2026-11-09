@@ -96,9 +96,9 @@ def judge_for(state, root):
             return out
         if kind == 'rejected':
             basis = v.get('attempts', [])
-            need(isinstance(basis, list) and all(type(i) is int and 0 <= i < len(cand['attempts']) for i in basis),
-                 f'{where}: `attempts` lists indexes of this candidate\'s attempts.')
-            failed = [i for i in basis if cand['attempts'][i]['outcome'] == 'tool-failed']
+            need(isinstance(basis, list) and all(type(i) is int and 1 <= i <= len(cand['attempts']) for i in basis),
+                 f'{where}: `attempts` lists this candidate\'s attempt numbers (1 = first).')
+            failed = [i for i in basis if cand['attempts'][i - 1]['outcome'] == 'tool-failed']
             need(not failed, f'{where}: attempt(s) {failed} failed as tools; a failed tool is not evidence against '
                              'the claim. Leave the candidate unresolved or find counterevidence.')
             refs = evidence.hash_refs(root, v.get('counterevidence', []), f'{where} counterevidence')

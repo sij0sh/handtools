@@ -25,7 +25,7 @@
      "evidence_required": ["CI configuration", "the test's collection (paths, markers, skips, xfail)"],
      "falsifiers": ["CI runs the suite that contains it"],
      "validation_methods": ["read CI config and test markers", "an approved collect-only command"],
-     "limits": "No CI configuration in the repository is a recon gap; report it, do not assume CI runs it."},
+     "limits": "No CI configuration in the repository: record a not-in-ci test gap citing where you searched; never assume CI runs it."},
     {"id": "tests/negative-paths", "title": "Failure, invalid input and recovery paths are tested",
      "applies": {"languages": ["*"], "boundaries": ["*"], "modes": ["*"]},
      "evidence_required": ["the failure path", "the test (or none) that exercises it"],

@@ -57,7 +57,11 @@ def runs(state):
         out += [a['command_run'] for a in c['attempts'] if 'command_run' in a]
         v = c.get('verdict') or {}
         out += [x['command_run'] for x in (v.get('proof') or {}, v.get('baseline') or {}) if 'command_run' in x]
-    return out
+    unique = []
+    for r in out:  # a proof usually cites the run an attempt already recorded
+        if r not in unique:
+            unique.append(r)
+    return unique
 
 
 def _spent(state, name):
@@ -117,7 +121,7 @@ def _candidate(c):
         lines += [f'- Rejected: {v["reason"]}', f'- Counterevidence: {_refs(v["counterevidence"])}']
     elif v.get('state') == 'unresolved':
         lines += [f'- Unresolved: {v["reason"]}']
-    lines += [f'- Attempt {n}: {a["method"]} -> {a["outcome"]}: {a["note"]}' for n, a in enumerate(c['attempts'])]
+    lines += [f'- Attempt {n}: {a["method"]} -> {a["outcome"]}: {a["note"]}' for n, a in enumerate(c['attempts'], 1)]
     return lines + ['']
 
 
@@ -158,7 +162,7 @@ def render(state, outcome=None):
     lines += [''] + _coverage(state)
     recon = state.get('recon') or {}
     lines += ['', '## Recon', '', f'Pinned: {recon["run"]} at revision {recon["revision"]}.' if recon.get('run')
-              else f'None: {recon.get("none", "not chosen")}.']
+              else f'None: {recon.get("none", "not chosen").rstrip(".")}.']
     lines += ['', '## Commands run', '']
     lines += [f'- `{r["command"]}` ({r["cwd"]} at {r["revision"][:12]}): exit {r["exit"]}' for r in runs(state)] \
         or ['- none (static analysis only)']

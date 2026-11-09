@@ -38,8 +38,8 @@ EVIDENCE = ('Evidence refs are [{"path": "shop/x.py", "lines": "10-14", "stateme
             'the script hashes each file. Add "revision": "<full sha>" to cite a file as it was at that commit.')
 COMMAND_RUN = ('A command run is {"command": exactly an approved command, "cwd": "worktree"|"tempdir", "revision": '
                '"<sha checked out there>"|"worktree", "exit": N, "output_sha256": "<sha256 of the full output>", '
-               '"excerpt": "<= 2000 chars"}. Never run commands in the project checkout itself: use `git worktree '
-               'add <scratch dir> <sha>` (or a temp copy) and remove it afterwards. A command that fails for '
+               '"excerpt": "<= 2000 chars"}, where output is stdout and stderr combined. Never run commands in the project checkout itself: use `git worktree '
+               'add <scratch dir> <sha>` (or a temp copy) and `git worktree remove --force` it afterwards. A command that fails for '
                'tooling reasons (missing dependency, timeout) is an attempt with outcome tool-failed, not evidence.')
 
 PROMPTS = {
@@ -82,7 +82,7 @@ PROMPTS = {
         'consumers; check mitigations before suspecting a bug. A suspicious pattern is a candidate, not a '
         'finding; a candidate cites a concrete violated expectation. A missing or weak test is a test gap, '
         'never a bug. In diff mode, consider unchanged callers and consumers the change affects.\n'
-        + EVIDENCE + '\n'
+        + EVIDENCE + '\n' + COMMAND_RUN + '\n'
         'Send {"results": [{"id": "O1", "status": "examined", "outcome": {"performed": "what you checked", '
         '"result": "no-issue|candidates|test-gaps", "refs": ["C1", "T1"]}, "evidence": [...]}, {"id": "O2", '
         '"status": "blocked|deferred|not-applicable", "reason": "..."}, {"id": "O3", "status": "investigating", '
@@ -99,7 +99,9 @@ PROMPTS = {
         'counterevidence first: a caller that validates, a guard, a contract that allows the behavior. In diff '
         'mode, decide origin: introduced or pre-existing need baseline evidence at the merge base (refs with '
         '"revision" or a run there); otherwise unknown with a reason. Severity and confidence are separate. '
-        'Mutation testing only for a named uncertainty, as an attempt with an approved command.\n'
+        'Mutation testing only for a named uncertainty, as an attempt with an approved command. Another '
+        'symptom of a fault already confirmed is a duplicate (duplicate_of) unless it has a distinct '
+        'consequence worth its own finding; say which in the verdict.\n'
         + EVIDENCE + '\n' + COMMAND_RUN + '\n'
         'Send {"candidates": [{"id": "C1", "attempt": {"method": "...", "outcome": "supports|refutes|'
         'inconclusive|tool-failed", "note": "...", "command_run": {...}, "uncertainty": "(mutation)"}, '
@@ -125,7 +127,7 @@ PROMPTS = {
         'The report below is rendered from the journal. Check it against the state; do not edit it. Present '
         'it to the user: confirmed findings, unresolved work, test gaps, coverage and limitations. Nothing is '
         'fixed; a fix is a separate task.\n\n@REPORT@\n'
-        'Send {} to write report.md and close the run.'),
+        'Send {} to write @REPORT_PATH@ and close the run.'),
     'checkpoint': _at(
         'Show the user the reason, coverage and open work above and ask for one decision. Do not decide for '
         'them. Send one of:\n'
@@ -143,7 +145,8 @@ def _prompt_with_report(prompt):
         text = prompt(root)
         if '@REPORT@' in text:
             state = storage.read_state(_path(root))
-            text = text.replace('@REPORT@', report.render(state))
+            text = text.replace('@REPORT@', report.render(state)).replace(
+                '@REPORT_PATH@', str(report.report_path(root, state['run_id'])))
         return text
     return wrapped
 

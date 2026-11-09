@@ -4,7 +4,7 @@ description: Review a diff, a subsystem or a reported bug in bounded, resumable 
 disable-model-invocation: true
 ---
 
-Set `S` to this skill's absolute directory. From the project root, drive the run with `S/scripts/workflow.py` (`python3` on Linux/macOS, `python` on Windows). The checks come from `S/../_engine/audit/packs/`; the script finds them.
+Set `S` to this skill's absolute directory. From the project root, drive the run with `S/scripts/workflow.py [--root DIR] <command>` (`python3` on Linux/macOS, `python` on Windows). The checks come from `S/../_engine/audit/packs/`; the script finds them.
 
 1. `start`; do the printed stage, then run the printed `done` command, piping JSON when asked.
 2. Repeat until `DONE`. Lost the current stage: `status`.

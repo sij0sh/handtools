@@ -12,6 +12,9 @@ choice. Challenge gaps, assumptions and simpler alternatives. A no-material-choi
 Ready means no blocking unknowns, a verification plan and authority for the specific scope. An answered
 question is not user approval. A loop limit with blocking issues means needs_input, never ready.
 Use a compact pass for obvious work. Reopen affected choices when evidence or scope changes.
+A plan is {"goal": "...", "constraints": [], "criteria": ["observable check"], "decisions": [{"id":
+"P1", "question": "...", "answer": "...", "after": []}], "blocking": [], "verification": "how criteria
+are checked", "challenged": true}; challenged means gaps and simpler alternatives were considered.
 Read policy/defaults.md, policy/contract.md, policy/instructions.md and policy/languages/<language>.md
 under the printed policy directory as relevant. Never invoke another skill to use this contract."""
 

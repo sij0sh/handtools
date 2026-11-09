@@ -14,6 +14,8 @@ v0.1.1 plan milestone M2 (review, candidate validation, targeted test analysis),
 - Recon pinning moved to `_engine/recon/pin.py`, shared by untangle and review; untangle's behavior and exports are unchanged.
 - Engine: `flow.abandon` calls an optional `steps.on_abandon(state, root)` hook before closing a run.
 - Workflow contract fixtures include review with concrete check packs.
+- The shared planning prompt now prints the plan's JSON shape (all workflows).
+- Evaluation: `.agents/artifacts/v011-m2-report.md` (scripted runs plus an independent agent run on the fixture).
 
 ## [0.1.1] - 2026-11-09
 

@@ -197,6 +197,9 @@ class ReviewTest(unittest.TestCase):
         self.assertIn('## Findings (confirmed): 2', text)
         self.assertIn('## Test gaps: 2 (not bug findings)', text)
         self.assertIn('Report-only', text)
+        ran = text.split('## Commands run')[1].split('##')[0]
+        self.assertEqual(ran.count(TAX), 2)  # head (attempt and proof cite one run) and merge base
+        self.assertIn('- Attempt 1:', text)
         # The report renders from the journal alone: replaying the final state gives the same bytes.
         history = storage.journal(storage.state_dir('review', self.root)).history('workflow.json')
         final = events.replay(history[:-1])[0]
@@ -234,7 +237,7 @@ class ReviewTest(unittest.TestCase):
         refused(wrong_base, 'baseline refs need')
         refused({'id': 'C3', 'verdict': {'state': 'rejected', 'reason': 'trust me'}}, 'cite at least one')
         refused({'id': 'C3', 'attempt': {'method': 'run', 'outcome': 'tool-failed', 'note': 'import error'},
-                 'verdict': {'state': 'rejected', 'reason': 'it failed', 'attempts': [0],
+                 'verdict': {'state': 'rejected', 'reason': 'it failed', 'attempts': [1],
                              'counterevidence': ev('shop/checkout.py', 'x')}}, 'failed as tools')
         refused({'id': 'C3', 'verdict': {'state': 'duplicate'}}, 'duplicate_of')
         refused({'id': 'C3', 'verdict': {'state': 'unresolved', 'reason': 'unsure'}}, 'at least one recorded attempt')
