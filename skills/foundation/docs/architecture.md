@@ -33,7 +33,7 @@ flowchart LR
 - **Consent before writes:** no project file is written until the user approves specific items in `assess`.
 - **Portable runtime:** scripts remain Python 3.9+ and standard-library-only; optional parsers degrade to `skipped`.
 - **One capability per change:** `apply` writes only approved items and keeps existing project conventions.
-- **Decisions:** accepted and declined items are recorded in `.agents/foundation.json` for the next run.
+- **Decisions:** interview answers (including project kind and maturity) are rows under foundation's goal in the ADR log (`designflow.py record`). Accepted and declined item ids, and that goal's id, are in `~/.agents/state/decisions/<project key>/foundation.json` for the next run.
 
 ## Data flow
 

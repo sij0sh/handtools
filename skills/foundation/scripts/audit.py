@@ -115,7 +115,6 @@ def main():
                 'dirty': bool(git(root, 'status', '--porcelain'))},
         'files': source_files,
         'stacks': stacks,
-        'decisions_record': (root / '.agents/foundation.json').is_file(),
         'adr_log': adr_log(root, paths),
         'evidence': evidence,
         'warnings': [f'tracked env file: {f}' for f in tracked_env_files(root)],

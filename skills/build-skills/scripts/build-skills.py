@@ -4,7 +4,8 @@
 Run from the project root. Python 3.9+; standard library only.
 `done` reads each stage's payload as JSON on stdin. Logic lives in build_skills/; this file owns the command line only.
 
-State under <skill>/state/<project-key>/ (script owns all of it; the agent edits only sN/draft/):
+State under ~/.agents/state/build-skills/<project-key>/ ($HANDTOOLS_STATE replaces ~/.agents/state;
+the script owns all of it; the agent edits only sN/draft/):
   workflow.json              session registry {version, root, sessions[]}
   workflow.lock              short-lived lock directory around writes
   sN/design.md, sN/review-N.md  stage artifacts

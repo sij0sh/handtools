@@ -7,8 +7,11 @@ import hashlib
 import json
 import re
 from datetime import date
+from pathlib import Path
 
 from . import storage
+
+RECORD = Path('.agents/design/decisions.json')  # committed in the project
 
 GOAL_KEYS = ('goal', 'constraints', 'criteria')
 GOAL_REQUIRED = ['id', 'goal', 'decisions']
@@ -94,11 +97,11 @@ def validate(record):
 
 
 def exists(root):
-    return (root / storage.RECORD).exists()
+    return (root / RECORD).exists()
 
 
 def load(root):
-    record = storage.read_json(root / storage.RECORD)
+    record = storage.read_json(root / RECORD)
     validate(record)
     return record
 
@@ -108,7 +111,7 @@ def load_or_empty(root):
 
 
 def save(root, record):
-    storage.write_json(root / storage.RECORD, record)
+    storage.write_json(root / RECORD, record)
 
 
 def find_goal(record, gid):

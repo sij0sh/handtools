@@ -1,9 +1,9 @@
 """Commands: start, done, status, abandon."""
 from .config import DONE_MSG
 from .prompts import render, summary
-from .sessions import active, close, find, load_registry, save_registry, select_active, timestamp
+from .sessions import active, base_dir, close, find, load_registry, save_registry, select_active, timestamp
 from .stages import PHASES
-from .storage import base_dir, lock
+from .storage import lock
 
 
 def cmd_start(root, launcher):

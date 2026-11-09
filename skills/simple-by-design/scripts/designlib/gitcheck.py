@@ -5,7 +5,7 @@ No git, or a root outside a work tree, means nothing to warn about.
 """
 import subprocess
 
-from . import storage
+from . import record
 
 PATTERN = ('.agents/*\n'
            '!.agents/design/\n'
@@ -24,7 +24,7 @@ def warning(root):
     """Return a warning when decisions.json is ignored or untracked in git, else None."""
     if _git(root, 'rev-parse', '--is-inside-work-tree') != 0:
         return None
-    path = storage.RECORD.as_posix()
+    path = record.RECORD.as_posix()
     if _git(root, 'ls-files', '--error-unmatch', path) == 0:
         return None
     if _git(root, 'check-ignore', '-q', '--no-index', path) == 0:

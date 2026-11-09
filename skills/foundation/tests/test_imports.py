@@ -47,8 +47,11 @@ class ImportTests(unittest.TestCase):
     def test_flow_only_imports_steps_and_storage(self):
         self.assertEqual(local_imports(PACKAGE / 'flow.py'), {'steps', 'storage'})
 
+    def test_steps_only_imports_storage(self):
+        self.assertEqual(local_imports(PACKAGE / 'steps.py'), {'storage'})
+
     def test_other_modules_have_no_local_imports(self):
-        for name in ('cli', 'steps', 'storage'):
+        for name in ('cli', 'storage'):
             self.assertEqual(local_imports(PACKAGE / f'{name}.py'), set(), name)
 
     def test_scripts_import_only_the_standard_library(self):

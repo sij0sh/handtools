@@ -36,7 +36,6 @@ class AuditTests(unittest.TestCase):
             self.assertIn('mise.toml', report['evidence']['runtime-versions'])
             self.assertIn('tests', report['evidence']['tests-lint'])
             self.assertIn('.gitignore', report['evidence']['secrets-excluded'])
-            self.assertFalse(report['decisions_record'])
             self.assertEqual(report['warnings'], [])
 
     @unittest.skipUnless(shutil.which('git'), 'git is required')

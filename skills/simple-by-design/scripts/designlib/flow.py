@@ -9,7 +9,7 @@ def _step(state, rec, session, launcher, limit):
 def start(root, launcher):
     """Add a fresh session; keep decisions.json and every earlier session."""
     limit = config.max_challenges()
-    with storage.lock(root):
+    with storage.lock(sessions.base(root)):
         if record.exists(root):
             rec = record.load(root)
         else:
@@ -23,7 +23,7 @@ def start(root, launcher):
 
 def done(root, sid, payload, launcher):
     """Apply the payload, verify the step, and advance; on any error write nothing."""
-    with storage.lock(root):
+    with storage.lock(sessions.base(root)):
         limit = config.max_challenges()
         state = sessions.load(root)
         session = sessions.select_active(state, sid)
@@ -90,7 +90,7 @@ def record_goal(root, gid, payload):
         raise ValueError('record needs a JSON object on stdin.')
     if 'id' in payload:
         raise ValueError('record: pass an existing goal with --goal G#, not `id` in the payload.')
-    with storage.lock(root):
+    with storage.lock(sessions.base(root)):
         rec = record.load_or_empty(root)
         state = sessions.load(root, allow_missing=True)
         if gid is not None:
@@ -121,7 +121,7 @@ def show(root, gid):
 
 
 def abandon(root, sid):
-    with storage.lock(root):
+    with storage.lock(sessions.base(root)):
         state = sessions.load(root)
         session = sessions.find(state, sid)
         if session['status'] != 'active':

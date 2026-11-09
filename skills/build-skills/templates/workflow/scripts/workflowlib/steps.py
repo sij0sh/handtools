@@ -3,8 +3,10 @@
 Example flow: do X, then Y; if Y's result is A, do Z, else finish.
 Each prompt ends on a criterion its check verifies. Payloads arrive as JSON on stdin.
 MODE: 'stateful' tracks one run per project; 'stateless' saves nothing and `done --stage S` names the step.
+AREA: this skill's folder under the per-user state root (see storage.py); set it to the skill's name.
 """
 MODE = 'stateful'
+AREA = 'workflow'
 ORDER = ['x', 'y', 'z']
 
 PROMPTS = {

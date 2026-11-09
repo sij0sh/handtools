@@ -1,16 +1,17 @@
 """untangle stages: order, prompts, and the gate and transition for each step.
 
 The script owns the path ledger, coverage, work queue, budgets, and exports; the agent reviews.
-Every accepted `done` rewrites <root>/.agents/artifacts/untangle/<audit-id>/current.md (where
+Every accepted `done` rewrites <state root>/untangle/<project key>/<audit-id>/current.md (where
 the run is) and audit.json (all state); publishing adds report.md. Exports persist after the run ends.
 Modules: ledger (paths), work (queue), checks (payloads), transitions (state), exports (files).
 """
 from . import checks, exports, transitions, work
+from .ledger import AREA  # noqa: F401  (flow.py reads steps.AREA)
 
 MODE = 'stateful'
 ORDER = ['inventory', 'map', 'scope', 'dissect', 'synthesize', 'challenge', 'checkpoint']
 
-_CURRENT = 'First read current.md in the newest .agents/artifacts/untangle/audit-*/ folder.'
+_CURRENT = f'First read current.md in the newest audit-*/ folder in {exports.AUDITS}.'
 
 PROMPTS = {
     'inventory': (
@@ -113,7 +114,7 @@ PROMPTS = {
         '{"approved_by_user": true, "decision": "publish_incomplete"}: write report.md marked INCOMPLETE.'),
 }
 
-DONE_MSG = ('DONE: report.md and audit.json are under .agents/artifacts/untangle/<audit-id>/. '
+DONE_MSG = (f'DONE: report.md and audit.json are in the newest audit-*/ folder in {exports.AUDITS}. '
             'Present report.md and stop for review. Nothing is approved or implemented.')
 
 # Per-step verification; raise ValueError to refuse `done`.

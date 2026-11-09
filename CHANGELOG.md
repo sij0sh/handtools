@@ -2,6 +2,13 @@
 
 One entry per release. A release bumps `VERSION` (and the manifests that copy it) and adds one entry here.
 
+## [0.0.3] - 2026-11-09
+
+- Per-user state moves to `~/.agents/state/<area>/<project key>/` (`$HANDTOOLS_STATE` overrides it), out of installed skill folders (a plugin update replaced them) and out of projects: build-skills and untangle runs, untangle's `current.md`/`audit.json`/`report.md`, simple-by-design's `workflow.json`, and foundation's `foundation.json`. The ADR log stays committed at `.agents/design/decisions.json`.
+- foundation records its interview answers, including project kind and maturity, as ADR rows under one goal. `foundation.json` keeps only `goal`, `accepted`, `declined` and `updated`.
+- One `storage.py` contract across the four workflow skills and build-skills' template (`state_root`, `project_root`, `project_key`, `state_dir`, `lock`). The bundle tests fail if any copy of `storage.py`, `cli.py` or `flow.py` differs from the template's.
+- Upgrading: move each project's `.agents/design/workflow.json` to `~/.agents/state/decisions/<project key>/` to keep its sessions (run any `designflow.py status` once to create the folder and its `project.json`). Unfinished build-skills or untangle runs and old `.agents/artifacts/untangle/` exports are not carried over.
+
 ## [0.0.2] - 2026-11-09
 
 - remember: evidence extraction normalizes Windows path separators, so repository paths are recognized; its activity continuation test no longer assumes short temporary paths.

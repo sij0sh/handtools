@@ -1,4 +1,4 @@
-"""Command-line helpers. Shared verbatim by saaw and its workflow template; edit both copies together."""
+"""Command-line helpers. Shared verbatim by every handtools workflow skill and the template; tests/test_bundle.py keeps the copies equal."""
 import json
 import os
 import shlex

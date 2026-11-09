@@ -17,7 +17,7 @@ LIB = SKILL_DIR / 'scripts' / 'designlib'
 if str(SCRIPT.parent) not in sys.path:
     sys.path.insert(0, str(SCRIPT.parent))
 
-from designlib import config, flow  # noqa: E402
+from designlib import config, flow, storage  # noqa: E402
 
 
 def load_module(path, name):
@@ -35,15 +35,22 @@ def printed_command(output, marker='Then run:'):
 class DesignflowTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
+        self._home = tempfile.TemporaryDirectory()
+        env = mock.patch.dict(os.environ, {storage.ENV: self._home.name})
+        env.start()
+        self.addCleanup(env.stop)
+        self.root = Path(self._tmp.name).resolve()
         self.design = self.root / '.agents' / 'design'
         self.record = self.design / 'decisions.json'
         self.view = self.design / 'decisions.md'
-        self.state = self.design / 'workflow.json'
-        self.lock = self.design / 'workflow.lock'
+        self.base = Path(self._home.name).resolve() / config.AREA / storage.project_key(self.root)
+        self.state = self.base / 'workflow.json'
+        self.lock = self.base / 'workflow.lock'
+        self.base.mkdir(parents=True)
 
     def tearDown(self):
         self._tmp.cleanup()
+        self._home.cleanup()
 
     def run_cmd(self, *args, payload=None, raw=None):
         stdin = raw if raw is not None else ('' if payload is None else json.dumps(payload))
@@ -606,9 +613,9 @@ class ImportGraphTest(unittest.TestCase):
     ALLOWED = {
         'designflow': {'flow'},
         'flow': {'storage', 'sessions', 'record', 'config', 'steps', 'gitcheck'},
-        'gitcheck': {'storage'},
+        'gitcheck': {'record'},
         'steps': {'sessions', 'record'},
-        'sessions': {'record', 'storage'},
+        'sessions': {'config', 'record', 'storage'},
         'record': {'storage'},
         'config': set(),
         'storage': set(),

@@ -106,13 +106,14 @@ final decide, and anything still open is listed in the summary.
 
 ## Files it writes
 
-In `.agents/design/`:
-
 All owned by the script; the agent edits them only through `done`.
 
-- `decisions.json`: the decision record (ADR log), one set per goal. Commit it.
-- `workflow.json`: permanent `{version, sessions[]}` registry.
-- `workflow.lock`: short-lived lock directory around writes.
+- `<project>/.agents/design/decisions.json`: the decision record (ADR log), one set per goal. Commit it.
+- `~/.agents/state/decisions/<project key>/workflow.json`: permanent `{version, sessions[]}` registry, per user.
+- `~/.agents/state/decisions/<project key>/workflow.lock`: short-lived lock directory around writes.
+
+`$HANDTOOLS_STATE` replaces `~/.agents/state`. The project key is `<folder name>-<8-hex hash of its path>`;
+`project.json` beside it names the project. After moving a repo, move its key folder by hand.
 
 ## What's inside
 

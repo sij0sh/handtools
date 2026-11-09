@@ -5,10 +5,11 @@ Run from the project root. Requires Python 3.9+; standard library only.
 `done` reads each step's edits as JSON on stdin; the agent never opens the files.
 Logic lives in designlib/; this file owns the command line only.
 
-Files (under .agents/design/), all owned by this script:
-  decisions.json  the project's decision record (ADR log), one set per goal; commit it
-  workflow.json   permanent session registry
-  workflow.lock   short-lived lock directory around writes
+Files, all owned by this script:
+  <root>/.agents/design/decisions.json  the project's decision record (ADR log), one set per goal; commit it
+  ~/.agents/state/decisions/<project key>/workflow.json  permanent session registry (per user)
+  ~/.agents/state/decisions/<project key>/workflow.lock  short-lived lock directory around writes
+  ($HANDTOOLS_STATE replaces ~/.agents/state.)
 """
 import argparse
 import json

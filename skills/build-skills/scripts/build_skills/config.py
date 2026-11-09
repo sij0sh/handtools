@@ -4,6 +4,8 @@ from pathlib import Path
 SKILL_DIR = Path(__file__).resolve().parents[2]
 REFS = SKILL_DIR / 'references'
 TEMPLATE = SKILL_DIR / 'templates' / 'workflow' / 'scripts'
+# Run state: <state root>/build-skills/<project key>/ (storage.py).
+AREA = 'build-skills'
 KINDS = ('prompt', 'staged')
 MODELS = ('stateless', 'stateful')
 GROUND_FIELDS = ['mode', 'kind', 'target', 'purpose', 'trigger', 'gap', 'pass_condition']

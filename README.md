@@ -53,6 +53,25 @@ simple-by-design owns every rule other skills use. Nothing is copied:
 
 A skill reaches them at `S/../simple-by-design/`, where `S` is the skill's own directory.
 
+## Where skills keep state
+
+The ADR log is committed in each project (`.agents/design/decisions.json`). Everything else a skill saves
+between steps is per user, outside both the project and the installed skill (a plugin update replaces the
+skill's folder):
+
+```text
+~/.agents/state/                     # $HANDTOOLS_STATE overrides; %USERPROFILE%\.agents\state on Windows
+  decisions/<project key>/           # simple-by-design sessions (workflow.json), foundation.json
+  untangle/<project key>/            # run state and <audit-id>/{current.md, audit.json, report.md}
+  build-skills/<project key>/        # sessions, drafts, backups
+  <skill>/<project key>/             # any skill built from build-skills' workflow template
+```
+
+The project key is `<folder name>-<8-hex hash of its absolute path>`, and each key folder has a
+`project.json` naming its project. Moving a repo leaves its state behind; `mv` the key folder to follow it.
+Each skill names its folder in one `AREA` constant. `storage.py` owns this layout, and its copies stay
+byte-identical until they share one home (checked by `tests/test_bundle.py`).
+
 ## Release
 
 1. Bump `VERSION` and the same version in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json` and `package.json`.

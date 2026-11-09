@@ -1,5 +1,6 @@
 """Tests for the stateless workflow CLI and stage checks."""
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -7,6 +8,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+STATE = tempfile.TemporaryDirectory()  # never touch the real ~/.agents/state
+os.environ['HANDTOOLS_STATE'] = STATE.name
 WORKFLOW = ROOT / 'scripts' / 'workflow.py'
 
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -19,7 +22,7 @@ def run_workflow(root, *args, payload=None):
     return subprocess.run(
         [sys.executable, str(WORKFLOW), '--root', str(root), *args],
         cwd=root,
-        input=None if payload is None else json.dumps(payload),
+        input='' if payload is None else json.dumps(payload),
         capture_output=True,
         text=True,
         check=False,

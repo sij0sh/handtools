@@ -2,7 +2,7 @@
 import re
 from datetime import datetime, timezone
 
-from . import record, storage
+from . import config, record, storage
 
 ORDER = ['ground', 'branch', 'decide', 'challenge']
 CLOSED_PHASE = 'done'
@@ -83,8 +83,13 @@ def _normalize(root, raw):
     return state
 
 
+def base(root):
+    """Per-user dir for workflow.json and workflow.lock; decisions.json stays in the project."""
+    return storage.state_dir(config.AREA, root)
+
+
 def load(root, allow_missing=False, persist_migration=False):
-    path = root / storage.STATE
+    path = base(root) / 'workflow.json'
     if not path.exists():
         if allow_missing:
             return {'version': 1, 'sessions': []}
@@ -92,14 +97,14 @@ def load(root, allow_missing=False, persist_migration=False):
     raw = storage.read_json(path)
     state = _normalize(root, raw)
     if persist_migration and isinstance(raw, dict) and 'sessions' not in raw:
-        with storage.lock(root):
+        with storage.lock(base(root)):
             state = _normalize(root, storage.read_json(path))
             save(root, state)
     return state
 
 
 def save(root, state):
-    storage.write_json(root / storage.STATE, state)
+    storage.write_json(base(root) / 'workflow.json', state)
 
 
 def add(state):

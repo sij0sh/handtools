@@ -299,6 +299,156 @@
           "date": "2026-11-06"
         }
       ]
+    },
+    {
+      "id": "G3",
+      "goal": "Consolidate the uncommitted state the handtools workflow skills (build-skills, foundation, simple-by-design, untangle) read and write into one per-user root, ~/.agents/state (platform equivalent on macOS/Windows), with a decisions/ area shared by simple-by-design and foundation and areas for build-skills and untangle, each organized by project/repo, keeping today's file shapes and merging schemas where that removes duplication. The ADR log itself stays committed in the project. Phase 2 (separate, after this): DRY the scripts/templates (the copied workflowlib) so new skills reuse one implementation.",
+      "constraints": [
+        "Today state is scattered across 3 conventions: (a) <installed skill dir>/state/<name>-<sha8 of root path>/workflow.json for build-skills and untangle (foundation's workflowlib is stateless); (b) <repo>/.agents/design/{decisions.json, workflow.json, workflow.lock} for simple-by-design; (c) <repo>/.agents/foundation.json (kind, maturity, decisions, accepted, declined, updated) and <repo>/.agents/artifacts/untangle/<audit-id>/{current.md, audit.json, report.md} as derived exports.",
+        "State inside the installed skill dir is unsafe: G1 constraint says plugin caches are versioned and pruned (e.g. ~/.claude/plugins/cache/handtools/handtools/0.0.1/...), so an update silently loses in-progress build-skills/untangle runs. An orphan skills/untangle/state/ut-7769e103/ already sits in this repo checkout.",
+        "Adopted G1 decisions D6/D11/D12: the ADR log is the project's COMMITTED .agents/design/decisions.json, written only by designflow.py (done/record); foundation and validate.py require it tracked in git. Moving it to ~/.agents/state would reverse these and take ADRs out of the repo (not reviewable in PRs, lost to other clones/teammates).",
+        "storage.py/cli.py/flow.py are copied verbatim (by md5) across build-skills template, foundation and untangle; build-skills' own build_skills/storage.py equals the template copy; simple-by-design has its own variant with a different lock path. project_root()/project_key()/lock()/write_json() are duplicated 4x.",
+        "~/.agents/skills is read by pi and Codex as a skills dir; ~/.agents/state is a sibling, not under skills/, so harnesses will not scan it.",
+        "Python 3.9+ stdlib only; Linux, macOS, Windows.",
+        "Keep current per-skill file shapes (workflow.json session registries, untangle's audit state) unless a merge removes a real duplicate."
+      ],
+      "criteria": [
+        "Every non-committed run/session state for the four skills lives under one per-user root with one documented layout: <root>/<area>/<project-key>/...; no skill writes state into its own install dir.",
+        "One function computes the state root and project key; every skill uses it (no second copy).",
+        "A plugin update or reinstall does not lose an in-progress run.",
+        "The ADR log location and commit policy are explicit and consistent with (or explicitly supersede) G1 D6/D12.",
+        "Existing state (this repo's .agents/design/workflow.json, the stray untangle state) has a stated migration or is knowingly dropped.",
+        "Tests cover root resolution per OS (incl. an override env var) and project-key stability."
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "question": "ADR log: does the committed <repo>/.agents/design/decisions.json move into ~/.agents/state/decisions/<project>/ (superseding G1 D6/D12), or stay in the repo with only uncommitted session/run state moving to ~/.agents/state?",
+          "status": "resolved",
+          "answer": "Keep it in the project. The ADR log stays the committed <repo>/.agents/design/decisions.json, written only by designflow.py (done/record) and defined by references/decisions.schema.json; G1/D6, G1/D11 and G1/D12 stand unchanged (gitcheck warnings, foundation's `adrs` capability, audit.py/validate.py tracking checks all stay). Only uncommitted state moves: simple-by-design's workflow.json session registry and workflow.lock go to ~/.agents/state/decisions/<key>/. designflow takes that one lock around writes to both files.",
+          "rationale": "User choice (revised): decisions stay reviewable in PRs and shared with every clone; session state is per-user scratch and belongs outside the repo.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D2",
+          "question": "State root per OS and override: Path.home()/.agents/state on every OS, XDG/Library/AppData per platform, and which env var overrides it?",
+          "status": "resolved",
+          "answer": "Path.home() / '.agents' / 'state' on every OS (Windows: %USERPROFILE%\\.agents\\state), overridden by env HANDTOOLS_STATE (absolute path, used as the root itself). No XDG/AppData branching.",
+          "rationale": "Matches the user's request and the existing ~/.agents/skills convention pi and Codex already use on all three OSes; one code path. The env var lets tests and unusual setups redirect without code changes.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D3",
+          "question": "Project key under each area: keep today's <dirname>-<sha8 of resolved root path>, or derive from the git remote URL (shared across clones/worktrees)?",
+          "status": "resolved",
+          "answer": "Keep today's key: <sanitized dirname>-<first 8 hex of sha256(normcase(resolved project root))>, root = --root, else git top level, else cwd. Each <area>/<key>/ dir also gets project.json {\"root\": \"<abs path>\"} written on first use so a human (and `status`) can tell which repo a key belongs to. Moving or renaming a repo orphans only its in-progress session/run state (the ADR log travels with the repo, D1); the fix is a manual `mv` of the key dir (documented), no remap command.",
+          "rationale": "User choice. project.json makes an orphaned key diagnosable without adding remote-URL logic.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D4",
+          "question": "What lives in decisions/<project>/: simple-by-design's session registry (workflow.json) plus what of foundation's .agents/foundation.json (kind, maturity, topic->answer decisions, accepted/declined item ids)? Do foundation's topic->answer decisions merge into the ADR schema instead of a second decisions shape?",
+          "after": [
+            "D1"
+          ],
+          "status": "resolved",
+          "answer": "decisions/<key>/ holds simple-by-design's workflow.json (unchanged shape), workflow.lock, project.json, and foundation.json. The ADR log is not here (D1). Schema merge: foundation's interview answers (today a topic->answer dict in .agents/foundation.json, plus kind and maturity) become ADR rows in the committed decisions.json, recorded through `designflow.py record` under one foundation goal. foundation.json shrinks to foundation's own bookkeeping: {\"goal\": \"G#\", \"accepted\": [ids], \"declined\": [ids], \"updated\": \"YYYY-MM-DD\"}.",
+          "rationale": "One owner for decisions (defaults #2): the same fact no longer lives in two shapes in two files. accepted/declined are capability-item bookkeeping, not decisions, so they stay foundation's and per-user.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D5",
+          "question": "untangle's derived exports (.agents/artifacts/untangle/<audit-id>/current.md, audit.json, report.md): move under state/untangle/<project>/ next to the run state, or stay in the repo?",
+          "after": [
+            "D2",
+            "D3"
+          ],
+          "status": "resolved",
+          "answer": "Move them: untangle writes current.md, audit.json, report.md to ~/.agents/state/untangle/<key>/<audit-id>/, beside workflow.json, and prints the absolute path of report.md/current.md in each step. Nothing is written under the target repo.",
+          "rationale": "User choice; keeps audited repos clean and removes the .agents/artifacts .gitignore entries.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D6",
+          "question": "Area naming and layout rule for build-skills, untangle, and future skills generated from build-skills' template: <root>/<area>/<project-key>/ with area = skill name except the shared 'decisions' area? Per-area lock?",
+          "after": [
+            "D2",
+            "D3"
+          ],
+          "status": "resolved",
+          "answer": "Layout: <root>/<area>/<key>/. area = the skill's AREA constant (D10): the skill name for build-skills, untangle, and any skill generated from build-skills' template; simple-by-design and foundation share area `decisions`. One workflow.lock per <area>/<key>/ dir, same mkdir lock and stale timeout as today, guarding script writes only (foundation.json is agent-written, D9). No skill writes into its own install dir; the generated-skill .gitignore 'state/' line and the template docstring change accordingly.",
+          "rationale": "The user's proposed layout; area-per-skill keeps skills from colliding without a registry, and the shared area is exactly the one shared owner of decisions.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D7",
+          "question": "Where does the single state-root/project-key/lock/write_json implementation live so all four skills import one copy (owned by one sibling skill vs a shared folder), or is that deferred to phase 2 with only the layout fixed now?",
+          "after": [
+            "D6"
+          ],
+          "status": "resolved",
+          "answer": "Fix the layout and contract now; the single implementation lands in phase 2. Contract of the one module: state_root() -> Path (HANDTOOLS_STATE or ~/.agents/state); project_root(arg) -> Path; project_key(root) -> str; state_dir(area, root) -> Path (creates it and project.json); read_json/write_json(atomic); lock(dir). Phase 2 picks its home and how the 4 skills plus the template import it (G1/D7's deferred workflowlib session). Until then each existing storage.py copy is edited identically, and the bundle test asserts the copies are byte-equal so they cannot drift in the meantime.",
+          "rationale": "The user split the work into two phases; where shared code lives is the core phase-2 question (G1/D7 deferred it). An equality test keeps criterion 'one function, no drifting copy' honest in the interim.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D8",
+          "question": "Migration of existing state (this repo's .agents/design/workflow.json with sessions s1/s2, stray skills/untangle/state/, any <installed skill>/state dirs): automatic move on first run, one-off manual move, or drop?",
+          "after": [
+            "D1",
+            "D6"
+          ],
+          "status": "resolved",
+          "answer": "One-off manual move, no migration code. On this machine: move handtools' .agents/design/workflow.json to ~/.agents/state/decisions/<handtools key>/ (decisions.json stays where it is, committed); delete the stray skills/untangle/state/ and any <installed skill>/state dirs (in-progress runs only, already exposed to cache pruning). CHANGELOG notes, for any other user, the one `mv` per project for workflow.json and .agents/foundation.json. Bump the version (G1/D3).",
+          "rationale": "Simplest adequate: one known user, a handful of files; permanent legacy-path code would outlive its one use.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D9",
+          "after": [
+            "D4",
+            "D6"
+          ],
+          "question": "Who writes foundation.json now that it lives outside the repo? Today the agent writes .agents/foundation.json itself in apply, so a script lock cannot cover it.",
+          "answer": "The agent still writes it, at the absolute path foundation's steps.py prints, computed through storage.state_dir('decisions', root). No lock: foundation's apply step is its only writer, and designflow.py never touches it. This corrects D6's 'under that dir's lock' clause: the lock guards only designflow's decisions.json/workflow.json writes. check_apply reads the same path and requires goal, accepted, declined, updated.",
+          "rationale": "Same writer as today, only the location changes; the agent cannot take a script-held lock.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D10",
+          "after": [
+            "D6"
+          ],
+          "question": "How does a skill name its area: a constant in code, or derived from its install folder name?",
+          "answer": "An explicit constant: AREA = 'decisions' in simple-by-design and foundation, 'untangle', 'build-skills'. The template's steps.py declares AREA beside MODE, and build-skills sets it to the new skill's name when it copies the template.",
+          "rationale": "Local reasoning (defaults #3): the reader sees the area in the code. Install folder names can differ by harness.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D11",
+          "after": [
+            "D1"
+          ],
+          "question": "Does the bundle test change now that workflow.json leaves the repo?",
+          "answer": "The bundle test keeps both G1/D8d checks (schema vs record.py, and every committed decisions.json validates). Tests never read the real ~/.agents/state; they set HANDTOOLS_STATE to a temp dir. No supersession is recorded against G1.",
+          "rationale": "With the ADR log still committed (D1), G1's decisions stand as written.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D12",
+          "after": [
+            "D4"
+          ],
+          "question": "How does foundation's interview find the decisions it already recorded once they live in decisions.json?",
+          "answer": "foundation.json.goal names its goal. Interview runs `designflow.py show` and treats that goal's resolved rows as settled; apply records new and changed answers with `designflow.py record --goal <that G#>` (no --goal on first run, then stores the new G# in foundation.json). kind and maturity are rows in that goal, questions 'Project kind' and 'Maturity'.",
+          "rationale": "Completes D4's merge with the existing record command; no new command.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        }
+      ]
     }
   ]
 }

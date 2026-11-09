@@ -2,8 +2,12 @@
 from . import steps, storage
 
 
+def _base(root):
+    return storage.state_dir(steps.AREA, root)
+
+
 def _path(root):
-    return storage.base_dir(root) / 'workflow.json'
+    return _base(root) / 'workflow.json'
 
 
 def _load(root):
@@ -21,7 +25,7 @@ def show(phase, launcher):
 def start(root, launcher):
     if steps.MODE == 'stateless':
         return show(steps.ORDER[0], launcher)
-    with storage.lock(storage.base_dir(root)):
+    with storage.lock(_base(root)):
         if _path(root).exists():
             raise ValueError('A run is unfinished; run `status` to resume or `abandon` to discard it.')
         state = {'phase': steps.ORDER[0]}
@@ -53,7 +57,7 @@ def done(root, payload, launcher, stage=None):
         return steps.DONE_MSG if nxt is None else show(nxt, launcher)
     if stage:
         raise ValueError('Stateful: omit `--stage`; the script tracks the step.')
-    with storage.lock(storage.base_dir(root)):
+    with storage.lock(_base(root)):
         state = _load(root)
         nxt = _step(state, payload)
         if nxt is None:
@@ -67,7 +71,7 @@ def done(root, payload, launcher, stage=None):
 def abandon(root):
     if steps.MODE == 'stateless':
         raise ValueError('Stateless: nothing saved, nothing to abandon.')
-    with storage.lock(storage.base_dir(root)):
+    with storage.lock(_base(root)):
         _load(root)
         _path(root).unlink()
     return 'Run abandoned.'

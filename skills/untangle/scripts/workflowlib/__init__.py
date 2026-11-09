@@ -1,7 +1,7 @@
 """Workflow internals. Allowed imports (checked by tests):
 
   flow -> steps, storage
-  steps -> checks, exports, transitions, work
+  steps -> checks, exports, ledger, transitions, work
   transitions -> exports, ledger, work
   exports -> checks, ledger, storage, work
   checks -> ledger, work

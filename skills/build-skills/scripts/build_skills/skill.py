@@ -68,8 +68,7 @@ def copy_skill(src, dest):
 
 def overlay(src, target):
     """Make target match src: mirror src's top-level dirs plus references/ and scripts/ exactly,
-    write top-level files except .gitignore, and append `state/` to .gitignore when scripts/ exists.
-    Top-level entries src lacks stay."""
+    and write top-level files except .gitignore (the target keeps its own). Top-level entries src lacks stay."""
     wanted = {p.relative_to(src) for p in skill_files(src)}
     mirrored = {rel.parts[0] for rel in wanted if len(rel.parts) > 1} | {'references', 'scripts'}
     if target.exists():
@@ -86,22 +85,18 @@ def overlay(src, target):
             continue
         (target / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src / rel, target / rel)
-    if (src / 'scripts').is_dir():
-        ignore = target / '.gitignore'
-        lines = ignore.read_text(encoding='utf-8').splitlines() if ignore.is_file() else []
-        if 'state/' not in (line.strip() for line in lines):
-            ignore.write_text('\n'.join(lines + ['state/']) + '\n', encoding='utf-8')
 
 
 def install_engine(skill, model):
-    """Staged model: copy the template engine into skill/scripts/ unless steps.py exists; set its MODE."""
+    """Staged model: copy the template engine into skill/scripts/ unless steps.py exists; set MODE and AREA."""
     steps = skill / 'scripts' / 'workflowlib' / 'steps.py'
     if not steps.is_file():
         shutil.copytree(TEMPLATE, skill / 'scripts', dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     text = steps.read_text(encoding='utf-8')
-    steps.write_text(re.sub(r"^MODE\s*=\s*['\"]\w+['\"]", f"MODE = '{model}'", text, count=1, flags=re.M),
-                     encoding='utf-8')
+    text = re.sub(r"^MODE\s*=\s*['\"]\w+['\"]", f"MODE = '{model}'", text, count=1, flags=re.M)
+    text = re.sub(r"^AREA\s*=\s*['\"][\w.-]+['\"]", f"AREA = '{skill.name}'", text, count=1, flags=re.M)
+    steps.write_text(text, encoding='utf-8')
 
 
 def check_files(skill):

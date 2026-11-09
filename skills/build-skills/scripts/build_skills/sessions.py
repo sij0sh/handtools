@@ -2,7 +2,12 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .storage import base_dir, read_json, write_json
+from .config import AREA
+from .storage import read_json, state_dir, write_json
+
+
+def base_dir(root):
+    return state_dir(AREA, root)
 
 
 def timestamp():

@@ -234,5 +234,70 @@ class CheckScriptTest(unittest.TestCase):
                           behind.stdout)
 
 
+TEMPLATE = SKILLS / 'build-skills' / 'templates' / 'workflow' / 'scripts' / 'workflowlib'
+# Engine files copied verbatim until phase 2 gives them one home (G3/D7); every copy must equal the template's.
+COPIES = {
+    'storage.py': [SKILLS / 'build-skills' / 'scripts' / 'build_skills', SKILLS / 'foundation' / 'scripts' / 'workflowlib',
+                   SKILLS / 'untangle' / 'scripts' / 'workflowlib', OWNER / 'scripts' / 'designlib'],
+    'cli.py': [SKILLS / 'build-skills' / 'scripts' / 'build_skills', SKILLS / 'foundation' / 'scripts' / 'workflowlib',
+               SKILLS / 'untangle' / 'scripts' / 'workflowlib'],
+    'flow.py': [SKILLS / 'foundation' / 'scripts' / 'workflowlib', SKILLS / 'untangle' / 'scripts' / 'workflowlib'],
+}
+
+
+def load_storage():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('handtools_storage', TEMPLATE / 'storage.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class StateTest(unittest.TestCase):
+    """G3: per-user state under one root, one layout, no state inside an installed skill."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.storage = load_storage()
+
+    def test_engine_copies_are_identical(self):
+        for name, dirs in COPIES.items():
+            for folder in dirs:
+                with self.subTest(file=str((folder / name).relative_to(ROOT))):
+                    self.assertEqual((folder / name).read_bytes(), (TEMPLATE / name).read_bytes(),
+                                     f'edit every copy of {name} together (see its docstring)')
+
+    def test_no_state_inside_skills(self):
+        for skill in skills():
+            self.assertFalse((skill / 'state').exists(), f'{skill.name}/state: state belongs in the state root')
+
+    def test_default_root_is_home_agents_state(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, clear=False) as env:
+            env.pop(self.storage.ENV, None)
+            with mock.patch.object(Path, 'home', return_value=Path(home)):
+                self.assertEqual(self.storage.state_root(), Path(home) / '.agents' / 'state')
+
+    def test_env_overrides_root(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {self.storage.ENV: tmp}):
+            self.assertEqual(self.storage.state_root(), Path(tmp).resolve())
+
+    def test_project_key_is_stable_and_per_path(self):
+        key = self.storage.project_key
+        a, b = Path('/work/my repo').resolve(), Path('/other/my repo').resolve()
+        self.assertEqual(key(a), key(a))
+        self.assertNotEqual(key(a), key(b))
+        self.assertRegex(key(a), r'^my-repo-[0-9a-f]{8}$')
+
+    def test_state_dir_layout_and_project_file(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {self.storage.ENV: tmp}):
+            root = Path(tmp).resolve() / 'proj'
+            path = self.storage.state_dir('untangle', root)
+            self.assertEqual(path, Path(tmp).resolve() / 'untangle' / self.storage.project_key(root))
+            self.assertEqual(json.loads((path / 'project.json').read_text()), {'root': str(root)})
+
+
 if __name__ == '__main__':
     unittest.main()

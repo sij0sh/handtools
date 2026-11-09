@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Workflow skill template: the script owns order; the agent does one step at a time.
 
-Copy this scripts/ folder into <skill>/scripts/ and edit workflowlib/steps.py only (set MODE there).
+Copy this scripts/ folder into <skill>/scripts/ and edit workflowlib/steps.py only (set MODE and AREA there).
 Python 3.9+; standard library only.
-Stateful: <skill>/state/<project-key>/workflow.json, one run per project; add `state/` to <skill>/.gitignore.
+Stateful: ~/.agents/state/<AREA>/<project-key>/workflow.json, one run per project (storage.py).
 Stateless: nothing saved; `done --stage S` names the finished step.
 """
 import argparse

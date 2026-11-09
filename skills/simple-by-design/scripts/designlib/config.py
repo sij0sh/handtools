@@ -9,6 +9,8 @@ CONTRACT = SKILL_DIR / 'references' / 'contract.md'
 LANGUAGES = SKILL_DIR / 'languages'
 INSTRUCTIONS = SKILL_DIR / 'references' / 'instructions.md'
 
+# Session state lives in <state root>/decisions/<project key>/ (storage.py), shared with foundation.
+AREA = 'decisions'
 DEFAULT_MAX_CHALLENGES = 3
 _METADATA = re.compile(r'metadata:\s*(#.*)?')
 _KEY = re.compile(r'\s+max-challenges\s*:.*')

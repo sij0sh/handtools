@@ -9,7 +9,7 @@ from pathlib import Path
 from . import storage
 
 
-ART = Path('.agents') / 'artifacts' / 'untangle'
+AREA = 'untangle'  # state and exports: <state root>/untangle/<project key>/ (storage.py)
 POLICY_FILES = ('references/defaults.md', 'references/contract.md', 'references/instructions.md')
 POLICY_ENV = 'UNTANGLE_POLICY_ROOT'
 # untangle and simple-by-design ship together in the handtools bundle: skills/untangle, skills/simple-by-design.
@@ -74,8 +74,8 @@ def walk_tree(root, rules, limits):
         for d in sorted(dirs):
             full, rel = here / d, (here / d).relative_to(root).as_posix()
             reason = is_excluded(rel, rules)
-            if rel == ART.as_posix() or full.resolve() == storage.STATE_DIR.resolve():
-                continue  # audit output and engine state: outside the source denominator
+            if full.resolve() == storage.state_root().resolve():
+                continue  # engine state and exports: outside the source denominator
             if full.is_symlink():
                 ledger[rel] = {'kind': 'symlink', 'target': os.readlink(full), 'disposition': 'excluded',
                                'reason': 'symlink, not traversed'}

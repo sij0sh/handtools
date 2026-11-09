@@ -1,15 +1,23 @@
-"""Derived files under <root>/.agents/artifacts/untangle/<audit-id>/: current.md, audit.json, report.md."""
+"""Derived files under <state root>/untangle/<project key>/<audit-id>/: current.md, audit.json, report.md."""
 import time
 from pathlib import Path
 
 from . import storage
-from .ledger import ART, policy_root
+from .ledger import AREA, find_root, policy_root
 from .work import all_items, coverage_summary
 from .checks import PITCH
 
 
+def audits_dir(root):
+    """Where this project's audit folders live, beside the run state."""
+    return storage.state_dir(AREA, Path(root))
+
+
 def out_dir(state):
-    return Path(state['root']) / ART / state['audit_id']
+    return audits_dir(state['root']) / state['audit_id']
+
+
+AUDITS = audits_dir(find_root())
 
 
 def render_current(state, phase):

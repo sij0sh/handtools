@@ -10,7 +10,7 @@
     {
       "name": "handtools",
       "source": "./",
-      "version": "0.0.2",
+      "version": "0.0.3",
       "description": "Agent skills: simple-by-design, untangle, foundation, build-skills and remember, with one set of shared design rules."
     }
   ]

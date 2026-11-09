@@ -1,12 +1,14 @@
 """End-to-end tests: copy the skill to a temp dir and drive scripts/build-skills.py as the agent would."""
 import ast
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SOURCE = Path(__file__).resolve().parents[1]
 if str(SOURCE / 'scripts') not in sys.path:
@@ -15,7 +17,11 @@ if str(SOURCE / 'scripts') not in sys.path:
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
+        self.home = self.tmp / 'state'  # HANDTOOLS_STATE: never the real ~/.agents/state
+        env = mock.patch.dict(os.environ, {'HANDTOOLS_STATE': str(self.home)})
+        env.start()
+        self.addCleanup(env.stop)
         self.skill = self.tmp / 'build-skills'
         for sub in ('scripts', 'references', 'templates'):
             shutil.copytree(SOURCE / sub, self.skill / sub, ignore=shutil.ignore_patterns('__pycache__'))
@@ -40,7 +46,7 @@ class Base(unittest.TestCase):
 
     def registry(self, root=None):
         root = str((root or self.project).resolve())
-        for f in (self.skill / 'state').glob('*/workflow.json'):
+        for f in (self.home / 'build-skills').glob('*/workflow.json'):
             data = json.loads(f.read_text())
             if data['root'] == root:
                 return data
@@ -75,7 +81,7 @@ class Base(unittest.TestCase):
         return self.done(payload, ok=ok)
 
     def wdir(self, kind='draft', sid='s1'):
-        return next((self.skill / 'state').glob(f'*/{sid}/{kind}/demo'))
+        return next((self.home / 'build-skills').glob(f'*/{sid}/{kind}/demo'))
 
     def write_skill(self, path, body='Do the thing.', ref=False):
         path.mkdir(parents=True, exist_ok=True)
@@ -113,7 +119,7 @@ class Sessions(Base):
         other.mkdir(parents=True)
         self.run_cmd('start')
         self.run_cmd('start', root=other)
-        self.assertEqual(len(list((self.skill / 'state').glob('*/workflow.json'))), 2)
+        self.assertEqual(len(list((self.home / 'build-skills').glob('*/workflow.json'))), 2)
 
     def test_target_held_by_one_active_session(self):
         self.start()
@@ -301,16 +307,17 @@ class Template(Base):
     script = 'templates/workflow/scripts/workflow.py'
 
     def states(self):
-        return list((self.skill / 'templates' / 'workflow' / 'state').glob('*/workflow.json'))
+        return list((self.home / 'workflow').glob('*/workflow.json'))
 
     def set_mode(self, mode):
         steps = self.skill / 'templates' / 'workflow' / 'scripts' / 'workflowlib' / 'steps.py'
         steps.write_text(steps.read_text().replace("MODE = 'stateful'", f"MODE = '{mode}'"))
 
-    def test_stateful_single_run_state_in_skill_dir(self):
+    def test_stateful_single_run_state_in_state_root(self):
         self.assertIn('STEP: X', self.run_cmd('start', script=self.script))
         self.assertIn('unfinished', self.run_cmd('start', script=self.script, ok=False))
         self.assertEqual(len(self.states()), 1)
+        self.assertFalse((self.skill / 'templates' / 'workflow' / 'state').exists())
         self.assertIn('omit `--stage`', self.run_cmd('done', '--stage', 'x', script=self.script, ok=False))
         self.run_cmd('done', script=self.script)
         self.assertIn('result', self.run_cmd('done', script=self.script, ok=False))
@@ -342,7 +349,7 @@ class Template(Base):
         self.assertIn('STEP: Z', self.run_cmd('done', '--stage', 'y', payload={'result': 'A'}, script=self.script))
         self.assertIn('nothing', self.run_cmd('status', script=self.script, ok=False))
         self.assertEqual(self.states(), [])
-        self.assertFalse((self.skill / 'templates' / 'workflow' / 'state').exists())
+        self.assertFalse((self.home / 'workflow').exists())
 
 
 class Structure(unittest.TestCase):

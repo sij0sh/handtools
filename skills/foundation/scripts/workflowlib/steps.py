@@ -8,7 +8,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import storage
+
 MODE = 'stateless'
+AREA = 'decisions'  # shared with simple-by-design: <state root>/decisions/<project key>/
 ORDER = ['discover', 'interview', 'assess', 'apply', 'validate']
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -16,8 +19,10 @@ SKILL = SCRIPTS.parent
 # The ADR log and its one definition belong to simple-by-design, beside this skill in the handtools bundle.
 DESIGN = SKILL.parent / 'simple-by-design'
 ADR_LOG = '.agents/design/decisions.json'
-RECORD_CMD = f'python3 {DESIGN / "scripts" / "designflow.py"} --root . record'
-DECISIONS = '.agents/foundation.json'
+DESIGNFLOW = f'python3 {DESIGN / "scripts" / "designflow.py"} --root .'
+RECORD_CMD = f'{DESIGNFLOW} record'
+# foundation's own bookkeeping, per user: its goal in the ADR log and the capability ids accepted or declined.
+DECISIONS = storage.state_dir(AREA, Path.cwd().resolve()) / 'foundation.json'
 RECORD = 'decisions-record'
 STATUSES = ['present', 'partial', 'missing', 'n/a', 'unknown']
 CAPABILITIES = {
@@ -47,7 +52,8 @@ PROMPTS = {
         'Send `{"kind": "...", "maturity": "...", "mode": "..."}`.'
     ),
     'interview': (
-        f'Read `{DECISIONS}` if it exists; treat its decisions as settled. From the audit, list the '
+        f'Read `{DECISIONS}` if it exists; its `goal` is foundation\'s goal in the ADR log. Run `{DESIGNFLOW} show` '
+        'and treat that goal\'s resolved rows (including `Project kind` and `Maturity`) as settled. From the audit, list the '
         'high-impact decisions still open (what is being built, prototype/MVP/production, where it runs, '
         'solo or team, cost/security/compliance limits, what must not change in a brownfield repo). '
         'Ask only the ones the repo and recorded decisions cannot answer, in one batch of at most 5. '
@@ -65,7 +71,7 @@ PROMPTS = {
         'impact and effort, ordered by priority; proposed file-level changes; risks and tradeoffs. '
         'Recommend nothing the decisions make unnecessary; do not re-propose ids in the record\'s `declined` unless the user asks to reassess. '
         'Ask the user which items to apply (plan mode) and, in any mode, whether to record the decisions '
-        f'(`{RECORD}`, writes only `{DECISIONS}`), and which project tests/linters `validate` may run. '
+        f'(`{RECORD}`: the interview answers into the ADR log, and `{DECISIONS}`), and which project tests/linters `validate` may run. '
         'Send `{"mode": "audit|plan", "capabilities": {"<id>": {"status": "...", "evidence": "..."}, ...}, '
         '"approved": ["<id>", ...], "run": ["command", ...]}`; `approved` lists only ids the user approved, else [].'
     ),
@@ -76,9 +82,11 @@ PROMPTS = {
         f'config. ADRs (`adrs`): record decisions only by piping a payload into `{RECORD_CMD}` (shape: '
         f'`{DESIGN / "references" / "decisions.schema.json"}`; send rows without `id` or `status`); never edit '
         f'{ADR_LOG} directly and never write Markdown ADRs. Convert legacy Markdown ADRs only if the user approved '
-        'that conversion. Write `{DECISIONS}` with `kind`, `maturity`, `decisions`, `accepted` (approved ids), '
-        '`declined` (proposed but not approved ids), and `updated` (ISO date), merging any existing record. '
-        f'If `{RECORD}` is the only approved item, write only the record. '
+        f'that conversion. Recording (`{RECORD}`): pipe every interview answer, plus `Project kind` and `Maturity`, as '
+        f'question/answer rows into `{RECORD_CMD} --goal <goal from {DECISIONS}>` (omit `--goal` the first time; the '
+        f'command prints the new G#). Then write `{DECISIONS}` with `goal` (that G#), `accepted` (approved ids), '
+        '`declined` (proposed but not approved ids), and `updated` (ISO date), merging any existing file. '
+        f'If `{RECORD}` is the only approved item, record only. '
         'Done when the files are written; send `{"changed": ["path", ...]}`.'
     ),
     'validate': (
@@ -142,12 +150,12 @@ def check_assess(state, payload):
 
 
 def check_apply(state, payload):
-    path = Path(DECISIONS)
+    path = DECISIONS
     try:
         record = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f'{DECISIONS} must exist and be valid JSON: {error}') from None
-    for key in ('kind', 'maturity', 'decisions', 'accepted', 'declined', 'updated'):
+    for key in ('goal', 'accepted', 'declined', 'updated'):
         if key not in record:
             raise ValueError(f'{DECISIONS} is missing `{key}`.')
     if not isinstance(payload.get('changed'), list) or not payload['changed']:
