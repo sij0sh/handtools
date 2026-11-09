@@ -223,6 +223,10 @@ class Stages(Base):
         engine = path / 'scripts' / '_engine'
         self.assertEqual((engine / 'flow.py').read_bytes(), (SOURCE.parent / '_engine' / 'flow.py').read_bytes())
         self.assertFalse((engine / 'tests').exists())
+        self.assertTrue((engine / 'recon' / 'cli.py').is_file())
+        self.assertFalse((engine / 'recon' / 'SKILL.md').exists())
+        self.assertEqual(json.loads((engine / 'distribution.json').read_text()),
+                         {'engine_api': 1, 'event_schema': 1, 'policy': 1, 'recon': 1, 'backend': 'none'})
         steps.write_text(steps.read_text().replace("ORDER = ['plan', 'work', 'verify']", "ORDER = ['x', 'y', 'z']"))
         self.assertIn('router', self.done(ok=False))
         self.staged(path, 'stateful')
