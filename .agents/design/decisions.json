@@ -581,6 +581,222 @@
           "date": "2026-11-09"
         }
       ]
+    },
+    {
+      "id": "G5",
+      "goal": "v0.1.1 M1 (.agents/artifacts/v011.md): add a shared, non-invokable reconnaissance component in skills/_engine/recon (evidence-backed records of snapshots, components, contracts, relationships, observations, decision references and discovery gaps), record it through the existing SQLite journal with versioned typed reducers, project it into remember, and integrate it into foundation and untangle, so both identify upstream/downstream external contracts with evidence and reuse unchanged evidence safely across source changes.",
+      "constraints": [
+        "Python 3.9+, standard library only; no graph database; no network access or autonomous org-wide discovery; collectors never execute project code.",
+        "_engine/recon has no SKILL.md, no invocation trigger and never invokes another skill; it ships inside the existing _engine copy (build_skills/skill.py install_engine already copies the whole directory).",
+        "The SQLite journal (_engine/events.py Journal) is the only authority; remember projections, untangle exports (current.md, audit.json, report.md) and reports are rebuildable views. No new maintained JSON/Markdown runtime artifacts.",
+        "Existing version-1 journals replay unchanged and are never rewritten; unsupported envelope versions fail visibly; expected-revision checks, request-id idempotency and gap/fork detection are kept.",
+        "Foundation stays stateless (discover/interview/assess/apply/validate) and keeps its apply boundaries; untangle keeps its stages, path ledger, budgets and A/B/gap tracks. Recon completeness never implies review coverage.",
+        "Inferred observations never become adopted decisions; .agents/design/decisions.json stays the only adopted-decision source.",
+        "Unknown contract fields stay unknown; an advertised channel without subscriber evidence is an exposed contract with an unknown consumer, never 'no consumers'.",
+        "_engine library code and repo tests are edited directly. foundation and untangle changes go through /handtools:build-skills revise sessions (both are staged skills). remember (script-backed, neither staged nor prompt) and build-skills' own skill.py install_engine are edited directly with unit tests, by user decision (D17).",
+        "M1 only drafts the generator manifest (workflow contract); build-skills generation/enforcement is M4. No review/security workflows (M2/M3)."
+      ],
+      "criteria": [
+        "Fixture (API, scheduled ingestion, queue publisher, shared schema) plus a separately supplied consumer repo, with an explicit expected map: both foundation and untangle runs identify the upstream and downstream contracts and cite evidence.",
+        "Repository-only mode records the queue consumer as unknown with a discovery gap; supplying the consumer repository resolves it.",
+        "Foundation reports an ownership/compatibility gap; untangle records a downstream behavior constraint.",
+        "Changing the shared schema marks affected records and dependent untangle conclusions stale; records whose evidence hashes are unchanged are reused in the successor snapshot.",
+        "An inferred pattern stays an observation and is never projected as an adopted decision.",
+        "Rebuilding remember projections from the journal reproduces the reduced state; a duplicated receipt adds no record; gaps/forks in the chain raise errors.",
+        "All existing tests (skills/*/tests, tests/) pass; untangle exports keep their current shape; a version-1 journal fixture replays identically.",
+        "A written M1 comparison report (pre-change vs new outputs against the expected map) records discovery improvements and investigation cost (files read, bytes, records, wall time)."
+      ],
+      "decisions": [
+        {
+          "id": "D1",
+          "question": "How are recon records written into the journal without breaking version-1 replay?",
+          "answer": "Add one event kind, `record.accepted`, whose payload is a versioned envelope {\"schema\": \"handtools.recon\", \"version\": 1, \"records\": [...]}. events.replay takes an explicit `reducers` argument (envelope schema -> pure reducer); existing kinds keep the generic merge, and a record.accepted event with no matching reducer/version raises. Event protocol schema_version stays 1, so version-1 runs replay byte-identically.",
+          "rationale": "Smallest change that gives typed reduction; explicit parameter instead of a global registry keeps events.py domain-free and readable locally.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D2",
+          "question": "Where does recon state live and what is a run?",
+          "answer": "<state root>/recon/<project key>/events.sqlite3. Each snapshot is one journal run (id `snap-N`): run.started carries the Snapshot record, record.accepted events add or supersede records, run.closed freezes it. Refreshing after source changes or resuming a closed snapshot starts a successor run that references its predecessor and carries forward records whose evidence hashes still match.",
+          "after": [
+            "D1"
+          ],
+          "rationale": "Reuses Journal append/replay/closure semantics unchanged; successor runs satisfy 'never append past closure'.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D3",
+          "question": "How are stable entity IDs and evidence references shaped?",
+          "status": "resolved",
+          "answer": "IDs are `<type>:<natural key>` from agent-supplied identity, never line numbers: `component:<repo>/<name>`, `contract:<kind>:<channel>` (kind = http|queue|schedule|schema|table|file|webhook|sdk; e.g. contract:queue:orders.created), `rel:<type>:<from>-><to>`, `obs:<slug>`, `gap:<slug>`, `decision:<G#>/<D#>`. Direction, producer and consumer are fields, not identity. An unknown endpoint is `{\"unresolved\": \"<role> of <contract id>\"}`. Evidence refs are {source: repo label ('.' or a related-repo label), path, sha256 of file content, lines (informational only), statement}. Classification (observed|configured|declared|inferred|unknown) and confidence (high|medium|low) are separate fields. Re-recording an id supersedes it; the reducer keeps the supersession chain. A `decision:` record must resolve to an answered decision in .agents/design/decisions.json or the validator rejects it; inferred patterns and conflicts are observations.",
+          "rationale": "Content-derived identity survives line moves; validating decision refs against the ADR log is the one mechanical guard that keeps inferences out of adopted decisions.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D4",
+          "question": "What command surface do agents use to collect, record and query recon, and how do its receipts reach transcripts?",
+          "after": [
+            "D1",
+            "D2"
+          ],
+          "status": "resolved",
+          "answer": "One script, skills/_engine/recon/cli.py (path-bootstrapped like engine.py): read-only `orient` and `candidates` (collector output, never records), and journal commands `start` (snapshot: scope roots incl. explicit `--related label=path`, exclusions, depth, budgets), `record`, `close`, `refresh` (successor run), `status`, `query <name>`. Write commands require --expect-revision and --request-id and print the accepted event as the receipt, same shape as engine.py. recordings.command_is_engine also accepts direct `recon/cli.py record|start|close|refresh` invocations so receipts are transcript-discoverable. A `recon.prompt(root)` (like planning.prompt) owns the progressive-discovery instructions and prints the CLI path; foundation and untangle prompts include it instead of copying text.",
+          "rationale": "Mirrors the existing engine.py receipt and planning.prompt conventions; one owner for the recon instructions.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D5",
+          "question": "Which collectors exist in M1 and how are orient/map/deepen budgets enforced?",
+          "after": [
+            "D4"
+          ],
+          "status": "resolved",
+          "answer": "Two pure, bounded collectors in recon/collect.py, both stdlib and repository-local (plus explicitly supplied related roots): `orient` inventories manifests, entrypoints, config, schemas (OpenAPI/JSON Schema/Avro/proto/GraphQL), migrations, CI, infra (compose/k8s/terraform/cron) and decision sources; `candidates` applies a small fixture-backed pattern table (Python + YAML/JSON config: HTTP routes, schedules, queue publish/subscribe, schema refs, table DDL) and reports other languages as unsupported scope. Both enforce max_files/max_bytes and report truncation as a gap. Map and deepen are agent operations: the snapshot records budgets (files, bytes, traversal depth, allowed_commands default none), each `record` batch carries a `cost` {files, bytes, commands}, the reducer accumulates it and `record` refuses batches that exceed the budget (a successor snapshot with user-approved budget is required). Cost totals feed the comparison report.",
+          "rationale": "Collectors produce candidates only; agent-side budgets cannot be measured by the script, so declared cost is accounted and enforced at the recording boundary.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D6",
+          "question": "How are staleness and invalidation computed, including dependent workflow conclusions?",
+          "after": [
+            "D2",
+            "D3"
+          ],
+          "status": "resolved",
+          "answer": "`refresh` rehashes every cited evidence file in the successor run: a record is stale if any evidence hash changed or file vanished; records whose `depends_on` names a stale entity become stale transitively; records with no evidence dependencies (e.g. inferred observations) go stale when the snapshot scope fingerprint (git HEAD + dirty-content hashes, or tree hash outside git) changed \u2014 conservative fallback. Unchanged records are carried forward with `reused_from: snap-N@rev`; stale ones are carried as status=stale and must be re-recorded or dropped. Workflow conclusions that cite recon ids (untangle findings/observables `recon_refs`) are stale when any cited id is stale in the newest snapshot.",
+          "rationale": "Uses recorded evidence dependencies first and snapshot-level invalidation only where dependencies are missing, exactly as the spec requires.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D7",
+          "question": "Who owns recon query semantics, and what does remember project?",
+          "after": [
+            "D1",
+            "D4"
+          ],
+          "status": "resolved",
+          "answer": "recon/query.py owns query semantics as pure functions over reduced state: summary, consumers(contract), neighbors(entity, direction, depth<=max), evidence(entity), gaps(open), stale. The CLI `query` and remember both call recon code; remember never reinterprets records. remember's load_workflow passes recon reducers when replaying the recon journal and flattens the reduced state into new catalog tables recon_snapshots, recon_components, recon_contracts, recon_relationships, recon_observations, recon_gaps, each row carrying snapshot run, record revision, source revision and status. Adopted decisions stay in workflow_decisions from decisions.json; recon `decision:` refs only link.",
+          "rationale": "One owner for semantics; projections are rebuildable flattenings, so rebuild-equals-replay is testable.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D8",
+          "question": "How does foundation consume recon while staying stateless?",
+          "after": [
+            "D4",
+            "D5"
+          ],
+          "status": "resolved",
+          "answer": "Foundation keeps no state. discover prompt (via recon.prompt) runs `orient`, then with user agreement `start`/`record`/`close` a snapshot at map depth for external contracts; the discover payload carries optional `recon_snapshot` and check_discover verifies it exists and is closed. interview prompt lists the snapshot's open gaps and asks only consequential ones. A new capability `external-contracts` (owners, schemas, compatibility/versioning, migration/deprecation documented) is assessed from the snapshot; check_assess requires every contract with unknown owner or compatibility to appear as a finding. Apply/validate are unchanged and never write recon.",
+          "rationale": "Fits foundation's existing capability-based assess and stateless check functions; recon state lives in the recon journal, not in foundation.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D9",
+          "question": "How does untangle pin and use a recon snapshot, and how do its prompts stop relying on current.md/audit.json?",
+          "after": [
+            "D4",
+            "D6"
+          ],
+          "status": "resolved",
+          "answer": "Untangle prompts become functions of state: flow.show renders the relevant part of render_current from the journal into the printed step, so prompts stop telling agents to read current.md/audit.json (exports are still written unchanged for compatibility). Map payload requires `recon_snapshot: {\"run\": \"snap-N\"}` (closed snapshot, pinned with its revision) or `{\"recon\": \"none\", \"reason\": \"...\"}`; the ledger stores the pin. Entry points and observables may cite `recon_refs`; an observable tied to a downstream consumer's requirement is recorded as contractual (the downstream behavior constraint). Scope shows contracts and open gaps for approval; dissect findings may carry `recon_refs` and trace external effects to contract ids. On status/resume, findings and units citing stale recon ids are re-queued through the existing drift reopen path. `start --continue <audit-id>` after a published audit creates a successor run with `predecessor`, importing findings whose unit fingerprints and recon refs are unchanged. Path ledger and A/B/gap tracks are untouched.",
+          "rationale": "Keeps untangle's stage graph; validated state, not exports, becomes what agents read.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D10",
+          "question": "What form does the M1 generator manifest (workflow contract draft) take?",
+          "status": "resolved",
+          "answer": "A draft at skills/_engine/policy/workflow-contract.md plus workflow-contract.schema.json describing: recon policy (none+reason|orient|map|deepen, required record types, permitted external scope, freshness), check packs (placeholder list), stages (inputs, typed outputs, evidence requirements, exit checks, transitions), budgets/checkpoints, outcomes complete|incomplete|cancelled, invocation (explicit for workflows; shared modules none). M1 writes foundation and untangle instances as test fixtures and a test that checks required keys; no runtime enforcement or generator changes until M4.",
+          "rationale": "The spec asks M1 to define, not implement, the manifest; fixtures prove the existing workflows are expressible.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D11",
+          "question": "How is M1 acceptance demonstrated (fixtures, automated vs agent-driven parts, comparison report)?",
+          "after": [
+            "D5",
+            "D8",
+            "D9"
+          ],
+          "status": "resolved",
+          "answer": "tests/fixtures/recon/orders (Flask-style POST /orders API, a cron ingestion job pulling an upstream vendor feed, a publisher to orders.created, shared schema schemas/order_created.v1.json, no subscriber) and tests/fixtures/recon/billing (separately supplied consumer that subscribes to orders.created and requires total_cents), plus expected-map.json. Automated (unittest): collector candidates vs expected map; scripted record sequences for repo-only (consumer unresolved + gap) and with --related billing (resolved); schema edit -> exact stale set, rest reused; decision-ref rejection for inferred patterns; remember projection rebuild equals reduced state; duplicate receipt adds nothing; chain gap/fork raise; golden version-1 journal replays identically; foundation check_discover/check_assess and untangle map/dissect checks with scripted payloads. Agent-driven: run foundation and untangle on the fixture before any change (baseline) and after, and write .agents/artifacts/v011-m1-report.md comparing both to expected-map.json with recorded cost and wall time.",
+          "rationale": "Deterministic parts are tested mechanically; workflow quality is agent-driven, so it is evaluated against an explicit expected map with a baseline captured first.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D12",
+          "question": "How is the work sliced and sequenced, and which slices go through build-skills?",
+          "after": [
+            "D8",
+            "D9",
+            "D11"
+          ],
+          "status": "resolved",
+          "answer": "S0 fixtures, expected map, version-1 golden journal, baseline foundation/untangle runs (direct). S1 events.replay reducers + record.accepted; recon records/validators/reducer (direct). S2 recon CLI, queries, refresh/invalidation, receipt recognition in recordings.py (direct). S3 collectors with budgets (direct). S4 workflow-contract draft + instances (direct). S5 remember projections (direct edit + tests, per D17). S6 foundation integration (build-skills revise foundation). S7 untangle integration (build-skills revise untangle). S8 install_engine copies distribution.json with `recon: 1` instead of a hardcoded dict (direct edit + test, per D17); acceptance runs, comparison report, CHANGELOG. Each slice lands with its tests; all README test commands pass after every slice.",
+          "rationale": "Library first, consumers after, matching the spec's 'no engine-wide rewrite before a working consumer'; skill changes go through build-skills as the user asked.",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D13",
+          "question": "What does each record type require versus leave unknown, and what are the size bounds?",
+          "after": [
+            "D3"
+          ],
+          "answer": "Every record needs id, type and classification; component, contract, relationship and observation need >=1 evidence ref unless classification=unknown. Contract requires kind, channel and direction (inbound|outbound|both); producer/consumer may be `unresolved`; owner, schema/version, compatibility, ordering, retries, idempotency, failure recovery, migration/deprecation, retention/deletion and authority boundary are optional and absent means unknown (queries print `unknown`; validators never require them). Gap requires question, searched scope, missing source/access, affected ids, consequence and next lookup. Validators cap a batch at 200 records and a statement at 500 characters; payloads must be JSON objects.",
+          "rationale": "Spec: unknown fields stay unknown; bounded inputs at the trust boundary.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D14",
+          "question": "How are snapshot ids allocated and when is an existing snapshot reused instead of refreshed?",
+          "after": [
+            "D2",
+            "D6"
+          ],
+          "answer": "`start` allocates the next `snap-N` under storage.lock on the recon state dir; the request id makes a retried start return the same run. `status` reports the newest snapshot (by predecessor chain, then N) and whether it is fresh (scope fingerprint of the primary and every related root equals the recorded one). Foundation and untangle prompts reuse a fresh closed snapshot whose depth and scope cover their need, otherwise run `refresh` (or `start` when none exists). Related roots are pinned in the snapshot with their own git HEAD/dirty fingerprint.",
+          "rationale": "One rule for both consumers prevents one workflow silently re-discovering while the other reuses.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D15",
+          "question": "Do transcript receipts for recon become authoritative in M1?",
+          "after": [
+            "D4",
+            "D7"
+          ],
+          "answer": "No. M1 makes recon receipts recognizable and replayable (replay with recon reducers, which already dedupes identical events and rejects gaps/forks), but remember projects recon only from the journal. Receipt import is exposed as non-authoritative evidence; authoritative transcript import stays the separate future migration named in the spec.",
+          "rationale": "Spec allows receipts for discoverability but forbids them becoming accepted state without chain validation; deferring keeps M1 small.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D16",
+          "question": "How do untangle's audit exclusions interact with the recon snapshot scope?",
+          "after": [
+            "D9"
+          ],
+          "answer": "They stay independent. Scope shows contracts and gaps whose evidence lies inside untangle's in-scope paths, and lists the rest as outside the audit boundary; untangle never edits recon scope, and recon never adds paths to the untangle ledger.",
+          "rationale": "Recon completeness never implies review coverage, and vice versa.",
+          "status": "resolved",
+          "date": "2026-11-09"
+        },
+        {
+          "id": "D17",
+          "question": "What if build-skills cannot express a revise of remember (helper-driven, not a staged workflow) or of _engine-adjacent build-skills code?",
+          "after": [
+            "D12"
+          ],
+          "status": "resolved",
+          "answer": "Use build-skills revise sessions for foundation (S6) and untangle (S7). Edit remember's provider/catalog (S5) and build-skills' install_engine (S8) directly, with unit tests, and note the exception in the plan and CHANGELOG.",
+          "rationale": "User decision 2026-11-09: build-skills only models staged and prompt skills. A prompt revise would reduce remember to SKILL.md, and extending build-skills now would pull M4 work into M1.",
+          "date": "2026-11-09"
+        }
+      ]
     }
   ]
 }
