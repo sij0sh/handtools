@@ -71,15 +71,21 @@ class Providers:
         import json
         from _engine import storage
         from _engine.events import Journal, replay
+        from _engine.recon import query as recon_query, reduce as recon_reduce
         key = storage.project_key(Path(self.store.root))
         events, runs, decisions, authorizations = [], [], [], []
+        recon = {name: [] for name in recon_query.PROJECTIONS}
         for path in sorted(storage.state_root().glob('*/' + key + '/events.sqlite3')):
-            store = Journal(path)
+            store = Journal(path, recon_reduce.REDUCERS)
             with store.connect() as db:
                 names = [x[0] for x in db.execute('SELECT DISTINCT run FROM events')]
             for name in names:
-                state, chain = replay(store.history(name))
+                state, chain = replay(store.history(name), recon_reduce.REDUCERS)
                 ref = str(path) + '#' + name
+                if path.parent.parent.name == 'recon' and state and 'snapshot' in state:
+                    closed = chain[-1]['kind'] == 'run.closed'
+                    for table, rows in recon_query.projection(state, len(chain), closed).items():
+                        recon[table] += [dict(row, source_ref=ref + ':' + str(len(chain))) for row in rows]
                 for item in chain:
                     events.append({'run_id': name, 'revision': item['revision'], 'event_id': item['event_id'],
                                    'kind': item['kind'], 'payload': json.dumps(item['payload']),
@@ -108,6 +114,7 @@ class Providers:
         self.tables['workflow_decisions'], self.tables['workflow_authorizations'] = decisions, authorizations
 
         self.tables['workflow_events'], self.tables['workflow_runs'] = events, runs
+        self.tables.update(recon)
         self.coverage['workflow'] = {'complete': True, 'scope': 'exact local project journals',
                                      'transcript_capture': 'not_searched'}
 

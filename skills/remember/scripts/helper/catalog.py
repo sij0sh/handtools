@@ -5,6 +5,20 @@ from .graph_queries import TABLES
 from .projection import FIELDS
 
 
+def _recon_tables():
+    """Recon projection columns, owned by the shared engine beside this skill (skills/_engine)."""
+    import sys
+    from pathlib import Path
+    base = next((p for p in Path(__file__).resolve().parents if (p / '_engine' / '__init__.py').is_file()), None)
+    if base is not None and str(base) not in sys.path:
+        sys.path.append(str(base))
+    from _engine.recon.query import PROJECTIONS
+    return PROJECTIONS
+
+
+RECON = _recon_tables()
+
+
 @dataclass(frozen=True)
 class Table:
     columns: dict
@@ -35,6 +49,15 @@ CATALOG = {
                              "workflow", "one committed workflow event", ("source_ref",)),
     "workflow_runs": Table({"run_id": "TEXT", "revision": "INTEGER", "state": "TEXT", "source_ref": "TEXT"},
                            "workflow", "one exact journal stream head", ("source_ref",)),
+    **{name: Table({**{c: ("INTEGER" if c in ("revision", "record_revision", "closed") else "TEXT") for c in cols},
+                    "source_ref": "TEXT"}, "workflow", grain, ("source_ref",))
+       for name, cols, grain in (
+           ("recon_snapshots", RECON["recon_snapshots"], "one recon snapshot head; journal is authoritative"),
+           ("recon_components", RECON["recon_components"], "one recon component record in a snapshot"),
+           ("recon_contracts", RECON["recon_contracts"], "one recon contract record; unknown fields are NULL"),
+           ("recon_relationships", RECON["recon_relationships"], "one recon relationship record"),
+           ("recon_observations", RECON["recon_observations"], "one recon observation; inferred patterns are not decisions"),
+           ("recon_gaps", RECON["recon_gaps"], "one recon discovery gap"))},
     "nodes": Table(TABLES["nodes"], "graph", "one source node", ("id",)),
     "edges": Table(TABLES["edges"], "graph", "one typed relationship", ("id",)),
     "gaps": Table(TABLES["gaps"], "graph", "one unresolved occurrence"),

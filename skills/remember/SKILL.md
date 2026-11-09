@@ -41,3 +41,6 @@ The output shows leads in four groups: `pitfall` (failed tries, corrections), `i
 Workflow state: `query 'SELECT run_id, revision, state FROM workflow_runs' --format table`
 reads exact local journal heads. `workflow_events` adds history. These tables do not use ranked
 session search or its current-session exclusion. `source_ref` identifies the journal/stream/revision.
+Recon snapshots: `recon_snapshots`, `recon_contracts`, `recon_components`, `recon_relationships`,
+`recon_observations`, `recon_gaps` (one row per record per snapshot run; NULL = unknown, never "none";
+`record_revision` and `evidence` name what each row rests on). Observations are not decisions.

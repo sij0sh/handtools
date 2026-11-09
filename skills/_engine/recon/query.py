@@ -1,5 +1,7 @@
 """Pure queries over one reduced snapshot state. Every result carries the snapshot run and the
 revision that accepted each record, so a reader can tell which evidence it rests on."""
+import json
+
 from . import records
 
 MAX_DEPTH = 5
@@ -129,3 +131,48 @@ def decisions(state):
 
 
 NAMES = ('summary', 'contracts', 'consumers', 'neighbors', 'evidence', 'gaps', 'stale', 'observations', 'decisions')
+
+
+# Flat rows for remember's rebuildable projections. One owner: remember adds only source_ref.
+PROJECTIONS = {
+    'recon_snapshots': ('run_id', 'revision', 'closed', 'depth', 'predecessor', 'roots', 'budgets', 'cost'),
+    'recon_components': ('run_id', 'record_id', 'record_revision', 'status', 'classification', 'confidence',
+                         'responsibility', 'sources', 'entrypoints', 'evidence', 'reused_from', 'stale_reason'),
+    'recon_contracts': ('run_id', 'record_id', 'record_revision', 'status', 'classification', 'confidence', 'kind',
+                        'channel', 'direction', 'producers', 'consumers', *records.CONTRACT_DETAILS, 'evidence',
+                        'reused_from', 'stale_reason'),
+    'recon_relationships': ('run_id', 'record_id', 'record_revision', 'status', 'classification', 'relation',
+                            'from_id', 'to_id', 'evidence', 'reused_from', 'stale_reason'),
+    'recon_observations': ('run_id', 'record_id', 'record_revision', 'status', 'classification', 'confidence',
+                           'claim', 'conflicts_with', 'evidence', 'reused_from', 'stale_reason'),
+    'recon_gaps': ('run_id', 'record_id', 'record_revision', 'status', 'classification', *records.GAP_FIELDS,
+                   'affected', 'resolution', 'reused_from', 'stale_reason'),
+}
+_TABLE = {'component': 'recon_components', 'contract': 'recon_contracts', 'relationship': 'recon_relationships',
+          'observation': 'recon_observations', 'gap': 'recon_gaps'}
+
+
+def _cell(value):
+    if value is None or isinstance(value, (str, int)):
+        return value
+    return json.dumps(value, sort_keys=True)
+
+
+def projection(state, revision, closed):
+    """{table: [row]} for one snapshot state at journal revision `revision`."""
+    snap = state['snapshot']
+    out = {name: [] for name in PROJECTIONS}
+    out['recon_snapshots'].append({'run_id': snap['id'], 'revision': revision, 'closed': int(closed),
+                                   'depth': snap['depth'], 'predecessor': snap.get('predecessor'),
+                                   'roots': _cell(snap['roots']), 'budgets': _cell(snap['budgets']),
+                                   'cost': _cell(state.get('cost', {'files': 0, 'bytes': 0, 'commands': []}))})
+    for rid, rec in sorted(state.get('records', {}).items()):
+        table = _TABLE.get(rec['type'])
+        if not table:
+            continue  # decision references link to the ADR log; they are not projected as decisions
+        extra = {'run_id': snap['id'], 'record_id': rid, 'record_revision': rec['accepted']['revision'],
+                 'from_id': rec.get('from'), 'to_id': rec.get('to')}
+        if rec['type'] == 'contract':
+            _, extra['kind'], extra['channel'] = rid.split(':', 2)
+        out[table].append({col: _cell(extra[col] if col in extra else rec.get(col)) for col in PROJECTIONS[table]})
+    return out
