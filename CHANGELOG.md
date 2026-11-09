@@ -2,6 +2,10 @@
 
 One entry per release. A release bumps `VERSION` (and the manifests that copy it) and adds one entry here.
 
+## [0.0.2] - 2026-11-09
+
+- remember: evidence extraction normalizes Windows path separators, so repository paths are recognized; its activity continuation test no longer assumes short temporary paths.
+
 ## [0.0.1] - 2026-11-06
 
 - Start handtools: build-skills, foundation, remember, simple-by-design and untangle in one repo, released as one plugin for Claude Code, Codex and pi.
