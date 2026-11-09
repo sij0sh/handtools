@@ -2,9 +2,9 @@
 
 One entry per release. A release bumps `VERSION` (and the manifests that copy it) and adds one entry here.
 
-## [Unreleased]
+## [0.1.1] - 2026-11-09
 
-v0.1.1 milestone M1 (reconnaissance contract). Released with M2-M4 per `.agents/artifacts/v011.md`.
+v0.1.1 milestone M1 (reconnaissance contract), per `.agents/artifacts/v011.md`.
 
 - Shared reconnaissance in `skills/_engine/recon/` (not a skill, no trigger): evidence-backed snapshots of components, contracts, relationships, observations, decision references and discovery gaps. `recon/cli.py` runs bounded read-only collectors (`orient`, `candidates`) and records snapshots (`start`, `record`, `close`, `refresh`, `status`, `query`). The recorder hashes every cited file; unknown fields stay unknown; an advertised channel without subscriber evidence has an unresolved consumer and a gap. A `decision:` record must match an answered decision in the ADR log, so inferred patterns stay observations.
 - The journal accepts `record.accepted` events carrying a versioned domain envelope, reduced by explicit reducers. Version-1 runs replay unchanged; an unknown envelope version or a missing reducer fails visibly. Recon receipts are recognized in transcripts as non-authoritative evidence.
