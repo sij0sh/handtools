@@ -5,39 +5,24 @@ Recon completeness never counts as review coverage, and the audit boundary never
 """
 from pathlib import Path
 
-from _engine.recon import guide, query, store
-from .ledger import in_scope_files, need
+from _engine.recon import guide, pin as recon_pin, query
+from .ledger import in_scope_files
 
 GUIDE_CMD = f'python3 {guide.CLI} --root .'
 
 
 def pin(state, payload, where='MAP'):
     """The payload's recon choice: {'run', 'revision'} of a closed snapshot, or {'none': reason}."""
-    run, none = payload.get('recon_snapshot'), payload.get('recon_none')
-    need((run is None) != (none is None),
-         f'{where}: send `recon_snapshot` (a closed snapshot, "snap-N") or `recon_none` (why recon is not needed).')
-    if none is not None:
-        need(isinstance(none, str) and none.strip(), f'{where}: `recon_none` is the reason, as text.')
-        return {'none': none}
-    need(isinstance(run, str) and run.startswith('snap-'), f'{where}: `recon_snapshot` is a snapshot id, snap-N.')
-    _, chain, closed = store.read(Path(state['root']), run)
-    need(closed, f'{where}: {run} is open; `close` it before pinning it.')
-    return {'run': run, 'revision': len(chain)}
+    return recon_pin.choose(Path(state['root']), payload, where)
 
 
 def snapshot(state, chosen=None):
-    chosen = chosen or state.get('recon') or {}
-    return store.read(Path(state['root']), chosen['run'])[0] if chosen.get('run') else None
+    return recon_pin.snapshot(Path(state['root']), chosen or state.get('recon'))
 
 
 def check_refs(snap, refs, where):
     """`recon_refs` must be record ids present in the pinned snapshot."""
-    need(isinstance(refs, list) and all(isinstance(r, str) for r in refs), f'{where}: `recon_refs` lists record ids.')
-    if not refs:
-        return
-    need(snap is not None, f'{where}: `recon_refs` need a pinned recon snapshot.')
-    unknown = [r for r in refs if r not in snap.get('records', {})]
-    need(not unknown, f'{where}: not in the pinned snapshot: {", ".join(unknown)}.')
+    recon_pin.check_refs(snap, refs, where)
 
 
 def cited(state):
@@ -53,21 +38,13 @@ def cited(state):
 
 def stale(state):
     """{id: reason} for cited ids that are stale or gone in the newest snapshot descended from the pin."""
-    chosen = state.get('recon') or {}
-    if not chosen.get('run'):
-        return {}
-    return store.stale_refs(Path(state['root']), chosen['run'], cited(state))
+    return recon_pin.stale(Path(state['root']), state.get('recon'), cited(state))
 
 
 def fresh_refs(state, refs, chosen):
     """True when no id in `refs` changed between the pin the conclusions were made under
     (state['recon']) and the snapshot `chosen` now."""
-    if not refs:
-        return True
-    if not chosen.get('run'):
-        return False
-    before = (state.get('recon') or {}).get('run')
-    return not store.changed_refs(Path(state['root']), before, chosen['run'], refs)
+    return recon_pin.fresh(Path(state['root']), state.get('recon'), chosen, refs)
 
 
 def _inside(state, rec):

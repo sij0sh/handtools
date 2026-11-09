@@ -11,6 +11,7 @@ Allowed local imports (checked by tests/test_bundle.py):
   collect -> sources
   query -> records
   store -> records, reduce, sources
+  pin -> store
   guide -> none
   cli -> collect, guide, query, records, store
 """
