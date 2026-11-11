@@ -1,0 +1,32 @@
+{
+  "name": "handtools",
+  "owner": {
+    "name": "sij0sh"
+  },
+  "plugins": [
+    {
+      "name": "untangle",
+      "source": "./plugins/untangle"
+    },
+    {
+      "name": "semantic-instructions",
+      "source": "./plugins/semantic-instructions"
+    },
+    {
+      "name": "workflows-as-skills",
+      "source": "./plugins/workflows-as-skills"
+    },
+    {
+      "name": "simple-by-design",
+      "source": "./plugins/simple-by-design"
+    },
+    {
+      "name": "foundation",
+      "source": "./plugins/foundation"
+    },
+    {
+      "name": "remember",
+      "source": "./plugins/remember"
+    }
+  ]
+}

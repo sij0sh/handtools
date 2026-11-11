@@ -1,0 +1,14 @@
+{
+  "name": "handtools",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "skills": [
+      "./plugins/*/skills/*"
+    ]
+  }
+}

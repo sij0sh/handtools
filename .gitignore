@@ -1,0 +1,9 @@
+.agents/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+mise.local.toml
+state/
+.DS_Store

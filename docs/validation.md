@@ -1,0 +1,99 @@
+# Validation
+
+Validated 2026-11-11 on Fedora Linux 44 (KDE), Python 3.14.10, mise 2026.11.2.
+Executed results are below; the CI jobs encode the planned cross-platform matrix.
+
+## Gate
+
+```text
+$ python3 scripts/validate.py
+validate: ok (6 skills)
+```
+
+## Results
+
+| Criterion | Result | Evidence |
+| --- | --- | --- |
+| C1 tree and frontmatter | PASS | `scripts/validate.py` checks all six `plugins/<name>/skills/<name>/SKILL.md` files, names, and descriptions. |
+| C2 Pi paths | PASS | `package.json` `pi.skills` is `./plugins/*/skills/*`; the validator resolves exactly six skill dirs. |
+| C3 Claude manifests | PASS | Marketplace lists six resolving sources; every plugin name and version matches `VERSION`; MIT license present. |
+| C4 copy fidelity | PASS | Six intentional-diff summaries in `docs/import.md`; raw diffs in `.agents/artifacts/import/`. No unexplained differences. |
+| C5 local tests | PASS | Commands and counts below; remember's full matrix is planned CI coverage. |
+| C6 Pi smoke | PARTIAL | Local-path install discovers six skills and a shipped script runs; git-source install not yet executed. |
+| C7 Claude smoke | PASS | Isolated scratch copy installed `untangle@handtools` 0.0.3, then updated to 0.0.4 after a version bump. |
+| C8 hygiene | PASS | Validator rejects `.git`, `.agents`, state, caches, bytecode, env/secret files; `remember/settings.json` is allowed and documented. |
+| C9 docs ownership | PASS | Root `README.md` owns install/update; per-skill install sections point to root. `workflows-as-skills` has no README. |
+| C10 provenance | PASS | Source remotes/HEADs, remember's dirty patch SHA-256, and untracked hashes are in `docs/import.md`. |
+| C11 design artifact | PASS | `.agents/artifacts/monorepo-design.md` records the tree, manifests, mapping, exclusions, versions, and validation plan; MIT decision recorded. |
+| C12 install cutover | NOT EXECUTED | User-level symlinks and package/plugin installs are unchanged; cutover remains pending. |
+
+## C5 executed tests
+
+| Skill | Command | Result |
+| --- | --- | --- |
+| `untangle` | `mise run check` | ruff clean; 52 tests passed |
+| `semantic-instructions` | `python3 -m unittest discover -s tests -v` | 10 tests passed |
+| `workflows-as-skills` | `python3 -m unittest discover -s tests -v` | 62 tests passed |
+| `simple-by-design` | `mise run check` | ruff clean; build compileall; 56 tests passed |
+| `foundation` | `mise run lint`, `mise run test`, `mise run build` | ruff clean; 21 tests passed; compileall clean |
+| `remember` | `python -m pip install -r requirements.txt`, then `python -m unittest discover -s tests -v` in a validation venv | requirements installed; 357 tests passed |
+
+Raw logs are under `.agents/artifacts/validation/` (untracked).
+
+## C6 Pi local-path smoke
+
+Used a temporary `HOME` and `PI_CODING_AGENT_DIR` with an empty
+`~/.agents/skills/`:
+
+```text
+pi install /home/joshsimon/Projects/handtools   # exit 0
+pi list                                         # reports the package
+```
+
+Pi's package resolver returned exactly these six enabled skills under
+`handtools/plugins/<name>/skills/<name>/`: `untangle`,
+`semantic-instructions`, `workflows-as-skills`, `simple-by-design`,
+`foundation`, `remember`.
+
+A shipped script ran from a separate scratch project:
+
+```text
+$ python3 /home/joshsimon/Projects/handtools/plugins/simple-by-design/skills/simple-by-design/scripts/sbd.py
+No current run. Start: python3 .../sbd.py --root /tmp/handtools-script... --request '<complete request>'
+```
+
+It created no files. The script resolves its own reference paths from the new
+location.
+
+## C7 Claude install and update smoke
+
+Used a temporary `HOME`, `CLAUDE_CONFIG_DIR`, and a scratch copy of the monorepo:
+
+```text
+claude plugin marketplace add <scratch>/handtools --json   # ok
+claude plugin install untangle@handtools --json            # untangle 0.0.3
+# bump scratch VERSION and plugin.json.version to 0.0.4
+claude plugin marketplace update handtools --json          # ok
+claude plugin update untangle@handtools --json             # 0.0.3 -> 0.0.4
+```
+
+The installed cache contained `skills/untangle/SKILL.md`; `plugin list` reported
+0.0.4 after the update.
+
+## Planned CI coverage
+
+CI runs the local suites plus:
+
+- untangle on Python 3.9;
+- semantic-instructions and workflows-as-skills on Python 3.11 and 3.13;
+- remember on Ubuntu, macOS, and Windows with Python 3.11 and 3.13;
+- mise tasks for untangle, foundation, and simple-by-design;
+- `scripts/validate.py`.
+
+Remember's local run covers one platform and one Python version; the matrix above
+is planned until CI results are appended.
+
+## Pending
+
+- C6 git-source Pi install/update through a temporary bare remote.
+- C12 user-level install cutover.
