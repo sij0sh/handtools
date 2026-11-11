@@ -107,6 +107,8 @@ class CliTests(unittest.TestCase):
         self.assertTrue(skill.startswith('---\nname: simple-by-design\n'))
         self.assertIn('disable-model-invocation: true', skill)
         self.assertIn('At `DONE`, stop', skill)
+        self.assertIn('Approval outranks implementation or commit rules', skill)
+        self.assertIn('never commit/delete `.agents`', skill)
         body = skill.split('---', 2)[2]
         self.assertLessEqual(len(body.split()), 100)
         self.assertGreaterEqual(1 - len(body.split()) / 2127, .95)

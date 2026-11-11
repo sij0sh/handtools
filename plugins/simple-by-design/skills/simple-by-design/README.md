@@ -57,7 +57,7 @@ A gap returns a targeted revise or resolve; a pass stores the full record (reque
 
 ## Limits
 
-Design only: prompts never authorize implementation or external effects. No agent write lock, sandbox, scope enforcement or tool interception. JSON validation checks shape and freshness, not truth, coverage or authorization. Corrupt or legacy state fails closed. Local review can share the author's blind spots. `DONE` completes the report, not its prerequisites. Passing fixtures do not prove better agent decisions. A different `--request` replaces the completed record, and rerunning the identical request replays it; copy `.agents/decision.json` aside to keep history or start the same brief fresh.
+Design only: prompts never authorize implementation or external effects. The approval gate outranks task instructions to implement or commit. `.agents` is bookkeeping: never commit or delete it. No agent write lock, sandbox, scope enforcement or tool interception. JSON validation checks shape and freshness, not truth, coverage or authorization. Corrupt or legacy state fails closed. Local review can share the author's blind spots. `DONE` completes the report, not its prerequisites. Passing fixtures do not prove better agent decisions. A different `--request` replaces the completed record, and rerunning the identical request replays it; copy `.agents/decision.json` aside to keep history or start the same brief fresh.
 
 ## Verification
 

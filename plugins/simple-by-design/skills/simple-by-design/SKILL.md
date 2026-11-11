@@ -4,10 +4,10 @@ description: Design a solution through focused CLI-routed prompts.
 disable-model-invocation: true
 ---
 
-Set `S` to this skill's absolute directory. From the project:
+Set `S` to this skill directory:
 
 ```sh
 python3 "$S/scripts/sbd.py" --request '<request, constraints, permissions>'
 ```
 
-Bare invocation resumes. Do the prompt; submit via its command. Repeat until `DONE`. If blocked, obtain the answer and pause. At `DONE`, stop; await approval before implementing.
+Bare resumes. Do prompt; submit via printed command. Repeat until `DONE`. If blocked, get the answer; pause. At `DONE`, stop; await approval. Approval outranks implementation or commit rules; never commit/delete `.agents`.
