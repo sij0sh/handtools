@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 
-from support import ROOT, CLI, REQUEST, CANDIDATE, PASS, NEED, BLOCKED, RESOLVED, Store
+from support import ROOT, CLI, REQUEST, CANDIDATE, REVISE, BLOCKED, RESOLVED, PASS, Store
 from engine.prompts import DONE, render, return_command
 from engine import router
 
@@ -79,12 +79,15 @@ class CliTests(unittest.TestCase):
 
     def test_blocked_reissue_and_acquired_answer_use_same_command(self):
         self.cli('--request', REQUEST)
-        self.submit(NEED)
+        self.submit(CANDIDATE)
+        self.assertIn('TASK: resolve', self.submit(REVISE).stdout)
         output = self.submit(BLOCKED).stdout
         self.assertIn('BLOCKED', output)
         self.assertEqual(self.cli().stdout, output)
         self.assertIn('Requester answer.', output)
-        self.assertIn('TASK: draft', self.submit(RESOLVED).stdout)
+        done = self.submit(RESOLVED).stdout
+        self.assertIn(RESOLVED['resolutions'][0]['answer'], done)
+        self.assertTrue(done.endswith(DONE + '\n'))
 
     def test_printed_command_is_executable_from_another_cwd_with_quoted_paths(self):
         self.cli('--request', REQUEST)
@@ -107,8 +110,6 @@ class CliTests(unittest.TestCase):
         self.assertTrue(skill.startswith('---\nname: simple-by-design\n'))
         self.assertIn('disable-model-invocation: true', skill)
         self.assertIn('At `DONE`, stop', skill)
-        self.assertIn('Approval outranks implementation or commit rules', skill)
-        self.assertIn('never commit/delete `.agents`', skill)
         body = skill.split('---', 2)[2]
         self.assertLessEqual(len(body.split()), 100)
         self.assertGreaterEqual(1 - len(body.split()) / 2127, .95)

@@ -8,44 +8,36 @@ import sys
 import tempfile
 import unittest
 
-from support import ROOT, CLI, REQUEST, CANDIDATE, PASS, NEED, BLOCKED, RESOLVED
+from support import ROOT, CLI, REQUEST, CANDIDATE, PASS, REVISE, BLOCKED, RESOLVED
 from engine import router
 from engine.prompts import DRAFT, RESOLVE, REVIEW, GUIDANCE_PATH, DONE, render, summary
 
 
 class PromptTests(unittest.TestCase):
     def test_authority_source_order_and_evidence_limits_are_explicit(self):
-        self.assertIn('request/delegation → supported decisions/conventions → applicable defaults → simplest adequate', DRAFT)
-        for rule in ('Defects defeat precedent', 'defaults never settle goals/permissions',
-                     'Honor approvals/deferrals', 'material unresolved user-owned intent',
-                     'never edit report-only targets', 'Expose assumptions'):
-            self.assertIn(rule, DRAFT)
-        for rule in ('request/documents/delegation first', 'pause until answered',
-                     'never silently choose deferred intent', 'never invent authority or answers',
-                     'cheapest authorized observation', 'before material harm/commitment',
-                     'explicit detection/revisit conditions', 'never as observation'):
+        self.assertIn('explictly requested, locally established decisions/conventions, '
+                      'best design practices, then the simplest adequate option', DRAFT)
+        self.assertIn('Routine reversible choices need no justification', DRAFT)
+        for rule in ('Defects override precedent', 'cheapest authorized observation',
+                     'before material harm', 'never present it as observed',
+                     'Resolve every review gap once', 'there is no further review'):
             self.assertIn(rule, RESOLVE)
-        self.assertNotIn('never pick', RESOLVE)
 
-    def test_review_retains_counterexamples_and_challenges_false_authority(self):
-        for rule in ('Delegate if available', 'otherwise review locally', 'Pair:', 'Defeater:',
-                     'Decision:', 'not assumed truths', 'criteria passing while goal fails',
-                     'unsafe assumptions', 'hidden deferred dependencies',
-                     'serious alternative/tradeoff/revisit', 'Alternatives alone require no question',
-                     'planned/executed tests', 'delegated/local basis', '"none: why"'):
+    def test_review_retains_counterexamples(self):
+        for rule in ('delegate when available', 'Pair:', 'Defeater:', 'Decision:', 'Unknown:',
+                     'criteria pass while the goal fails', 'deferred dependency',
+                     'serious alternative, tradeoff, revisit condition',
+                     'reason for each absent defect'):
             self.assertIn(rule, REVIEW)
 
-    def test_conditional_readiness_gate_is_in_resolve_and_review_not_new_state(self):
-        for instructions in (RESOLVE, REVIEW):
-            for term in ('"Conditional:"', 'prerequisite', 'verifier', 'criteria test'):
-                self.assertIn(term, instructions)
-        self.assertIn('decisions not to act on', RESOLVE)
-        self.assertIn('If readiness is required now, block', RESOLVE)
-        self.assertIn('DONE completes the report, not its prerequisites', RESOLVE)
-        self.assertIn('Readiness required: need', REVIEW)
-        self.assertEqual(set(router.RESULTS['draft']), {'candidate', 'need'})
+    def test_conditional_gate_and_single_pass_results(self):
+        for term in ('"Conditional:"', 'prerequisite', 'verifier', 'Test the gate in the criteria',
+                     'If readiness is required now, block',
+                     'DONE completes the report, not its prerequisites'):
+            self.assertIn(term, RESOLVE)
+        self.assertEqual(set(router.RESULTS['draft']), {'candidate'})
+        self.assertEqual(set(router.RESULTS['review']), {'pass', 'revise'})
         self.assertEqual(set(router.RESULTS['resolve']), {'resolved', 'blocked'})
-        self.assertEqual(set(router.RESULTS['review']), {'pass', 'revise', 'need'})
 
     def test_disclosure_is_domain_not_gap_gated_in_draft_and_review(self):
         for request in ('Design Java work using our already-settled executor convention.',
@@ -59,8 +51,8 @@ class PromptTests(unittest.TestCase):
                     self.assertIn('software—common/relevant language rows even for settled choices', output)
                     self.assertIn('agent-instructions—instruction rule; otherwise skip', output)
                     self.assertIn('Reuse context; separate reviewers read independently', output)
-        resolve = router.advance(router.new(REQUEST), NEED)
-        self.assertNotIn(str(GUIDANCE_PATH), render(resolve, CLI, Path('/unrelated/task')))
+        resolve = router.advance(router.advance(router.new(REQUEST), CANDIDATE), REVISE)
+        self.assertIn(json.dumps(str(GUIDANCE_PATH)), render(resolve, CLI, Path('/unrelated/task')))
 
     def test_reference_contains_one_common_contract_and_ten_compact_profiles(self):
         text = GUIDANCE_PATH.read_text()
@@ -75,28 +67,29 @@ class PromptTests(unittest.TestCase):
         self.assertLessEqual(len(text.split()), 350)
 
     def test_complete_summary_contains_full_record_and_ends_with_done_marker(self):
-        resolve = router.advance(router.new(REQUEST), NEED)
-        blocked = router.advance(resolve, BLOCKED)
-        redraft = router.advance(blocked, RESOLVED)
-        complete = router.advance(router.advance(redraft, CANDIDATE), PASS)
+        complete = router.advance(router.advance(router.new(REQUEST), CANDIDATE), PASS)
         text = summary(complete)
         fields = (REQUEST, CANDIDATE['summary'], CANDIDATE['criteria'][0],
-                  CANDIDATE['decisions'][0]['id'], '## Resolutions', NEED['question'],
-                  RESOLVED['answer'], RESOLVED['basis'], PASS['pair'], PASS['defeater'],
-                  PASS['decision'], PASS['basis'], 'Design complete, not implementation.')
+                  CANDIDATE['decisions'][0]['id'], PASS['pair'], PASS['defeater'],
+                  PASS['decision'], PASS['unknown'], PASS['basis'],
+                  'Design complete, not implementation.')
         fields += tuple(CANDIDATE['decisions'][0][key]
                         for key in ('choice', 'basis', 'alternative', 'tradeoff', 'revisit'))
         for value in fields:
             self.assertIn(value, text)
         output = render(complete, CLI, Path('/unrelated/task'))
         self.assertEqual(output, text + '\n\n' + DONE)
-        self.assertTrue(output.endswith(DONE))
 
-    def test_summary_omits_resolutions_when_empty_and_marks_no_decisions(self):
-        complete = router.advance(router.advance(router.new(REQUEST), CANDIDATE), PASS)
-        text = summary(complete)
-        self.assertNotIn('## Resolutions', text)
-        empty = {**complete, 'candidate': {**complete['candidate'], 'decisions': []}}
+    def test_resolved_summary_pairs_each_gap_with_its_resolution(self):
+        resolve = router.advance(router.advance(router.new(REQUEST), CANDIDATE), REVISE)
+        text = summary(router.advance(router.advance(resolve, BLOCKED), RESOLVED))
+        resolution = RESOLVED['resolutions'][0]
+        self.assertIn(f"- (defeater, D1) {resolution['witness']} → {resolution['answer']} "
+                      f"(basis: {resolution['basis']})", text)
+        self.assertIn(RESOLVED['criteria'][0], text)
+        self.assertNotIn(CANDIDATE['criteria'][0], text)
+        empty = router.advance(router.advance(router.new(REQUEST), CANDIDATE), PASS)
+        empty = {**empty, 'candidate': {**empty['candidate'], 'decisions': []}}
         self.assertIn('None consequential.', summary(empty))
 
     def test_done_marker_is_not_injected_into_incomplete_prompts(self):

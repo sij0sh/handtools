@@ -1,7 +1,7 @@
 from copy import deepcopy
 import unittest
 
-from support import REQUEST, CANDIDATE, PASS, NEED, BLOCKED, RESOLVED, REVISE, DispatchError
+from support import REQUEST, CANDIDATE, PASS, BLOCKED, RESOLVED, REVISE, DispatchError
 from engine import router
 
 
@@ -13,7 +13,7 @@ class RouterTests(unittest.TestCase):
     def test_zero_gap_path_needs_only_candidate_and_review(self):
         draft = router.new(REQUEST)
         self.assertEqual(set(draft), {"schema_version", "phase", "ticket", "request"})
-        self.assertEqual(draft["schema_version"], 4)
+        self.assertEqual(draft["schema_version"], 5)
         self.assertEqual(draft["phase"], "draft")
         review = router.advance(draft, CANDIDATE)
         final = router.advance(review, PASS)
@@ -28,38 +28,41 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(set(final), {"schema_version", "phase", "request",
                                       "candidate", "review"})
 
-    def test_every_route_including_material_review_need(self):
-        draft = router.new(REQUEST)
-        for source in (draft, router.advance(draft, CANDIDATE)):
-            resolve = router.advance(source, NEED)
-            blocked = router.advance(resolve, BLOCKED)
-            self.assertEqual(blocked["phase"], "blocked")
-            self.assertEqual(blocked["open"], {**body(NEED), "blocked_on": body(BLOCKED)})
-            redraft = router.advance(blocked, RESOLVED)
-            self.assertEqual(redraft["phase"], "draft")
-            self.assertNotIn("open", redraft)
-            self.assertEqual(redraft["resolutions"], [{
-                "type": NEED["type"], "question": NEED["question"],
-                "answer": RESOLVED["answer"], "basis": RESOLVED["basis"]}])
-            if "candidate" in source:
-                self.assertEqual(redraft["candidate"], source["candidate"])
-            self.assertEqual(router.advance(redraft, CANDIDATE)["phase"], "review")
-        review = router.advance(draft, CANDIDATE)
-        redraft = router.advance(review, REVISE)
-        self.assertEqual(redraft["phase"], "draft")
-        self.assertEqual(redraft["candidate"], review["candidate"])
-        self.assertEqual(redraft["gaps"], REVISE["gaps"])
-        resolve = router.advance(redraft, NEED)
+    def test_defect_path_resolves_once_then_completes_without_loop(self):
+        review = router.advance(router.new(REQUEST), CANDIDATE)
+        resolve = router.advance(review, REVISE)
+        self.assertEqual(resolve["phase"], "resolve")
         self.assertEqual(resolve["gaps"], REVISE["gaps"])
-        resolved = router.advance(resolve, RESOLVED)
-        self.assertEqual(resolved["gaps"], REVISE["gaps"])
-        self.assertNotIn("gaps", router.advance(redraft, CANDIDATE))
-        with self.assertRaises(DispatchError):
-            router.advance(redraft, PASS)  # Cannot approve a draft or reuse an old review.
+        self.assertEqual(resolve["candidate"], review["candidate"])
+        blocked = router.advance(resolve, BLOCKED)
+        self.assertEqual(blocked["phase"], "blocked")
+        self.assertEqual(blocked["blocked_on"], body(BLOCKED))
+        for source in (resolve, blocked):
+            final = router.advance(source, RESOLVED)
+            self.assertEqual(final["phase"], "complete")
+            self.assertNotIn("ticket", final)
+            self.assertNotIn("review", final)
+            self.assertEqual(final["candidate"], {k: v for k, v in body(RESOLVED).items()
+                                                  if k != "resolutions"})
+            self.assertEqual(final["resolutions"], RESOLVED["resolutions"])
+            self.assertEqual(set(final), {"schema_version", "phase", "request",
+                                          "candidate", "gaps", "resolutions"})
+        for bad in (PASS, CANDIDATE, REVISE):
+            with self.assertRaises(DispatchError):
+                router.advance(resolve, bad)  # Resolve cannot re-review or redraft.
+        for bad in (BLOCKED, RESOLVED):
+            with self.assertRaises(DispatchError):
+                router.advance(review, bad)
+        unmatched = {**RESOLVED, "resolutions": [{**RESOLVED["resolutions"][0], "witness": "other"}]}
+        for bad in (unmatched, {**RESOLVED, "resolutions": RESOLVED["resolutions"] * 2},
+                    {**RESOLVED, "resolutions": []}):
+            with self.assertRaises(DispatchError):
+                router.advance(resolve, bad)
 
     def test_invalid_results_never_mutate_the_input(self):
         states = [router.new(REQUEST)]
-        states += [router.advance(states[0], CANDIDATE), router.advance(states[0], NEED)]
+        states.append(router.advance(states[0], CANDIDATE))
+        states.append(router.advance(states[1], REVISE))
         no_alternative = {k: v for k, v in CANDIDATE["decisions"][0].items() if k != "alternative"}
         malformed = [None, [], '', 1, {}, {'status': []}, {'status': 'DONE'},
                      {**CANDIDATE, 'summary': ''},
@@ -70,8 +73,8 @@ class RouterTests(unittest.TestCase):
                      {**CANDIDATE, 'decisions': [no_alternative]},
                      {**CANDIDATE, 'decisions': [{**CANDIDATE['decisions'][0], 'revisit': ''}]},
                      {**CANDIDATE, 'decisions': [{'id': 'D1', 'choice': 'x', 'basis': 'x', 'alternative': 'x', 'tradeoff': 'x', 'revisit': 'x'}, {'id': 'D1', 'choice': 'x', 'basis': 'x', 'alternative': 'x', 'tradeoff': 'x', 'revisit': 'x'}]},
-                     {**NEED, 'type': 'choice'},
-                     {k: v for k, v in NEED.items() if k != 'witness'},
+                     {'status': 'need', 'type': 'intent', 'question': 'q', 'witness': 'w', 'consequence': 'c'},
+                     {k: v for k, v in RESOLVED.items() if k != 'resolutions'},
                      {'status': 'blocked', 'question': 'q', 'needs': None},
                      {'status': 'resolved', 'answer': 'x', 'basis': ''},
                      {k: v for k, v in PASS.items() if k != 'defeater'},
@@ -105,11 +108,12 @@ class RouterTests(unittest.TestCase):
                     {**good, 'phase': 'publishing'},
                     {**good, 'schema_version': 1},
                     {**good, 'schema_version': 2},
-                    {**good, 'schema_version': 3}):
+                    {**good, 'schema_version': 3},
+                    {**good, 'schema_version': 4}):
             with self.assertRaises(DispatchError):
                 router.validate(bad)
         with self.assertRaisesRegex(DispatchError, 'legacy'):
-            router.validate({**good, 'schema_version': 3})
+            router.validate({**good, 'schema_version': 4})
 
     def test_phase_specific_payloads_and_complete_state_are_exact(self):
         review = router.advance(router.new(REQUEST), CANDIDATE)
@@ -123,14 +127,14 @@ class RouterTests(unittest.TestCase):
                 {key: value for key, value in complete.items() if key != "review"},
                 {**complete, "ticket": review["ticket"]},
                 {**complete, "gaps": REVISE["gaps"]},
-                {**complete, "open": body(NEED)},
+                {**complete, "resolutions": RESOLVED["resolutions"]},
                 {**complete, "phase": "publishing"},
                 {**review, "review": body(PASS)},
-                {**review, "open": body(NEED)}):
+                {**review, "blocked_on": body(BLOCKED)}):
             with self.subTest(bad=bad):
                 with self.assertRaises(DispatchError):
                     router.validate(bad)
-        old = {"schema_version": 3, "phase": "complete", "ticket": review["ticket"]}
+        old = {"schema_version": 4, "phase": "complete", "ticket": review["ticket"]}
         with self.assertRaisesRegex(DispatchError, 'legacy'):
             router.validate(old)
 

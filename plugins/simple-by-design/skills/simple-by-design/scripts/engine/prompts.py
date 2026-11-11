@@ -4,13 +4,40 @@ import json
 from pathlib import Path
 import shlex
 
-from .router import CHECKS, DECISION, RESULTS, TYPES, prompt as phase_prompt
+from .router import CHECKS, DECISION, RESOLUTION, RESULTS, prompt as phase_prompt
 
-DRAFT = """Design only; inspect within authority; never edit report-only targets. Choose means: request/delegation → supported decisions/conventions → applicable defaults → simplest adequate. Defects defeat precedent; defaults never settle goals/permissions. Honor approvals/deferrals; ask only for material unresolved user-owned intent. Facts: observe, or assume with cheap reversal, detection before harm, and revisit; otherwise need. Expose assumptions. State checkable criteria. Consequential decisions: cited/assumed basis, serious alternative, tradeoff, revisit; routine reversible choices need none. Preserve resolutions; revise feedback's affected decisions/dependents, keeping others. Return candidate or need for one intent/fact gap."""
+DRAFT = """
+Submit a solution to the request for review.
 
-RESOLVE = """Settle this gap within request constraints/delegation; never invent authority or answers. Choose engineering means yourself: supported decisions/conventions, applicable defaults, simplest adequate; evidence of defects defeats precedent. Intent: use the request/documents/delegation first; ask only for a material unresolved user-owned goal, permission or tradeoff, then pause until answered. Honor explicit approvals/deferrals; never silently choose deferred intent. Fact: make the cheapest authorized observation that changes the choice. Otherwise assume only with cheap reversal, detection before material harm/commitment, and explicit detection/revisit conditions. Keep every relied-on assumption visible in summary/criteria or decision basis, never as observation. Unsafe unknowns require evidence or a conditional design: summary starts "Conditional:", names prerequisite, verifier and decisions not to act on; criteria test the gate. If readiness is required now, block. DONE completes the report, not its prerequisites. Return resolved with answer/basis (including any gate), or blocked with question and who/what is needed. Design only; do not perform unauthorized actions."""
+Resolve decisions based on which comes first: explictly requested, locally established decisions/conventions, best design practices, then the simplest adequate option.
 
-REVIEW = """Delegate if available; otherwise review locally. Construct counterexamples against request, authority and supported resolutions/decisions, not assumed truths. Pair: two consistent outcomes differing materially to requester/criteria. Defeater: plausible unrefuted failure, including criteria passing while goal fails, unsafe assumptions or hidden deferred dependencies. Decision: consequential choice missing serious alternative/tradeoff/revisit or inference posing as observation. Alternatives alone require no question. Require checkable criteria; distinguish planned/executed tests. Conditional summaries start "Conditional:", naming prerequisite, verifier, dependent decisions; criteria test gate. Readiness required: need. Return pass (each check: "none: why"; delegated/local basis), revise naming choice decisions, or need for one intent/fact gap."""
+For consequential decisions, state evidence or assumptions, a serious alternative, tradeoff, and revisit condition. Routine reversible choices need no justification.
+"""
+
+RESOLVE = """
+Resolve every review gap once and return the final design; there is no further review.
+
+Choose engineering means using supported decisions, conventions, applicable defaults, and the simplest adequate option. Defects override precedent.
+
+For missing facts, make the cheapest authorized observation that could change the decision. Otherwise assume only when reversal is cheap and failure can be detected before material harm. Expose the assumption and its revisit conditions; never present it as observed.
+
+Unsafe unknowns require evidence or a conditional design. Begin its summary with "Conditional:" and identify the prerequisite, verifier, and dependent decisions. Test the gate in the criteria. If readiness is required now, block. DONE completes the report, not its prerequisites.
+
+Return resolved with the revised design and one resolution per gap, quoting its witness, or blocked with one question and the required source. Design only.
+"""
+
+REVIEW = """
+Review independently; delegate when available.
+
+Challenge the design against the request.
+
+- Pair: Could two compliant outcomes differ materially?
+- Defeater: Could criteria pass while the goal fails, an assumption proves unsafe, or a deferred dependency remains hidden?
+- Decision: Does a consequential choice lack a serious alternative, tradeoff, revisit condition, or honest evidence basis?
+- Unknown: Does the design rely on unresolved user intent or an unobserved fact?
+
+Return pass with a reason for each absent defect, or revise listing every defect and its affected decision.
+"""
 
 GUIDANCE_PATH = Path(__file__).resolve().parents[2] / "references" / "design.md"
 GUIDANCE = """Read {path}: software—common/relevant language rows even for settled choices; agent-instructions—instruction rule; otherwise skip. Reuse context; separate reviewers read independently."""
@@ -21,7 +48,7 @@ EXAMPLES = {
     "criteria": ["..."],
     "decisions": [{key: "D1" if key == "id" else "..." for key in DECISION}],
     "gaps": [{"check": " | ".join(CHECKS), "witness": "...", "decision": "D1 | new"}],
-    "type": " | ".join(TYPES),
+    "resolutions": [dict.fromkeys(RESOLUTION, "...")],
 }
 
 
@@ -44,7 +71,7 @@ DONE = "DONE: design recorded in .agents/decision.json. Stop; await user approva
 
 def summary(document):
     """Render a completed checkpoint as the human-readable design record."""
-    candidate, review = document["candidate"], document["review"]
+    candidate = document["candidate"]
     lines = ["# Solution design", "", "## Request", "", document["request"], "",
              "## Summary", "", candidate["summary"], "", "## Criteria", ""]
     lines += [f"- {item}" for item in candidate["criteria"]]
@@ -56,13 +83,16 @@ def summary(document):
         lines.append("")
     if not candidate["decisions"]:
         lines += ["None consequential.", ""]
-    if document.get("resolutions"):
-        lines += ["## Resolutions", ""]
-        lines += [f"- ({item['type']}) {item['question']} → {item['answer']} (basis: {item['basis']})"
-                  for item in document["resolutions"]]
-        lines.append("")
     lines += ["## Review", ""]
-    lines += [f"- **{key.capitalize()}:** {review[key]}" for key in ("pair", "defeater", "decision", "basis")]
+    if "review" in document:
+        review = document["review"]
+        lines += [f"- **{key.capitalize()}:** {review[key]}" for key in (*CHECKS, "basis")]
+    else:
+        answers = {item["witness"]: item for item in document["resolutions"]}
+        lines += ["Defects found and resolved once; not re-reviewed.", ""]
+        lines += [f"- ({item['check']}, {item['decision']}) {item['witness']} → "
+                  f"{answers[item['witness']]['answer']} (basis: {answers[item['witness']]['basis']})"
+                  for item in document["gaps"]]
     lines += ["", NOTICE]
     return "\n".join(lines)
 
@@ -71,21 +101,9 @@ def render(document, script, root):
     if document["phase"] == "complete":
         return summary(document) + "\n\n" + DONE
     prompt = phase_prompt(document)
-    context = {"request": document["request"]}
-    if document.get("resolutions"):
-        context["resolutions"] = document["resolutions"]
-    if document.get("candidate"):
-        context["candidate"] = document["candidate"]
-    if prompt == "draft" and document.get("gaps"):
-        context["gaps"] = document["gaps"]
-    if prompt == "resolve":
-        context["gap"] = {key: value for key, value in document["open"].items()
-                          if key != "blocked_on"}
-        if "blocked_on" in document["open"]:
-            context["blocked_on"] = document["open"]["blocked_on"]
-    instructions = INSTRUCTIONS[prompt]
-    if prompt in ("draft", "review"):
-        instructions += "\n" + GUIDANCE.format(path=json.dumps(str(GUIDANCE_PATH)))
+    context = {key: document[key] for key in ("request", "candidate", "gaps", "blocked_on")
+               if key in document}
+    instructions = INSTRUCTIONS[prompt] + "\n" + GUIDANCE.format(path=json.dumps(str(GUIDANCE_PATH)))
     heading = f"TASK: {prompt}"
     if document["phase"] == "blocked":
         heading += " (BLOCKED: obtain the needed answer before submitting)"

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from support import CLI, REQUEST, CANDIDATE, PASS, NEED, BLOCKED, RESOLVED, DispatchError, Store
+from support import CLI, REQUEST, CANDIDATE, PASS, REVISE, BLOCKED, RESOLVED, DispatchError, Store
 from engine.state import decode
 
 
@@ -37,7 +37,7 @@ class StateTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), before)
         review = self.submit(CANDIDATE)
         complete = self.submit(PASS)
-        self.assertEqual(complete, {'schema_version': 4, 'phase': 'complete',
+        self.assertEqual(complete, {'schema_version': 5, 'phase': 'complete',
                                     'request': REQUEST, 'candidate': review['candidate'],
                                     'review': body(PASS)})
         self.assertNotIn('ticket', complete)
@@ -70,37 +70,32 @@ class StateTests(unittest.TestCase):
         self.submit(PASS)
         self.assertEqual(legacy.read_text(), '{"events": ["old data"]}')
 
-    def test_blocked_resume_keeps_ticket_request_candidate_and_open(self):
+    def test_blocked_resume_keeps_ticket_request_candidate_and_gaps(self):
         review = self.submit(CANDIDATE)
-        self.submit(NEED)
+        self.submit(REVISE)
         blocked = self.submit(BLOCKED)
         self.assertEqual(Store(self.root).resume(), blocked)
         self.assertEqual(blocked['candidate'], review['candidate'])
-        self.assertEqual(blocked['open'], {**body(NEED), 'blocked_on': body(BLOCKED)})
-        resolved = self.submit(RESOLVED)
-        self.assertEqual(resolved['request'], REQUEST)
-        self.assertEqual(resolved['phase'], 'draft')
-        self.assertEqual(resolved['resolutions'][0]['answer'], 'Use English.')
-        self.assertEqual(resolved['candidate'], review['candidate'])
-        self.assertNotIn('open', resolved)
-        with self.assertRaises(DispatchError):
-            self.submit(PASS)
-
-    def test_complete_keeps_resolutions_and_full_record(self):
-        self.submit(NEED)
-        self.submit(BLOCKED)
-        self.submit(RESOLVED)
-        self.submit(CANDIDATE)
-        complete = self.submit(PASS)
+        self.assertEqual(blocked['gaps'], REVISE['gaps'])
+        self.assertEqual(blocked['blocked_on'], body(BLOCKED))
+        complete = self.submit(RESOLVED)
         self.assertEqual(complete['phase'], 'complete')
+        self.assertNotIn('blocked_on', complete)
+        with self.assertRaises(DispatchError):
+            self.store.submit(blocked['ticket'], RESOLVED)
+
+    def test_complete_keeps_gaps_resolutions_and_full_record(self):
+        self.submit(CANDIDATE)
+        self.submit(REVISE)
+        complete = self.submit(RESOLVED)
         self.assertEqual(complete['request'], REQUEST)
-        self.assertEqual(complete['candidate'], body(CANDIDATE))
-        self.assertEqual(complete['review'], body(PASS))
-        self.assertEqual(complete['resolutions'], [{
-            'type': NEED['type'], 'question': NEED['question'],
-            'answer': RESOLVED['answer'], 'basis': RESOLVED['basis']}])
+        self.assertEqual(complete['candidate'], {k: v for k, v in body(RESOLVED).items()
+                                                 if k != 'resolutions'})
+        self.assertEqual(complete['gaps'], REVISE['gaps'])
+        self.assertEqual(complete['resolutions'], RESOLVED['resolutions'])
+        self.assertEqual(Store(self.root).resume(), complete)
         self.assertEqual(set(complete), {'schema_version', 'phase', 'request',
-                                         'candidate', 'resolutions', 'review'})
+                                         'candidate', 'gaps', 'resolutions'})
 
     def test_completion_is_one_atomic_write(self):
         self.submit(CANDIDATE)
@@ -212,12 +207,12 @@ class StateTests(unittest.TestCase):
 
     def test_corruption_fails_closed_for_reads_starts_and_submissions(self):
         valid = self.path.read_text()
-        bad_values = ['{', '[]', valid.replace('"schema_version": 4', '"schema_version": 999'),
-                      valid.replace('"schema_version": 4', '"schema_version": 4, "schema_version": 4'),
-                      valid.replace('"schema_version": 4', '"schema_version": NaN'),
+        bad_values = ['{', '[]', valid.replace('"schema_version": 5', '"schema_version": 999'),
+                      valid.replace('"schema_version": 5', '"schema_version": 5, "schema_version": 5'),
+                      valid.replace('"schema_version": 5', '"schema_version": NaN'),
                       valid.replace('"phase": "draft"', '"phase": []'),
-                      valid.replace('"schema_version": 4', '"schema_version": 3'),
-                      valid.replace('"schema_version": 4', '"schema_version": 2')]
+                      valid.replace('"schema_version": 5', '"schema_version": 4'),
+                      valid.replace('"schema_version": 5', '"schema_version": 3')]
         for raw in bad_values:
             self.path.write_text(raw)
             for action in (self.store.resume, lambda: self.store.start(REQUEST),

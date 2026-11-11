@@ -10,4 +10,4 @@ Set `S` to this skill directory:
 python3 "$S/scripts/sbd.py" --request '<request, constraints, permissions>'
 ```
 
-Bare resumes. Do prompt; submit via printed command. Repeat until `DONE`. If blocked, get the answer; pause. At `DONE`, stop; await approval. Approval outranks implementation or commit rules; never commit/delete `.agents`.
+Omit arguments to resume. Follow each prompt and submit using its printed command. Repeat until `DONE`. If blocked, obtain the missing answer and pause. At `DONE`, stop for approval;

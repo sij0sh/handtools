@@ -19,11 +19,13 @@ CANDIDATE = {"status": "candidate", "summary": "Use one print('Hello') command. 
                             "revisit": "Options or subcommands are requested."}]}
 PASS = {"status": "pass", "pair": "none: request fixes output and count.",
         "defeater": "none: criterion fails if output differs.", "decision": "none: D1 complete.",
+        "unknown": "none: language and output are stated.",
         "basis": "Local review, not delegated. Planned tests are not reported as executed."}
-NEED = {"status": "need", "type": "intent", "question": "Which output language is required?",
-        "witness": "Hello and Hola both satisfy the request but differ to the requester.",
-        "consequence": "Changes the user-visible greeting."}
-BLOCKED = {"status": "blocked", "question": "Which language?", "needs": "Requester answer."}
-RESOLVED = {"status": "resolved", "answer": "Use English.", "basis": "Requester explicitly answered English."}
 REVISE = {"status": "revise", "gaps": [{"check": "defeater", "witness": "Criterion passes if Hello is printed twice.",
                                         "decision": "D1"}]}
+BLOCKED = {"status": "blocked", "question": "Which language?", "needs": "Requester answer."}
+RESOLVED = {**CANDIDATE, "status": "resolved",
+            "criteria": ["Running the command prints exactly one line, Hello, once."],
+            "resolutions": [{"witness": REVISE["gaps"][0]["witness"],
+                             "answer": "Criterion now requires exactly one line.",
+                             "basis": "Request: print Hello once."}]}

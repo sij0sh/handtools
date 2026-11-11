@@ -19,19 +19,19 @@ def text(value):
 
 
 # Required result fields, beside the transitions they support.
-NEED = ("type", "question", "witness", "consequence")
-RESULTS = {
-    "draft": {"candidate": ("summary", "criteria", "decisions"), "need": NEED},
-    "resolve": {"resolved": ("answer", "basis"), "blocked": ("question", "needs")},
-    "review": {"pass": ("pair", "defeater", "decision", "basis"), "revise": ("gaps",),
-               "need": NEED},
-}
 DECISION = ("id", "choice", "basis", "alternative", "tradeoff", "revisit")
 GAP = ("check", "witness", "decision")
-CHECKS = ("pair", "defeater", "decision")
-TYPES = ("intent", "fact")
-PHASES = ("draft", "resolve", "blocked", "review", "complete")
-PROMPTS = {"draft": "draft", "resolve": "resolve", "blocked": "resolve", "review": "review"}
+RESOLUTION = ("witness", "answer", "basis")
+CHECKS = ("pair", "defeater", "decision", "unknown")
+CANDIDATE = ("summary", "criteria", "decisions")
+RESULTS = {
+    "draft": {"candidate": CANDIDATE},
+    "review": {"pass": (*CHECKS, "basis"), "revise": ("gaps",)},
+    "resolve": {"resolved": (*CANDIDATE, "resolutions"), "blocked": ("question", "needs")},
+}
+# One pass, no loops: draft → review → complete, or review → resolve → complete.
+PHASES = ("draft", "review", "resolve", "blocked", "complete")
+PROMPTS = {"draft": "draft", "review": "review", "resolve": "resolve", "blocked": "resolve"}
 
 
 def record(value, keys, name):
@@ -59,38 +59,22 @@ def gap(value):
     require(value["check"] in CHECKS, f"gap check must be {' | '.join(CHECKS)}")
 
 
-def need(value):
-    record(value, NEED, "need")
-    require(value["type"] in TYPES, f"need type must be {' | '.join(TYPES)}")
-
-
-def open_gap(value):
-    require(isinstance(value, dict), "invalid checkpoint open")
-    keys = set(NEED)
-    if "blocked_on" in value:
-        keys.add("blocked_on")
-    require(set(value) == keys, "invalid checkpoint open fields")
-    need({key: value[key] for key in NEED})
-    if "blocked_on" in value:
-        record(value["blocked_on"], ("question", "needs"), "blocked_on")
-
-
-def resolution(value):
-    record(value, ("type", "question", "answer", "basis"), "resolution")
-    require(value["type"] in TYPES, "invalid resolution type")
-
-
 SHAPES = {
     "criteria": lambda value: items(value, "criteria", lambda item: require(text(item), "criteria must be nonempty text")),
     "decisions": decisions,
     "gaps": lambda value: items(value, "gaps", gap),
-    "type": lambda value: require(value in TYPES, f"type must be {' | '.join(TYPES)}"),
+    "resolutions": lambda value: items(value, "resolutions", lambda item: record(item, RESOLUTION, "resolution")),
 }
+
+
+def covers(gaps, resolutions):
+    require(sorted(item["witness"] for item in resolutions) == sorted(item["witness"] for item in gaps),
+            "resolutions must answer each gap once, quoting its witness")
 
 
 def new(request):
     require(text(request), "--request must be nonempty text")
-    return {"schema_version": 4, "phase": "draft", "ticket": uuid.uuid4().hex,
+    return {"schema_version": 5, "phase": "draft", "ticket": uuid.uuid4().hex,
             "request": request}
 
 
@@ -102,52 +86,44 @@ def prompt(document):
 def validate(document):
     require(isinstance(document, dict), "invalid checkpoint")
     version = document.get("schema_version")
-    if type(version) is int and version in (1, 2, 3):
+    if type(version) is int and version in (1, 2, 3, 4):
         raise DispatchError(
             f"legacy checkpoint (schema {version}); move .agents/decision.json aside, "
             "then start with --request")
-    require(type(version) is int and version == 4,
+    require(type(version) is int and version == 5,
             "unsupported checkpoint schema; move .agents/decision.json aside, "
             "then start with --request")
     phase = document.get("phase")
     require(isinstance(phase, str) and phase in PHASES, "invalid checkpoint phase")
 
-    allowed = {"schema_version", "phase"}
-    required = {"schema_version", "phase"}
+    required = {"schema_version", "phase", "request"}
+    if phase != "complete":
+        required.add("ticket")
+    if phase != "draft":
+        required.add("candidate")
+    if phase in ("resolve", "blocked"):
+        required.add("gaps")
+    if phase == "blocked":
+        required.add("blocked_on")
     if phase == "complete":
-        allowed.update(("request", "candidate", "review", "resolutions"))
-        required.update(("request", "candidate", "review"))
-    else:
-        allowed.update(("ticket", "request"))
-        required.update(("ticket", "request"))
-        if phase == "draft":
-            allowed.update(("candidate", "gaps", "resolutions"))
-        elif phase in ("resolve", "blocked"):
-            allowed.update(("candidate", "gaps", "resolutions", "open"))
-            required.add("open")
-        elif phase == "review":
-            allowed.update(("candidate", "resolutions"))
-            required.add("candidate")
-    require(set(document) <= allowed, "invalid checkpoint fields")
-    require(required <= set(document), "missing checkpoint fields")
+        required.update(("review",) if "review" in document else ("gaps", "resolutions"))
+    require(set(document) == required, "invalid checkpoint fields")
 
     if "ticket" in document:
         ticket = document["ticket"]
         require(isinstance(ticket, str) and re.fullmatch(r"[0-9a-f]{32}", ticket),
                 "invalid checkpoint ticket")
-    if "request" in document:
-        require(text(document["request"]), "invalid checkpoint request")
+    require(text(document["request"]), "invalid checkpoint request")
     if "candidate" in document:
         require(isinstance(document["candidate"], dict), "invalid checkpoint candidate")
         check_result("draft", {"status": "candidate", **document["candidate"]})
     if "gaps" in document:
-        items(document["gaps"], "gaps", gap)
-    if "open" in document:
-        open_gap(document["open"])
-        require((phase == "blocked") == ("blocked_on" in document["open"]),
-                "checkpoint open/phase mismatch")
+        SHAPES["gaps"](document["gaps"])
+    if "blocked_on" in document:
+        record(document["blocked_on"], ("question", "needs"), "blocked_on")
     if "resolutions" in document:
-        items(document["resolutions"], "resolutions", resolution)
+        SHAPES["resolutions"](document["resolutions"])
+        covers(document["gaps"], document["resolutions"])
     if "review" in document:
         require(isinstance(document["review"], dict), "invalid checkpoint review")
         check_result("review", {"status": "pass", **document["review"]})
@@ -175,31 +151,23 @@ def body(result):
 
 def advance(document, result):
     validate(document)
-    require(document["phase"] in ("draft", "resolve", "blocked", "review"),
-            "run is not accepting results")
+    require(document["phase"] != "complete", "run is not accepting results")
     status = check_result(prompt(document), result)
-    result = deepcopy(result)  # Never alias caller-owned lists into the checkpoint.
+    result = body(deepcopy(result))  # Never alias caller-owned lists into the checkpoint.
     updated = deepcopy(document)
+    updated["ticket"] = uuid.uuid4().hex
     if status == "candidate":
-        updated.update(phase="review", candidate=body(result))
-        updated.pop("gaps", None)
-    elif status == "need":
-        updated.update(phase="resolve", open=body(result))
-    elif status == "resolved":
-        source = document["open"]
-        updated["resolutions"] = updated.get("resolutions", []) + [{
-            "type": source["type"], "question": source["question"],
-            "answer": result["answer"], "basis": result["basis"]}]
-        updated["phase"] = "draft"
-        updated.pop("open", None)
-    elif status == "blocked":
-        updated["open"] = {**updated["open"], "blocked_on": body(result)}
-        updated["phase"] = "blocked"
-    elif status == "revise":
-        updated.update(phase="draft", gaps=result["gaps"])
+        updated.update(phase="review", candidate=result)
     elif status == "pass":
-        updated.update(phase="complete", review=body(result))
-        updated.pop("ticket", None)
-    if status != "pass":
-        updated["ticket"] = uuid.uuid4().hex
+        updated.update(phase="complete", review=result)
+    elif status == "revise":
+        updated.update(phase="resolve", gaps=result["gaps"])
+    elif status == "blocked":
+        updated.update(phase="blocked", blocked_on=result)
+    elif status == "resolved":
+        covers(document["gaps"], result["resolutions"])
+        updated.update(phase="complete", resolutions=result.pop("resolutions"), candidate=result)
+        updated.pop("blocked_on", None)
+    if updated["phase"] == "complete":
+        updated.pop("ticket")
     return validate(updated)
