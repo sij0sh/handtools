@@ -13,24 +13,15 @@ Six agent skills, one source each, packaged for Pi and Claude Code.
 
 ## Install
 
-The local checkout is the canonical source until this monorepo is published.
-The GitHub repository `sij0sh/handtools` still holds the previous single-plugin
-tree, so the git/GitHub commands are for after that publish.
+GitHub is the canonical source. The repository is private, so both tools fetch
+it over SSH; an SSH key with read access to `sij0sh/handtools` is required.
 
 ### Pi
 
-From this checkout:
-
 ```sh
-pi install /path/to/handtools
+pi install git:git@github.com:sij0sh/handtools
 # or run once without installing
-pi -e /path/to/handtools
-```
-
-After publishing:
-
-```sh
-pi install git:github.com/sij0sh/handtools
+pi -e git:git@github.com:sij0sh/handtools
 ```
 
 The package exposes `./plugins/*/skills/*`; all six skills install together.
@@ -38,22 +29,23 @@ Update with `pi update --extensions`.
 
 ### Claude Code
 
-From this checkout:
-
 ```sh
-/plugin marketplace add /path/to/handtools
-/plugin install untangle@handtools
+claude plugin marketplace add sij0sh/handtools
+claude plugin install untangle@handtools
 ```
 
-After publishing:
-
-```sh
-/plugin marketplace add sij0sh/handtools
-```
+Equivalent in a session: `/plugin marketplace add sij0sh/handtools`.
 
 Install any or all of `untangle`, `semantic-instructions`, `workflows-as-skills`,
 `simple-by-design`, `foundation`, and `remember` from the `handtools`
 marketplace. Each plugin is independently versioned.
+
+### Invoking
+
+Only `remember` is model-invocable, so it activates on its own. The other five
+declare `disable-model-invocation: true` and run only when called explicitly:
+`/skill:<name>` in Pi, `/<plugin>:<skill>` in Claude Code. This keeps long
+multi-stage workflows out of automatic selection.
 
 ## Layout
 
