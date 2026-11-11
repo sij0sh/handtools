@@ -21,7 +21,7 @@ validate: ok (6 skills)
 | C5 local tests | PASS | Commands and counts below; remember's full matrix is planned CI coverage. |
 | C6 Pi smoke | PASS | Isolated local-path install discovers six skills; a shipped script runs from a scratch project; an isolated git-source install and update through a temporary dumb-HTTP remote also pass. |
 | C7 Claude smoke | PASS | Isolated scratch copy installed `untangle@handtools` 0.0.3, then updated to 0.0.4 after a version bump. |
-| C8 hygiene | PASS | Validator rejects `.git`, `.agents`, state, caches, bytecode, env/secret files; `remember/settings.json` is allowed and documented. |
+| C8 hygiene | PASS | Validator rejects `.git`, `.agents`, state, caches, bytecode, env/secret files, including force-committed ones; untracked gitignored paths are skipped so a dirty local tree does not fail, and a non-git checkout stays strict. `remember/settings.json` is allowed and documented. |
 | C9 docs ownership | PASS | Root `README.md` owns install/update; per-skill install sections point to root. `workflows-as-skills` has no README. |
 | C10 provenance | PASS | Source remotes/HEADs, remember's dirty patch SHA-256, and untracked hashes are in `docs/import.md`. |
 | C11 design artifact | PASS | `.agents/artifacts/monorepo-design.md` records the tree, manifests, mapping, exclusions, versions, and validation plan; MIT decision recorded. |

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -127,10 +128,37 @@ def check_plugins() -> None:
         check_frontmatter(name, ROOT / "plugins" / name / "skills" / name)
 
 
+def git_ignored(rels: list[str]) -> set[str]:
+    """Ignore rules for untracked paths, so a dirty tree does not fail.
+
+    `git check-ignore` reports -- and this skips -- only ignored paths that are
+    not tracked, so a committed cache or secret is still an error.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), "check-ignore", "--stdin"],
+            input="\n".join(rels),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if proc.returncode not in (0, 1):
+        return set()
+    return {line for line in proc.stdout.splitlines() if line}
+
+
 def check_hygiene() -> None:
+    entries = []
     for path in ROOT.rglob("*"):
         rel = path.relative_to(ROOT)
         if rel.parts[0] in {".git", ".agents"}:
+            continue
+        entries.append((path, rel))
+    ignored = git_ignored([str(rel) for _, rel in entries])
+    for path, rel in entries:
+        if str(rel) in ignored:
             continue
         if path.is_dir() and path.name in FORBIDDEN_DIRS:
             fail(f"forbidden directory: {rel}")
