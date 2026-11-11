@@ -2,7 +2,7 @@
 
 Agent skill that creates, edits, reviews, or simplifies instructions written for AI agents: prompts, `SKILL.md`, `AGENTS.md`, agent definitions, workflow stages, and evaluation instructions.
 
-It runs a three-phase workflow — Frame → Compose → Challenge — through a small state engine that enforces reading before writing, requires an evidenced challenge, and caps revisions at two passes. The engine routes phases and never writes the target instruction.
+It runs a three-phase workflow — Frame → Compose → Challenge — through a small state engine that enforces reading before writing and requires an evidenced challenge. Challenge is a single review: the engine never revises or writes the target instruction, and the calling agent decides whether to act on a revision recommendation.
 
 ## Requirements
 

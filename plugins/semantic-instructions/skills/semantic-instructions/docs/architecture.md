@@ -30,9 +30,7 @@ stateDiagram-v2
     [*] --> frame
     frame --> compose: frame result
     compose --> challenge: candidate
-    challenge --> compose: revise (passes < 2)
-    challenge --> complete: pass
-    challenge --> complete: revise (passes = 2, unresolved risk)
+    challenge --> complete: challenge result
     complete --> [*]
 ```
 
@@ -45,7 +43,7 @@ stateDiagram-v2
 
 - The engine writes only its own state, never the target.
 - A review operation never writes.
-- Revision is capped at two passes; residual defects are reported as unresolved risks.
+- Challenge runs once; the engine never auto-revises. A revise recommendation is reported for the calling agent to act on.
 - State and artifacts live under `.agents/`, which is gitignored.
 
 ## Files

@@ -61,6 +61,7 @@ class FlowTest(unittest.TestCase):
         result = run(self.root, '--request', request)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(read_state(self.root)['phase'], 'frame')
+        return result
 
     def done(self, payload):
         result = run(self.root, 'done', read_state(self.root)['ticket'], payload=payload)
@@ -68,7 +69,9 @@ class FlowTest(unittest.TestCase):
 
     def test_pass_completes_without_writing_target(self):
         self.start()
-        self.assertEqual(self.done(frame()).returncode, 0)
+        result = self.done(frame())
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('principles.md', result.stdout)
         self.assertEqual(self.done(compose()).returncode, 0)
         result = self.done(pass_result(removed=['Delete the redundant rule.']))
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -94,26 +97,20 @@ class FlowTest(unittest.TestCase):
         result = self.done(pass_result())
         self.assertIn('Return the instruction inline', result.stdout)
 
-    def test_two_revisions_then_stop_with_unresolved_risk(self):
+    def test_revision_recommendation_completes_without_loop(self):
         self.start()
         self.assertEqual(self.done(frame()).returncode, 0)
         self.assertEqual(self.done(compose('v1')).returncode, 0)
         result = self.done(revise())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(read_state(self.root)['phase'], 'compose')
-        self.assertEqual(read_state(self.root)['passes'], 1)
-        self.assertEqual(self.done(compose('v2')).returncode, 0)
-        self.assertEqual(self.done(revise()).returncode, 0)
-        self.assertEqual(read_state(self.root)['passes'], 2)
-        self.assertEqual(self.done(compose('v3')).returncode, 0)
-        result = self.done(revise(case='A third defect remains.', evidence='No further revision is allowed.',
-                                  fix='Resolve later.'))
-        self.assertEqual(result.returncode, 0, result.stderr)
         state = read_state(self.root)
         self.assertEqual(state['phase'], 'complete')
-        self.assertEqual(state['passes'], 2)
-        self.assertIn('STOP: two revision passes exhausted', result.stdout)
-        self.assertIn('A third defect remains.', result.stdout)
+        self.assertNotIn('passes', state)
+        self.assertNotIn('feedback', state)
+        self.assertIn('challenge recommends revision', result.stdout)
+        self.assertIn('Require the frame result before compose.', result.stdout)
+        self.assertIn('Decide whether to apply', result.stdout)
+        self.assertFalse((self.root / 'out.txt').exists())
 
     def test_early_target_write_is_rejected(self):
         self.start()

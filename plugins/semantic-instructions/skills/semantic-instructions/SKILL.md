@@ -4,4 +4,4 @@ description: Create, edit, review, or simplify instructions for AI agents, inclu
 disable-model-invocation: true
 ---
 
-Set `S` to this skill's absolute directory. From the task project run `python3 "$S/scripts/semantic_flow.py" --request '<request>'`; follow each printed prompt and submit JSON through its printed command. Bare invocation resumes. The engine routes Frame → Compose → Challenge; read [details](references/details.md) when prompted. Do not write before challenge passes.
+Set `S` to this skill's absolute directory. From the task project run `python3 "$S/scripts/semantic_flow.py" --request '<request>'`; follow each printed prompt and submit JSON through its printed command. Bare invocation resumes. The engine routes Frame → Compose → Challenge and stops after one challenge review; Send final recommendations to user for review.
