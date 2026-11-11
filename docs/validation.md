@@ -19,7 +19,7 @@ validate: ok (6 skills)
 | C3 Claude manifests | PASS | Marketplace lists six resolving sources; every plugin name and version matches `VERSION`; MIT license present. |
 | C4 copy fidelity | PASS | Six intentional-diff summaries in `docs/import.md`; raw diffs in `.agents/artifacts/import/`. No unexplained differences. |
 | C5 local tests | PASS | Commands and counts below; remember's full matrix is planned CI coverage. |
-| C6 Pi smoke | PARTIAL | Local-path install discovers six skills and a shipped script runs; git-source install not yet executed. |
+| C6 Pi smoke | PASS | Isolated local-path install discovers six skills; a shipped script runs from a scratch project; an isolated git-source install and update through a temporary dumb-HTTP remote also pass. |
 | C7 Claude smoke | PASS | Isolated scratch copy installed `untangle@handtools` 0.0.3, then updated to 0.0.4 after a version bump. |
 | C8 hygiene | PASS | Validator rejects `.git`, `.agents`, state, caches, bytecode, env/secret files; `remember/settings.json` is allowed and documented. |
 | C9 docs ownership | PASS | Root `README.md` owns install/update; per-skill install sections point to root. `workflows-as-skills` has no README. |
@@ -40,7 +40,9 @@ validate: ok (6 skills)
 
 Raw logs are under `.agents/artifacts/validation/` (untracked).
 
-## C6 Pi local-path smoke
+## C6 Pi smoke
+
+### Local-path install
 
 Used a temporary `HOME` and `PI_CODING_AGENT_DIR` with an empty
 `~/.agents/skills/`:
@@ -64,6 +66,23 @@ No current run. Start: python3 .../sbd.py --root /tmp/handtools-script... --requ
 
 It created no files. The script resolves its own reference paths from the new
 location.
+
+### Git-source install and update
+
+A temporary bare remote was served with the dumb HTTP protocol. In a separate
+temporary `HOME` and `PI_CODING_AGENT_DIR`:
+
+```text
+pi install git:http://127.0.0.1:19418/sij0sh/handtools.git   # exit 0
+pi list                                                       # reports the git source
+```
+
+Pi cloned to `~/.pi/agent/git/127.0.0.1/sij0sh/handtools`; its resolver returned
+the same six enabled skills under that cache. `pi update --extensions` reported
+up to date at the original commit. A temporary commit was pushed to the bare
+remote, `git update-server-info` was refreshed, and the next
+`pi update --extensions` fetched it (`5d46ce9 -> 2f2ff14`) and checked out the
+new file.
 
 ## C7 Claude install and update smoke
 
@@ -95,5 +114,4 @@ is planned until CI results are appended.
 
 ## Pending
 
-- C6 git-source Pi install/update through a temporary bare remote.
 - C12 user-level install cutover.

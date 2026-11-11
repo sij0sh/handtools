@@ -17,10 +17,10 @@ monorepo history starts fresh, while each source repository keeps its history.
 | `foundation` | `6c9522eac2778223f390b79a6aed1b6eb5580c9a` | none | 0.0.1 |
 | `remember` | `f382c38914c49c04d9f330d1fb55ca5bf65f18f9` | 0.5.19 | 0.5.20 |
 
-`simple-by-design` was at 0.1.3 when the design was recorded. Its source gained
-one commit (`071d200`, stop after DONE) before the copy, so the import carries
-0.1.3 and the patch bump produces 0.1.4. The other source versions matched the
-design.
+`simple-by-design` was at 0.1.2 when the design was recorded. Its source gained
+two commits before the copy, ending at 0.1.3 (`071d200`, stop after DONE), so the
+import carries 0.1.3 and the patch bump produces 0.1.4. The other source versions
+matched the design.
 
 ## remember dirty snapshot
 
