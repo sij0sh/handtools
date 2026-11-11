@@ -25,7 +25,7 @@ validate: ok (6 skills)
 | C9 docs ownership | PASS | Root `README.md` owns install/update; per-skill install sections point to root. `workflows-as-skills` has no README. |
 | C10 provenance | PASS | Source remotes/HEADs, remember's dirty patch SHA-256, and untracked hashes are in `docs/import.md`. |
 | C11 design artifact | PASS | `.agents/artifacts/monorepo-design.md` records the tree, manifests, mapping, exclusions, versions, and validation plan; MIT decision recorded. |
-| C12 install cutover | NOT EXECUTED | User-level symlinks and package/plugin installs are unchanged; cutover remains pending. |
+| C12 install cutover | PASS | Pi package installed and six old symlinks removed; Claude marketplace re-pointed at the local checkout, all six plugins installed, and the old Claude skill symlink removed. |
 
 ## C5 executed tests
 
@@ -99,6 +99,46 @@ claude plugin update untangle@handtools --json             # 0.0.3 -> 0.0.4
 The installed cache contained `skills/untangle/SKILL.md`; `plugin list` reported
 0.0.4 after the update.
 
+## C12 user-level install cutover
+
+Executed on the real user configuration after C1-C11 passed.
+
+Pi:
+
+```text
+pi install /home/joshsimon/Projects/handtools   # exit 0
+pi list                                         # ../../Projects/handtools -> /home/joshsimon/Projects/handtools
+```
+
+The package resolver returned the six package skills under
+`/home/joshsimon/Projects/handtools/plugins/<name>/skills/<name>/` and no
+top-level copies of those six names. The six symlinks in `~/.agents/skills/`
+were removed; the unrelated `readme` symlink remains.
+
+Claude:
+
+```text
+claude plugin marketplace remove handtools --json          # ok
+claude plugin marketplace add /home/joshsimon/Projects/handtools --json  # ok
+claude plugin install <name>@handtools --json              # ok, six times
+```
+
+`claude plugin list --json` reports exactly the six plugins at 0.0.3, 0.0.4,
+0.0.8, 0.1.4, 0.0.1 and 0.5.20. Their cache contains the six
+`skills/<name>/SKILL.md` files. The old `~/.claude/skills/simple-by-design`
+symlink was removed; `readme` and `synced/` remain. The installed
+simple-by-design script ran from a scratch directory and created no files.
+
+The pre-existing marketplace named `handtools` pointed at
+`github.com/sij0sh/handtools`, an older single-plugin repository. It was removed
+from the user configuration and replaced by a `directory` source at the local
+checkout. The old marketplace clone was backed up first, and the stale
+`handtools/handtools` plugin cache was removed. Cutover evidence and the backup
+are under `.agents/artifacts/cutover/` (untracked).
+
+`claude plugin validate . --json` succeeds with warnings only (missing
+marketplace/plugin descriptions, author and icon).
+
 ## Planned CI coverage
 
 CI runs the local suites plus:
@@ -114,4 +154,5 @@ is planned until CI results are appended.
 
 ## Pending
 
-- C12 user-level install cutover.
+None. All C1-C12 criteria pass. The CI matrix remains planned coverage until CI
+results are appended.

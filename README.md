@@ -13,18 +13,24 @@ Six agent skills, one source each, packaged for Pi and Claude Code.
 
 ## Install
 
+The local checkout is the canonical source until this monorepo is published.
+The GitHub repository `sij0sh/handtools` still holds the previous single-plugin
+tree, so the git/GitHub commands are for after that publish.
+
 ### Pi
+
+From this checkout:
+
+```sh
+pi install /path/to/handtools
+# or run once without installing
+pi -e /path/to/handtools
+```
+
+After publishing:
 
 ```sh
 pi install git:github.com/sij0sh/handtools
-```
-
-For local development:
-
-```sh
-pi install ./handtools
-# or run once without installing
-pi -e ./handtools
 ```
 
 The package exposes `./plugins/*/skills/*`; all six skills install together.
@@ -32,9 +38,17 @@ Update with `pi update --extensions`.
 
 ### Claude Code
 
+From this checkout:
+
+```sh
+/plugin marketplace add /path/to/handtools
+/plugin install untangle@handtools
+```
+
+After publishing:
+
 ```sh
 /plugin marketplace add sij0sh/handtools
-/plugin install untangle@handtools
 ```
 
 Install any or all of `untangle`, `semantic-instructions`, `workflows-as-skills`,
