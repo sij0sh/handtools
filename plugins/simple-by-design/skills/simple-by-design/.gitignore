@@ -1,0 +1,8 @@
+.agents/*
+!.agents/sbd/
+.agents/sbd/*
+!.agents/sbd/design.json
+__pycache__/
+*.py[cod]
+.ruff_cache/
+mise.local.toml

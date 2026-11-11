@@ -1,0 +1,27 @@
+# Pin exact project tools; commit mise.lock. Local overrides go in mise.local.toml.
+[tools]
+python = "3.11.18"
+ruff = "0.17.3"
+
+[settings]
+lockfile = true
+
+[tasks.setup]
+description = "Install pinned tools"
+run = "mise install"
+
+[tasks.test]
+description = "Run the unittest suite"
+run = "python3 -m unittest discover -s tests -v"
+
+[tasks.lint]
+description = "Lint Python sources"
+run = "ruff check ."
+
+[tasks.build]
+description = "Compile-check Python sources"
+run = "python3 -m compileall -q scripts tests"
+
+[tasks.check]
+description = "Lint, test and build"
+depends = ["lint", "test", "build"]
